@@ -1,0 +1,27 @@
+import { route } from 'remix/fetch-router/routes'
+
+export const routes = route({
+	home: '/',
+	systemStatus: '/system-status',
+	diagnostics: '/diagnostics',
+	islandRouterStatus: '/island-router/status',
+	islandRouterApiStatus: '/island-router-api/status',
+	islandRouterApiSetup: '/island-router-api/setup',
+	health: '/health',
+	rokuStatus: '/roku/status',
+	rokuSetup: '/roku/setup',
+	lutronStatus: '/lutron/status',
+	lutronSetup: '/lutron/setup',
+	sonosStatus: '/sonos/status',
+	sonosSetup: '/sonos/setup',
+	samsungTvStatus: '/samsung-tv/status',
+	samsungTvSetup: '/samsung-tv/setup',
+	bondStatus: '/bond/status',
+	bondSetup: '/bond/setup',
+	accessNetworksUnleashedStatus: '/access-networks-unleashed/status',
+	accessNetworksUnleashedSetup: '/access-networks-unleashed/setup',
+	jellyfishStatus: '/jellyfish/status',
+	jellyfishSetup: '/jellyfish/setup',
+	venstarStatus: '/venstar/status',
+	venstarSetup: '/venstar/setup',
+})

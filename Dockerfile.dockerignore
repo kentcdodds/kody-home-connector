@@ -1,0 +1,17 @@
+.git
+.github
+.cursor
+.vscode
+.wrangler
+node_modules
+**/node_modules
+coverage
+dist
+build
+playwright-report
+test-results
+deploy.log
+preview-secrets-overrides.env
+*.local
+*.log
+**/.DS_Store

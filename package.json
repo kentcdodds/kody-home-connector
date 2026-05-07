@@ -1,0 +1,51 @@
+{
+  "name": "kody-home-connector",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Local-network home automation connector for Kody.",
+  "homepage": "https://github.com/kentcdodds/kody-home-connector#readme",
+  "bugs": {
+    "url": "https://github.com/kentcdodds/kody-home-connector/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kentcdodds/kody-home-connector.git"
+  },
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch server/dev-server.ts",
+    "start": "NODE_ENV=production node --import ./src/sentry-init.ts index.ts",
+    "start:mocks": "MOCKS=true ROKU_DISCOVERY_URL=http://roku.mock.local/discovery NODE_ENV=production node --import ./src/sentry-init.ts index.ts",
+    "test": "vitest run",
+    "lint": "oxlint .",
+    "lint:fix": "oxlint . --fix",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check",
+    "validate": "npm run format:check && npm run lint && npm test"
+  },
+  "dependencies": {
+    "@kody-bot/connector-kit": "^1.0.1",
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "@remix-run/node-fetch-server": "^0.13.1",
+    "@sentry/node": "^10.45.0",
+    "dns-equal": "^1.0.0",
+    "dns-txt": "^2.0.2",
+    "dotenv": "^17.3.1",
+    "msw": "^2.12.14",
+    "multicast-dns": "^7.2.3",
+    "multicast-dns-service-types": "^1.1.0",
+    "remix": "^3.0.0-beta.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "oxfmt": "^0.42.0",
+    "oxlint": "^1.55.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.1"
+  },
+  "engines": {
+    "node": "24.x"
+  },
+  "packageManager": "npm@11.11.1"
+}
