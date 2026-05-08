@@ -24,7 +24,7 @@
     "validate": "npm run format:check && npm run lint && npm test"
   },
   "dependencies": {
-    "@kody-bot/connector-kit": "^1.0.1",
+    "@kody-bot/connector-kit": "^1.1.0",
     "@modelcontextprotocol/sdk": "1.29.0",
     "@remix-run/node-fetch-server": "^0.13.1",
     "@sentry/node": "^10.45.0",

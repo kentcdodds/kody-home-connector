@@ -22,6 +22,8 @@ const heartbeatIntervalMs = 10_000
 const initialReconnectDelayMs = 2_000
 const maxReconnectDelayMs = 30_000
 const slowToolCallThresholdMs = 5_000
+const homeConnectorDescription =
+	'Local-network home automation for Sonos, Bond shades, Venstar thermostats, Roku, Samsung TVs, Lutron, JellyFish lighting, and network gear.'
 
 function isJsonRpcResponse(
 	message: JSONRPCMessage,
@@ -296,6 +298,7 @@ export function createWorkerConnector(input: {
 				type: 'connector.hello',
 				connectorKind: 'home',
 				connectorId: input.config.homeConnectorId,
+				description: homeConnectorDescription,
 				sharedSecret: input.config.sharedSecret!,
 			}
 			addHomeConnectorSentryBreadcrumb({
