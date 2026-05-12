@@ -17,7 +17,10 @@ import { type HomeConnectorConfig } from '../src/config.ts'
 import { captureHomeConnectorException } from '../src/sentry.ts'
 import { renderInfoRows } from './handler-utils.ts'
 
-function renderQuickLinks(state: HomeConnectorState, config: HomeConnectorConfig) {
+function renderQuickLinks(
+	state: HomeConnectorState,
+	config: HomeConnectorConfig,
+) {
 	const workerSnapshotUrl = state.connection.connectorId
 		? `${config.workerSessionUrl}/snapshot`
 		: null

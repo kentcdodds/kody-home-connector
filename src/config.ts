@@ -101,7 +101,10 @@ function resolveKodyUserId(workerBaseUrl: string) {
 	return null
 }
 
-function createConnectorPath(homeConnectorId: string, kodyUserId: string | null) {
+function createConnectorPath(
+	homeConnectorId: string,
+	kodyUserId: string | null,
+) {
 	const encodedHomeConnectorId = encodeConnectorPathSegment(
 		homeConnectorId,
 		'HOME_CONNECTOR_ID',

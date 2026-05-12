@@ -170,7 +170,9 @@ function getWorkerSnapshotUrl(
 	config: HomeConnectorConfig,
 	state: HomeConnectorState,
 ) {
-	return state.connection.connectorId ? `${config.workerSessionUrl}/snapshot` : null
+	return state.connection.connectorId
+		? `${config.workerSessionUrl}/snapshot`
+		: null
 }
 
 function countDiagnosticSources(state: HomeConnectorState) {
