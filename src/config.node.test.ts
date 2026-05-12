@@ -39,6 +39,7 @@ function createTemporaryEnv(values: Record<string, string | undefined>) {
 test('live connector applies discovery defaults when env overrides are absent', () => {
 	using _env = createTemporaryEnv({
 		...requiredConfigEnv,
+		KODY_USER_ID: undefined,
 		MOCKS: 'false',
 		ROKU_DISCOVERY_URL: undefined,
 		SONOS_DISCOVERY_URL: undefined,
@@ -81,6 +82,51 @@ test('explicit discovery URLs override defaults in mock mode', () => {
 		lutronDiscoveryUrl: 'http://lutron.mock.local/discovery',
 		jellyfishDiscoveryUrl: 'http://jellyfish.mock.local/discovery',
 	})
+})
+
+test('worker URLs use the user-scoped connector path when KODY_USER_ID is set', () => {
+	using _env = createTemporaryEnv({
+		HOME_CONNECTOR_ID: 'living room/default',
+		WORKER_BASE_URL: 'https://heykody.dev/',
+		KODY_USER_ID: ' user/123 ',
+		NODE_ENV: 'production',
+	})
+
+	const config = loadHomeConnectorConfig()
+	expect(config.workerSessionUrl).toBe(
+		'https://heykody.dev/connectors/u/user%2F123/home/living%20room%2Fdefault',
+	)
+	expect(config.workerWebSocketUrl).toBe(
+		'wss://heykody.dev/connectors/u/user%2F123/home/living%20room%2Fdefault',
+	)
+	expect(config.workerWebSocketUrl).not.toContain('/connectors/home')
+})
+
+test('local worker URLs keep the legacy connector path when KODY_USER_ID is absent', () => {
+	using _env = createTemporaryEnv({
+		...requiredConfigEnv,
+		KODY_USER_ID: undefined,
+		NODE_ENV: 'production',
+	})
+
+	const config = loadHomeConnectorConfig()
+	expect(config.workerSessionUrl).toBe(
+		'http://localhost:3742/connectors/home/default',
+	)
+	expect(config.workerWebSocketUrl).toBe(
+		'ws://localhost:3742/connectors/home/default',
+	)
+})
+
+test('production Kody worker URLs require KODY_USER_ID', () => {
+	using _env = createTemporaryEnv({
+		HOME_CONNECTOR_ID: 'default',
+		WORKER_BASE_URL: 'https://heykody.dev',
+		KODY_USER_ID: undefined,
+		NODE_ENV: 'production',
+	})
+
+	expect(() => loadHomeConnectorConfig()).toThrow('KODY_USER_ID')
 })
 
 test('scan CIDR env vars override derived autoscan CIDRs', () => {

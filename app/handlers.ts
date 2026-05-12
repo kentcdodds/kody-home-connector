@@ -17,9 +17,12 @@ import { type HomeConnectorConfig } from '../src/config.ts'
 import { captureHomeConnectorException } from '../src/sentry.ts'
 import { renderInfoRows } from './handler-utils.ts'
 
-function renderQuickLinks(state: HomeConnectorState) {
+function renderQuickLinks(
+	state: HomeConnectorState,
+	config: HomeConnectorConfig,
+) {
 	const workerSnapshotUrl = state.connection.connectorId
-		? `${state.connection.workerUrl}/connectors/home/${encodeURIComponent(state.connection.connectorId)}/snapshot`
+		? `${config.workerSessionUrl}/snapshot`
 		: null
 	return html`<ul class="list">
 		<li><a href="/roku/status">Roku status</a></li>
@@ -50,6 +53,7 @@ function getConnectionStatusSummary(state: HomeConnectorState) {
 }
 
 export function createHomeDashboardHandler(
+	config: HomeConnectorConfig,
 	state: HomeConnectorState,
 	lutron: ReturnType<typeof createLutronAdapter>,
 	samsungTv: ReturnType<typeof createSamsungTvAdapter>,
@@ -210,7 +214,7 @@ export function createHomeDashboardHandler(
 
 							<div class="card">
 								<h2>Quick links</h2>
-								${renderQuickLinks(state)}
+								${renderQuickLinks(state, config)}
 							</div>
 						</section>
 					</div>`,

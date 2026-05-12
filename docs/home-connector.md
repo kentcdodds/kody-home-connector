@@ -3,17 +3,29 @@
 The local `this repository` process is the bridge between Kody's Cloudflare
 Worker and devices that are only reachable on the local network.
 
-It is a **remote connector** with `kind: home`. The wire protocol, URL shapes,
-and secret configuration for **any** outbound connector are documented in
-[Remote connectors](./remote-connectors.md).
+It is a **remote connector** with `kind: home`. The connector opens its outbound
+Worker session to `/connectors/u/{KODY_USER_ID}/home/{HOME_CONNECTOR_ID}` when
+`KODY_USER_ID` is configured.
+
+Core deployment env vars:
+
+- `KODY_USER_ID` - the Kody user id that owns this home connector. Required for
+  production Kody Worker URLs such as `https://heykody.dev`; URL path characters
+  are encoded before building the ingress URL.
+- `HOME_CONNECTOR_ID` - the connector instance id, defaulting to `default`.
+- `WORKER_BASE_URL` - the Kody Worker origin, defaulting to
+  `http://localhost:3742` for local development.
+- `HOME_CONNECTOR_SHARED_SECRET` - the shared secret used to authenticate the
+  connector after the WebSocket opens.
 
 ## Public-vs-internal boundary
 
-The connector URL paths (for example `/connectors/home/default/...`) are
-**WebSocket-only** on the public internet. The Worker entrypoint rejects
-non-WebSocket HTTP requests to connector routes with `404` before they reach the
-`HomeConnectorSession` Durable Object, and the DO `fetch()` handler itself also
-rejects non-upgrade HTTP with `404` as a second layer.
+The connector URL paths (for example
+`/connectors/u/{KODY_USER_ID}/home/default/...`) are **WebSocket-only** on the
+public internet. The Worker entrypoint rejects non-WebSocket HTTP requests to
+connector routes with `404` before they reach the `HomeConnectorSession` Durable
+Object, and the DO `fetch()` handler itself also rejects non-upgrade HTTP with
+`404` as a second layer.
 
 Worker-internal code that needs snapshot or tool data (such as
 `packages/worker/src/home/client.ts`) calls Durable Object RPC methods directly
