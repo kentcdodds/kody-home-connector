@@ -166,10 +166,11 @@ function getSafeConnectionSnapshot(state: HomeConnectorState) {
 	}
 }
 
-function getWorkerSnapshotUrl(state: HomeConnectorState) {
-	return state.connection.connectorId
-		? `${state.connection.workerUrl}/connectors/home/${encodeURIComponent(state.connection.connectorId)}/snapshot`
-		: null
+function getWorkerSnapshotUrl(
+	config: HomeConnectorConfig,
+	state: HomeConnectorState,
+) {
+	return state.connection.connectorId ? `${config.workerSessionUrl}/snapshot` : null
 }
 
 function countDiagnosticSources(state: HomeConnectorState) {
@@ -257,7 +258,7 @@ async function loadDashboardSnapshot(
 		connectionTone: getConnectionTone(deps.state),
 		connectionLabel: getConnectionLabel(deps.state),
 		connectionIssues,
-		workerSnapshotUrl: getWorkerSnapshotUrl(deps.state),
+		workerSnapshotUrl: getWorkerSnapshotUrl(deps.config, deps.state),
 		roku: {
 			adopted: rokuAdopted.length,
 			discovered: rokuDiscovered.length,

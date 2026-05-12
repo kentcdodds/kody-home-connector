@@ -23,8 +23,10 @@ function createConfig(dataPath = '/tmp'): HomeConnectorConfig {
 	return {
 		homeConnectorId: 'default',
 		workerBaseUrl: 'http://localhost:3742',
-		workerSessionUrl: 'http://localhost:3742/connectors/home/default',
-		workerWebSocketUrl: 'ws://localhost:3742/connectors/home/default',
+		workerSessionUrl:
+			'http://localhost:3742/connectors/u/test-user/home/default',
+		workerWebSocketUrl:
+			'ws://localhost:3742/connectors/u/test-user/home/default',
 		sharedSecret: 'secret',
 		islandRouterHost: null,
 		islandRouterPort: 22,
@@ -149,14 +151,16 @@ test('home route toggles worker snapshot link by connector id', async () => {
 		const responseWithConnector = await router.fetch('http://example.test/')
 		expect(responseWithConnector.status).toBe(200)
 		const htmlWithConnector = await responseWithConnector.text()
-		expect(htmlWithConnector).toContain('/connectors/home/default/snapshot')
+		expect(htmlWithConnector).toContain(
+			'/connectors/u/test-user/home/default/snapshot',
+		)
 
 		state.connection.connectorId = ''
 		const responseWithoutConnector = await router.fetch('http://example.test/')
 		expect(responseWithoutConnector.status).toBe(200)
 		const htmlWithoutConnector = await responseWithoutConnector.text()
 		expect(htmlWithoutConnector).not.toContain(
-			'/connectors/home/default/snapshot',
+			'/connectors/u/test-user/home/default/snapshot',
 		)
 		expect(htmlWithConnector).toContain('Home connector dashboard')
 		expect(htmlWithConnector).toContain('Island router diagnostics')

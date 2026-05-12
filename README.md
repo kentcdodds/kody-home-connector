@@ -16,6 +16,21 @@ npm install
 npm run dev
 ```
 
+## Configuration
+
+Set `KODY_USER_ID` for deployed connectors so the Worker WebSocket uses Kody's
+user-scoped ingress path:
+
+```bash
+KODY_USER_ID=your-kody-user-id
+HOME_CONNECTOR_ID=default
+WORKER_BASE_URL=https://heykody.dev
+HOME_CONNECTOR_SHARED_SECRET=...
+```
+
+`HOME_CONNECTOR_ID` still defaults to `default`, and `WORKER_BASE_URL` still
+defaults to `http://localhost:3742` for local development.
+
 Useful checks:
 
 ```bash
