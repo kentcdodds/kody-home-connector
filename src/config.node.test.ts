@@ -99,7 +99,7 @@ test('worker URLs use the user-scoped connector path when KODY_USER_ID is set', 
 	expect(config.workerWebSocketUrl).toBe(
 		'wss://heykody.dev/connectors/u/user%2F123/home/living%20room%2Fdefault',
 	)
-	expect(config.workerWebSocketUrl).not.toContain('/connectors/home/default')
+	expect(config.workerWebSocketUrl).not.toContain('/connectors/home')
 })
 
 test('local worker URLs keep the legacy connector path when KODY_USER_ID is absent', () => {
