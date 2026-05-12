@@ -251,6 +251,22 @@ function initializeSchema(db: SqliteDatabase) {
 			updated_at TEXT NOT NULL,
 			PRIMARY KEY (connector_id, ip)
 		);
+
+		CREATE TABLE IF NOT EXISTS home_connector_logs (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			connector_id TEXT NOT NULL,
+			level TEXT NOT NULL,
+			event TEXT NOT NULL,
+			message TEXT NOT NULL,
+			metadata_json TEXT NOT NULL,
+			created_at TEXT NOT NULL
+		);
+
+		CREATE INDEX IF NOT EXISTS idx_home_connector_logs_connector_time
+			ON home_connector_logs(connector_id, created_at DESC, id DESC);
+
+		CREATE INDEX IF NOT EXISTS idx_home_connector_logs_connector_level_time
+			ON home_connector_logs(connector_id, level, created_at DESC, id DESC);
 	`)
 }
 

@@ -9,6 +9,7 @@ import { createSonosAdapter } from './adapters/sonos/index.ts'
 import { createVenstarAdapter } from './adapters/venstar/index.ts'
 import { createHomeConnectorMcpServer } from './mcp/server.ts'
 import { loadHomeConnectorConfig } from './config.ts'
+import { createHomeConnectorLogger } from './logging/index.ts'
 import { createAppState, updateConnectionState } from './state.ts'
 import { createHomeConnectorStorage } from './storage/index.ts'
 import { createWorkerConnector } from './transport/worker-connector.ts'
@@ -17,6 +18,10 @@ export function createHomeConnectorApp() {
 	const config = loadHomeConnectorConfig()
 	const state = createAppState()
 	const storage = createHomeConnectorStorage(config)
+	const logger = createHomeConnectorLogger({
+		config,
+		storage,
+	})
 	updateConnectionState(state, {
 		workerUrl: config.workerBaseUrl,
 		connectorId: config.homeConnectorId,
@@ -64,6 +69,7 @@ export function createHomeConnectorApp() {
 	const mcp = createHomeConnectorMcpServer({
 		config,
 		state,
+		logger,
 		samsungTv,
 		lutron,
 		sonos,
@@ -77,6 +83,7 @@ export function createHomeConnectorApp() {
 	const workerConnector = createWorkerConnector({
 		config,
 		state,
+		logger,
 		toolRegistry: mcp.createToolRegistry(),
 	})
 
@@ -84,6 +91,7 @@ export function createHomeConnectorApp() {
 		config,
 		state,
 		storage,
+		logger,
 		samsungTv,
 		lutron,
 		sonos,

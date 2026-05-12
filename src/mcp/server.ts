@@ -15,6 +15,11 @@ import { type createSonosAdapter } from '../adapters/sonos/index.ts'
 import { type createSamsungTvAdapter } from '../adapters/samsung-tv/index.ts'
 import { type createVenstarAdapter } from '../adapters/venstar/index.ts'
 import { type HomeConnectorConfig } from '../config.ts'
+import {
+	homeConnectorLogRetentionDays,
+	type HomeConnectorLogger,
+	type HomeConnectorLogLevel,
+} from '../logging/index.ts'
 import { registerAccessNetworksUnleashedHomeConnectorTools } from './register-access-networks-unleashed-tools.ts'
 import { registerBondHomeConnectorTools } from './register-bond-tools.ts'
 import { registerIslandRouterApiHomeConnectorTools } from './register-island-router-api-tools.ts'
@@ -73,6 +78,7 @@ export type HomeConnectorMcpServer = {
 export function createHomeConnectorMcpServer(input: {
 	config: HomeConnectorConfig
 	state: HomeConnectorState
+	logger?: HomeConnectorLogger
 	samsungTv: ReturnType<typeof createSamsungTvAdapter>
 	lutron: ReturnType<typeof createLutronAdapter>
 	sonos: ReturnType<typeof createSonosAdapter>
@@ -106,7 +112,7 @@ export function createHomeConnectorMcpServer(input: {
 		},
 		{
 			instructions:
-				"Home connector MCP server. Tools support Roku, Samsung TV, Lutron, Sonos, Bond (Olibra Bond Bridge / shades, groups, and RF devices), JellyFish Lighting, Venstar WiFi thermostat control, Island router status plus a generic allowlisted Island CLI catalog executor, a generic Island Router HTTP API proxy, and a single generic Access Networks / RUCKUS Unleashed WiFi raw-request capability. Use 'access_networks_unleashed_scan_controllers', 'access_networks_unleashed_adopt_controller', 'access_networks_unleashed_set_credentials', and 'access_networks_unleashed_authenticate_controller' to wire up a controller, then 'access_networks_unleashed_request' to issue authenticated AJAX requests. Use 'router_get_status' for Island SSH readiness and 'router_run_command' for catalog command ids; arbitrary CLI text is never accepted and write-risk entries require a reason plus exact confirmation. Use 'island_router_api_set_pin' before 'island_router_api_request' for the LAN-only Island Router HTTP API proxy; non-GET proxy requests require a reason plus exact confirmation. Island router and Access Networks Unleashed write operations are high risk and must be used only when highly certain. Bond local API tokens are configured only in the admin UI (/bond/setup); use bond_authentication_guide when you need a reminder.",
+				"Home connector MCP server. Tools support Roku, Samsung TV, Lutron, Sonos, Bond (Olibra Bond Bridge / shades, groups, and RF devices), JellyFish Lighting, Venstar WiFi thermostat control, Island router status plus a generic allowlisted Island CLI catalog executor, a generic Island Router HTTP API proxy, and a single generic Access Networks / RUCKUS Unleashed WiFi raw-request capability. Use 'home_connector_list_logs' to inspect the connector's sanitized local operational log history. Use 'access_networks_unleashed_scan_controllers', 'access_networks_unleashed_adopt_controller', 'access_networks_unleashed_set_credentials', and 'access_networks_unleashed_authenticate_controller' to wire up a controller, then 'access_networks_unleashed_request' to issue authenticated AJAX requests. Use 'router_get_status' for Island SSH readiness and 'router_run_command' for catalog command ids; arbitrary CLI text is never accepted and write-risk entries require a reason plus exact confirmation. Use 'island_router_api_set_pin' before 'island_router_api_request' for the LAN-only Island Router HTTP API proxy; non-GET proxy requests require a reason plus exact confirmation. Island router and Access Networks Unleashed write operations are high risk and must be used only when highly certain. Bond local API tokens are configured only in the admin UI (/bond/setup); use bond_authentication_guide when you need a reminder.",
 		},
 	)
 
@@ -285,6 +291,83 @@ export function createHomeConnectorMcpServer(input: {
 			if (result) return result
 			throw error
 		}
+	}
+
+	function normalizeLogLevel(
+		value: unknown,
+	): HomeConnectorLogLevel | undefined {
+		if (
+			value === 'debug' ||
+			value === 'info' ||
+			value === 'warn' ||
+			value === 'error'
+		) {
+			return value
+		}
+		return undefined
+	}
+
+	if (input.logger) {
+		registerTool(
+			{
+				name: 'home_connector_list_logs',
+				title: 'List Home Connector Logs',
+				description:
+					'Read sanitized local home connector operational logs retained for eight days. Supports filtering by level, exact event name, time window, text query, and pagination with beforeId.',
+				...buildToolInputSchema({
+					level: z.enum(['debug', 'info', 'warn', 'error']).optional(),
+					event: z.string().min(1).optional(),
+					query: z.string().min(1).optional(),
+					since: z
+						.string()
+						.min(1)
+						.optional()
+						.describe('Inclusive ISO timestamp lower bound.'),
+					until: z
+						.string()
+						.min(1)
+						.optional()
+						.describe('Inclusive ISO timestamp upper bound.'),
+					beforeId: z
+						.number()
+						.int()
+						.min(1)
+						.optional()
+						.describe('Return log rows with ids lower than this id.'),
+					limit: z.number().int().min(1).max(500).optional(),
+				}),
+				annotations: {
+					readOnlyHint: true,
+					idempotentHint: true,
+				},
+			},
+			async (args) => {
+				const logs = input.logger!.listLogs({
+					level: normalizeLogLevel(args['level']),
+					event: typeof args['event'] === 'string' ? args['event'] : undefined,
+					query: typeof args['query'] === 'string' ? args['query'] : undefined,
+					since: typeof args['since'] === 'string' ? args['since'] : undefined,
+					until: typeof args['until'] === 'string' ? args['until'] : undefined,
+					beforeId:
+						args['beforeId'] == null ? undefined : Number(args['beforeId']),
+					limit: args['limit'] == null ? undefined : Number(args['limit']),
+				})
+				return structuredTextResult(
+					logs.length === 0
+						? 'No home connector logs matched the filters.'
+						: logs
+								.map(
+									(log) =>
+										`${log.createdAt} ${log.level.toUpperCase()} ${log.event}: ${log.message}`,
+								)
+								.join('\n'),
+					{
+						logs,
+						retentionDays: homeConnectorLogRetentionDays,
+					},
+				)
+			},
+		)
 	}
 
 	const jellyfishPatternPathSchema = buildToolInputSchema({
