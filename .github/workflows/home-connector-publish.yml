@@ -43,7 +43,7 @@ jobs:
         shell: bash
         env:
           PORT: 4041
-          KODY_USER_ID: ci-user
+          KODY_USERNAME: ci-user
           HOME_CONNECTOR_SHARED_SECRET: ci-home-connector-secret
           NODE_OPTIONS: --disable-warning=ExperimentalWarning
           WORKER_BASE_URL: http://127.0.0.1:65535

@@ -39,7 +39,7 @@ function createTemporaryEnv(values: Record<string, string | undefined>) {
 test('live connector applies discovery defaults when env overrides are absent', () => {
 	using _env = createTemporaryEnv({
 		...requiredConfigEnv,
-		KODY_USER_ID: undefined,
+		KODY_USERNAME: undefined,
 		MOCKS: 'false',
 		ROKU_DISCOVERY_URL: undefined,
 		SONOS_DISCOVERY_URL: undefined,
@@ -84,28 +84,28 @@ test('explicit discovery URLs override defaults in mock mode', () => {
 	})
 })
 
-test('worker URLs use the user-scoped connector path when KODY_USER_ID is set', () => {
+test('worker URLs use the username-scoped connector path when KODY_USERNAME is set', () => {
 	using _env = createTemporaryEnv({
 		HOME_CONNECTOR_ID: 'living room/default',
 		WORKER_BASE_URL: 'https://heykody.dev/',
-		KODY_USER_ID: ' user/123 ',
+		KODY_USERNAME: ' kentcdodds ',
 		NODE_ENV: 'production',
 	})
 
 	const config = loadHomeConnectorConfig()
 	expect(config.workerSessionUrl).toBe(
-		'https://heykody.dev/connectors/u/user%2F123/home/living%20room%2Fdefault',
+		'https://heykody.dev/@kentcdodds/connectors/home/living%20room%2Fdefault',
 	)
 	expect(config.workerWebSocketUrl).toBe(
-		'wss://heykody.dev/connectors/u/user%2F123/home/living%20room%2Fdefault',
+		'wss://heykody.dev/@kentcdodds/connectors/home/living%20room%2Fdefault',
 	)
-	expect(config.workerWebSocketUrl).not.toContain('/connectors/home')
+	expect(config.workerWebSocketUrl).not.toContain('/connectors/u/')
 })
 
-test('local worker URLs keep the legacy connector path when KODY_USER_ID is absent', () => {
+test('local worker URLs keep the legacy connector path when KODY_USERNAME is absent', () => {
 	using _env = createTemporaryEnv({
 		...requiredConfigEnv,
-		KODY_USER_ID: undefined,
+		KODY_USERNAME: undefined,
 		NODE_ENV: 'production',
 	})
 
@@ -118,15 +118,15 @@ test('local worker URLs keep the legacy connector path when KODY_USER_ID is abse
 	)
 })
 
-test('production Kody worker URLs require KODY_USER_ID', () => {
+test('production Kody worker URLs require KODY_USERNAME', () => {
 	using _env = createTemporaryEnv({
 		HOME_CONNECTOR_ID: 'default',
 		WORKER_BASE_URL: 'https://heykody.dev',
-		KODY_USER_ID: undefined,
+		KODY_USERNAME: undefined,
 		NODE_ENV: 'production',
 	})
 
-	expect(() => loadHomeConnectorConfig()).toThrow('KODY_USER_ID')
+	expect(() => loadHomeConnectorConfig()).toThrow('KODY_USERNAME')
 })
 
 test('scan CIDR env vars override derived autoscan CIDRs', () => {

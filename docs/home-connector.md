@@ -4,14 +4,14 @@ The local `this repository` process is the bridge between Kody's Cloudflare
 Worker and devices that are only reachable on the local network.
 
 It is a **remote connector** with `kind: home`. The connector opens its outbound
-Worker session to `/connectors/u/{KODY_USER_ID}/home/{HOME_CONNECTOR_ID}` when
-`KODY_USER_ID` is configured.
+Worker session to `/@{KODY_USERNAME}/connectors/home/{HOME_CONNECTOR_ID}` when
+`KODY_USERNAME` is configured.
 
 Core deployment env vars:
 
-- `KODY_USER_ID` - the Kody user id that owns this home connector. Required for
-  production Kody Worker URLs such as `https://heykody.dev`; URL path characters
-  are encoded before building the ingress URL.
+- `KODY_USERNAME` - the Kody username that owns this home connector. Required
+  for production Kody Worker URLs such as `https://heykody.dev`; URL path
+  characters are encoded before building the ingress URL.
 - `HOME_CONNECTOR_ID` - the connector instance id, defaulting to `default`.
 - `WORKER_BASE_URL` - the Kody Worker origin, defaulting to
   `http://localhost:3742` for local development.
@@ -21,7 +21,7 @@ Core deployment env vars:
 ## Public-vs-internal boundary
 
 The connector URL paths (for example
-`/connectors/u/{KODY_USER_ID}/home/default/...`) are **WebSocket-only** on the
+`/@{KODY_USERNAME}/connectors/home/default/...`) are **WebSocket-only** on the
 public internet. The Worker entrypoint rejects non-WebSocket HTTP requests to
 connector routes with `404` before they reach the `HomeConnectorSession` Durable
 Object, and the DO `fetch()` handler itself also rejects non-upgrade HTTP with
