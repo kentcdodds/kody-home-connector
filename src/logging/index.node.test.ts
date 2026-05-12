@@ -133,8 +133,47 @@ test('logger writes sanitized values to the console sink', () => {
 	expect(consoleCalls[0]).toMatchObject([
 		'Failed with token=[redacted]',
 		{
-			name: 'Error',
-			message: 'password=[redacted] Authorization: [redacted]',
+			error: {
+				name: 'Error',
+				message: 'password=[redacted] Authorization: [redacted]',
+			},
+			token: '[redacted]',
+		},
+	])
+})
+
+test('logger writes sanitized structured context to the console sink', () => {
+	const config = createConfig()
+	const storage = createHomeConnectorStorage(config)
+	const consoleCalls: Array<Array<unknown>> = []
+	const logger = createHomeConnectorLogger({
+		config,
+		storage,
+		console: {
+			debug() {},
+			info(...args: Array<unknown>) {
+				consoleCalls.push(args)
+			},
+			warn() {},
+			error() {},
+		},
+		now: () => new Date('2026-05-12T18:00:00.000Z'),
+	})
+
+	logger.info('worker.websocket.error', 'Home connector websocket error', {
+		eventType: 'error',
+		readyState: 3,
+		url: 'wss://example.com?token=abc123',
+		attempt: 2,
+	})
+
+	expect(consoleCalls[0]).toMatchObject([
+		'Home connector websocket error',
+		{
+			eventType: 'error',
+			readyState: 3,
+			url: 'wss://example.com/?token=[redacted]',
+			attempt: 2,
 		},
 	])
 })

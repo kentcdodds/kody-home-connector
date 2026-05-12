@@ -279,9 +279,8 @@ export function createHomeConnectorLogger(input: {
 	) {
 		const sanitizedMessage = sanitizeLogString(message)
 		const sanitizedMetadata = sanitizeLogMetadata(metadata)
-		const error = sanitizedMetadata['error']
-		if (error) {
-			consoleSink[level](sanitizedMessage, error)
+		if (Object.keys(sanitizedMetadata).length > 0) {
+			consoleSink[level](sanitizedMessage, sanitizedMetadata)
 			return
 		}
 		consoleSink[level](sanitizedMessage)
