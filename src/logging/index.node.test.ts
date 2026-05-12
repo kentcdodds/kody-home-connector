@@ -200,6 +200,84 @@ test('logger still writes entries when retention pruning fails', () => {
 	expect(logger.listLogs({ event: 'test.persisted' })).toHaveLength(1)
 })
 
+test('logger sanitizes persistence failure console warnings', () => {
+	const config = createConfig()
+	const storage = createHomeConnectorStorage(config)
+	const consoleCalls: Array<Array<unknown>> = []
+	const originalQuery = storage.db.query.bind(storage.db)
+	storage.db.query = (sql) => {
+		if (sql.includes('INSERT INTO home_connector_logs')) {
+			throw new Error('insert failed token=abc123')
+		}
+		return originalQuery(sql)
+	}
+	const logger = createHomeConnectorLogger({
+		config,
+		storage,
+		console: {
+			debug() {},
+			info() {},
+			warn(...args: Array<unknown>) {
+				consoleCalls.push(args)
+			},
+			error() {},
+		},
+		now: () => new Date('2026-05-12T18:00:00.000Z'),
+	})
+
+	logger.info('test.failed_insert', 'Failed insert')
+
+	expect(JSON.stringify(consoleCalls)).not.toContain('abc123')
+	expect(consoleCalls.at(-1)).toMatchObject([
+		'Failed to persist home connector log entry.',
+		{
+			name: 'Error',
+			message: 'insert failed token=[redacted]',
+		},
+	])
+})
+
+test('logger excludes expired entries from reads', () => {
+	const config = createConfig()
+	const storage = createHomeConnectorStorage(config)
+	const logger = createHomeConnectorLogger({
+		config,
+		storage,
+		console: silentConsole,
+		now: () => new Date('2026-05-12T18:00:00.000Z'),
+	})
+	const statement = storage.db.query(
+		`
+			INSERT INTO home_connector_logs (
+				connector_id,
+				level,
+				event,
+				message,
+				metadata_json,
+				created_at
+			) VALUES (?, ?, ?, ?, ?, ?)
+		`,
+	)
+	statement.run(
+		config.homeConnectorId,
+		'info',
+		'old.event',
+		'old',
+		'{}',
+		'2026-05-01T00:00:00.000Z',
+	)
+	statement.run(
+		config.homeConnectorId,
+		'info',
+		'new.event',
+		'new',
+		'{}',
+		'2026-05-12T17:00:00.000Z',
+	)
+
+	expect(logger.listLogs().map((log) => log.event)).toEqual(['new.event'])
+})
+
 test('logger prunes entries older than eight days', () => {
 	const config = createConfig()
 	const storage = createHomeConnectorStorage(config)

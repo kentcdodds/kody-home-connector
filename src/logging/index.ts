@@ -322,7 +322,10 @@ export function createHomeConnectorLogger(input: {
 					createdAt,
 				)
 		} catch (error) {
-			consoleSink.warn('Failed to persist home connector log entry.', error)
+			consoleSink.warn(
+				'Failed to persist home connector log entry.',
+				sanitizeLogValue(error),
+			)
 		}
 	}
 
@@ -344,6 +347,11 @@ export function createHomeConnectorLogger(input: {
 		listLogs(listInput = {}) {
 			const params: Array<SQLInputValue> = [input.config.homeConnectorId]
 			const clauses = ['connector_id = ?']
+			const retentionCutoff = new Date(
+				now().getTime() - homeConnectorLogRetentionMs,
+			).toISOString()
+			clauses.push('created_at >= ?')
+			params.push(retentionCutoff)
 			if (listInput.level) {
 				clauses.push('level = ?')
 				params.push(listInput.level)
