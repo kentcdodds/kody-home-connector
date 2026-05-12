@@ -455,6 +455,11 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 				},
 			],
 		})
+		await expect(
+			mcp.callTool('home_connector_list_logs', {
+				since: 'yesterday',
+			}),
+		).rejects.toThrow('since must be an ISO datetime string.')
 		const accessNetworksScanTool = tools.find(
 			(tool) => tool.name === 'access_networks_unleashed_scan_controllers',
 		)

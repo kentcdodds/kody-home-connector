@@ -203,12 +203,19 @@ function parseMetadata(value: string) {
 }
 
 function stringifyMetadata(metadata: Record<string, unknown>) {
-	const sanitized = sanitizeLogValue(metadata)
+	const sanitized = sanitizeLogMetadata(metadata)
 	try {
 		return JSON.stringify(sanitized)
 	} catch {
 		return JSON.stringify({ serializationError: true })
 	}
+}
+
+function sanitizeLogMetadata(metadata: Record<string, unknown>) {
+	const sanitized = sanitizeLogValue(metadata)
+	return sanitized && typeof sanitized === 'object' && !Array.isArray(sanitized)
+		? (sanitized as Record<string, unknown>)
+		: {}
 }
 
 function mapLogRow(row: HomeConnectorLogRow): HomeConnectorLogEntry {
@@ -253,17 +260,31 @@ export function createHomeConnectorLogger(input: {
 		nextPruneAt = now().getTime() + 60 * 60 * 1000
 	}
 
+	function tryPruneExpiredLogs() {
+		try {
+			pruneExpiredLogs()
+		} catch (error) {
+			nextPruneAt = now().getTime() + 5 * 60 * 1000
+			consoleSink.warn(
+				'Failed to prune expired home connector log entries.',
+				sanitizeLogValue(error),
+			)
+		}
+	}
+
 	function writeConsole(
 		level: HomeConnectorLogLevel,
 		message: string,
 		metadata: Record<string, unknown>,
 	) {
-		const error = metadata['error']
+		const sanitizedMessage = sanitizeLogString(message)
+		const sanitizedMetadata = sanitizeLogMetadata(metadata)
+		const error = sanitizedMetadata['error']
 		if (error) {
-			consoleSink[level](message, error)
+			consoleSink[level](sanitizedMessage, error)
 			return
 		}
-		consoleSink[level](message)
+		consoleSink[level](sanitizedMessage)
 	}
 
 	function write(
@@ -274,10 +295,12 @@ export function createHomeConnectorLogger(input: {
 	) {
 		writeConsole(level, message, metadata)
 		const createdAt = now().toISOString()
+		const sanitizedMessage = sanitizeLogString(message)
+		const sanitizedMetadata = stringifyMetadata(metadata)
+		if (now().getTime() >= nextPruneAt) {
+			tryPruneExpiredLogs()
+		}
 		try {
-			if (now().getTime() >= nextPruneAt) {
-				pruneExpiredLogs()
-			}
 			input.storage.db
 				.query(
 					`
@@ -295,8 +318,8 @@ export function createHomeConnectorLogger(input: {
 					input.config.homeConnectorId,
 					level,
 					event,
-					sanitizeLogString(message),
-					stringifyMetadata(metadata),
+					sanitizedMessage,
+					sanitizedMetadata,
 					createdAt,
 				)
 		} catch (error) {
@@ -304,7 +327,7 @@ export function createHomeConnectorLogger(input: {
 		}
 	}
 
-	pruneExpiredLogs()
+	tryPruneExpiredLogs()
 
 	return {
 		debug(event, message, metadata) {

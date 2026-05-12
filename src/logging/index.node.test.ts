@@ -106,6 +106,61 @@ test('logger persists sanitized entries and supports filtered reads', () => {
 	})
 })
 
+test('logger writes sanitized values to the console sink', () => {
+	const config = createConfig()
+	const storage = createHomeConnectorStorage(config)
+	const consoleCalls: Array<Array<unknown>> = []
+	const logger = createHomeConnectorLogger({
+		config,
+		storage,
+		console: {
+			debug() {},
+			info() {},
+			warn() {},
+			error(...args: Array<unknown>) {
+				consoleCalls.push(args)
+			},
+		},
+		now: () => new Date('2026-05-12T18:00:00.000Z'),
+	})
+
+	logger.error('test.error', 'Failed with token=abc123', {
+		error: new Error('password=abc123 Authorization: Bearer abc123'),
+		token: 'abc123',
+	})
+
+	expect(JSON.stringify(consoleCalls)).not.toContain('abc123')
+	expect(consoleCalls[0]).toMatchObject([
+		'Failed with token=[redacted]',
+		{
+			name: 'Error',
+			message: 'password=[redacted] Authorization: [redacted]',
+		},
+	])
+})
+
+test('logger still writes entries when retention pruning fails', () => {
+	const config = createConfig()
+	const storage = createHomeConnectorStorage(config)
+	const originalQuery = storage.db.query.bind(storage.db)
+	storage.db.query = (sql) => {
+		if (sql.includes('DELETE FROM home_connector_logs')) {
+			throw new Error('delete failed token=abc123')
+		}
+		return originalQuery(sql)
+	}
+	const logger = createHomeConnectorLogger({
+		config,
+		storage,
+		console: silentConsole,
+		now: () => new Date('2026-05-12T18:00:00.000Z'),
+	})
+
+	logger.info('test.persisted', 'Persisted after prune failure')
+
+	expect(logger.listLogs({ event: 'test.persisted' })).toHaveLength(1)
+})
+
 test('logger prunes entries older than eight days', () => {
 	const config = createConfig()
 	const storage = createHomeConnectorStorage(config)

@@ -307,6 +307,18 @@ export function createHomeConnectorMcpServer(input: {
 		return undefined
 	}
 
+	const logTimestampSchema = z.iso.datetime()
+	function normalizeLogTimestamp(value: unknown, name: string) {
+		if (value == null) return undefined
+		if (
+			typeof value !== 'string' ||
+			!logTimestampSchema.safeParse(value).success
+		) {
+			throw new Error(`${name} must be an ISO datetime string.`)
+		}
+		return new Date(value).toISOString()
+	}
+
 	if (input.logger) {
 		registerTool(
 			{
@@ -318,14 +330,12 @@ export function createHomeConnectorMcpServer(input: {
 					level: z.enum(['debug', 'info', 'warn', 'error']).optional(),
 					event: z.string().min(1).optional(),
 					query: z.string().min(1).optional(),
-					since: z
-						.string()
-						.min(1)
+					since: z.iso
+						.datetime()
 						.optional()
 						.describe('Inclusive ISO timestamp lower bound.'),
-					until: z
-						.string()
-						.min(1)
+					until: z.iso
+						.datetime()
 						.optional()
 						.describe('Inclusive ISO timestamp upper bound.'),
 					beforeId: z
@@ -346,8 +356,8 @@ export function createHomeConnectorMcpServer(input: {
 					level: normalizeLogLevel(args['level']),
 					event: typeof args['event'] === 'string' ? args['event'] : undefined,
 					query: typeof args['query'] === 'string' ? args['query'] : undefined,
-					since: typeof args['since'] === 'string' ? args['since'] : undefined,
-					until: typeof args['until'] === 'string' ? args['until'] : undefined,
+					since: normalizeLogTimestamp(args['since'], 'since'),
+					until: normalizeLogTimestamp(args['until'], 'until'),
 					beforeId:
 						args['beforeId'] == null ? undefined : Number(args['beforeId']),
 					limit: args['limit'] == null ? undefined : Number(args['limit']),
