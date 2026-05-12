@@ -164,6 +164,43 @@ test('derived Access Networks Unleashed autoscan CIDRs split a /23 into /24 scan
 	).toEqual(['192.168.6.0/24', '192.168.7.0/24'])
 })
 
+test('derived autoscan CIDRs skip container bridge interfaces', () => {
+	const warnings: Array<string> = []
+	const originalWarn = console.warn
+	console.warn = (message?: unknown) => {
+		warnings.push(String(message))
+	}
+	try {
+		expect(
+			deriveAccessNetworksUnleashedAutoscanCidrsFromInterfaces({
+				docker0: [
+					{
+						address: '172.17.0.1',
+						netmask: '255.255.0.0',
+						family: 'IPv4',
+						mac: '00:00:00:00:00:00',
+						internal: false,
+						cidr: '172.17.0.1/16',
+					},
+				],
+				en0: [
+					{
+						address: '192.168.6.10',
+						netmask: '255.255.255.0',
+						family: 'IPv4',
+						mac: '00:00:00:00:00:00',
+						internal: false,
+						cidr: '192.168.6.10/24',
+					},
+				],
+			}),
+		).toEqual(['192.168.6.0/24'])
+	} finally {
+		console.warn = originalWarn
+	}
+	expect(warnings).toEqual([])
+})
+
 test('derived Venstar autoscan CIDRs split a /23 into /24 scan blocks', () => {
 	expect(
 		deriveVenstarAutoscanCidrsFromInterfaces({

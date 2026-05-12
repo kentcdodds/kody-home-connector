@@ -130,19 +130,22 @@ test('logger writes sanitized values to the console sink', () => {
 	})
 
 	expect(JSON.stringify(consoleCalls)).not.toContain('abc123')
-	expect(consoleCalls[0]).toMatchObject([
-		'Failed with token=[redacted]',
-		{
+	expect(consoleCalls[0]).toHaveLength(1)
+	expect(JSON.parse(String(consoleCalls[0]?.[0]))).toMatchObject({
+		level: 'error',
+		event: 'test.error',
+		message: 'Failed with token=[redacted]',
+		metadata: {
 			error: {
 				name: 'Error',
 				message: 'password=[redacted] Authorization: [redacted]',
 			},
 			token: '[redacted]',
 		},
-	])
+	})
 })
 
-test('logger writes sanitized structured context to the console sink', () => {
+test('logger writes sanitized structured context as one console line', () => {
 	const config = createConfig()
 	const storage = createHomeConnectorStorage(config)
 	const consoleCalls: Array<Array<unknown>> = []
@@ -167,15 +170,18 @@ test('logger writes sanitized structured context to the console sink', () => {
 		attempt: 2,
 	})
 
-	expect(consoleCalls[0]).toMatchObject([
-		'Home connector websocket error',
-		{
+	expect(consoleCalls[0]).toHaveLength(1)
+	expect(JSON.parse(String(consoleCalls[0]?.[0]))).toMatchObject({
+		level: 'info',
+		event: 'worker.websocket.error',
+		message: 'Home connector websocket error',
+		metadata: {
 			eventType: 'error',
 			readyState: 3,
 			url: 'wss://example.com/?token=[redacted]',
 			attempt: 2,
 		},
-	])
+	})
 })
 
 test('logger still writes entries when retention pruning fails', () => {
@@ -228,13 +234,59 @@ test('logger sanitizes persistence failure console warnings', () => {
 	logger.info('test.failed_insert', 'Failed insert')
 
 	expect(JSON.stringify(consoleCalls)).not.toContain('abc123')
-	expect(consoleCalls.at(-1)).toMatchObject([
-		'Failed to persist home connector log entry.',
-		{
-			name: 'Error',
-			message: 'insert failed token=[redacted]',
+	expect(consoleCalls.at(-1)).toHaveLength(1)
+	expect(JSON.parse(String(consoleCalls.at(-1)?.[0]))).toMatchObject({
+		level: 'warn',
+		event: 'logger.persist_failed',
+		message: 'Failed to persist home connector log entry.',
+		metadata: {
+			error: {
+				name: 'Error',
+				message: 'insert failed token=[redacted]',
+			},
 		},
-	])
+	})
+})
+
+test('logger writes prune failures as one sanitized console line', () => {
+	const config = createConfig()
+	const storage = createHomeConnectorStorage(config)
+	const consoleCalls: Array<Array<unknown>> = []
+	const originalQuery = storage.db.query.bind(storage.db)
+	storage.db.query = (sql) => {
+		if (sql.includes('DELETE FROM home_connector_logs')) {
+			throw new Error('delete failed token=abc123')
+		}
+		return originalQuery(sql)
+	}
+
+	createHomeConnectorLogger({
+		config,
+		storage,
+		console: {
+			debug() {},
+			info() {},
+			warn(...args: Array<unknown>) {
+				consoleCalls.push(args)
+			},
+			error() {},
+		},
+		now: () => new Date('2026-05-12T18:00:00.000Z'),
+	})
+
+	expect(JSON.stringify(consoleCalls)).not.toContain('abc123')
+	expect(consoleCalls[0]).toHaveLength(1)
+	expect(JSON.parse(String(consoleCalls[0]?.[0]))).toMatchObject({
+		level: 'warn',
+		event: 'logger.prune_failed',
+		message: 'Failed to prune expired home connector log entries.',
+		metadata: {
+			error: {
+				name: 'Error',
+				message: 'delete failed token=[redacted]',
+			},
+		},
+	})
 })
 
 test('logger excludes expired entries from reads', () => {

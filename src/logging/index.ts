@@ -235,6 +235,25 @@ function normalizeLimit(limit: number | undefined) {
 	return Math.min(500, Math.max(1, Math.floor(limit)))
 }
 
+function stringifyConsoleLog(input: {
+	level: HomeConnectorLogLevel
+	event: string
+	message: string
+	metadata?: Record<string, unknown>
+}) {
+	const sanitizedMetadata = input.metadata
+		? sanitizeLogMetadata(input.metadata)
+		: {}
+	return JSON.stringify({
+		level: input.level,
+		event: input.event,
+		message: sanitizeLogString(input.message),
+		...(Object.keys(sanitizedMetadata).length > 0
+			? { metadata: sanitizedMetadata }
+			: {}),
+	})
+}
+
 export function createHomeConnectorLogger(input: {
 	config: HomeConnectorConfig
 	storage: HomeConnectorStorage
@@ -266,24 +285,30 @@ export function createHomeConnectorLogger(input: {
 		} catch (error) {
 			nextPruneAt = now().getTime() + 5 * 60 * 1000
 			consoleSink.warn(
-				'Failed to prune expired home connector log entries.',
-				sanitizeLogValue(error),
+				stringifyConsoleLog({
+					level: 'warn',
+					event: 'logger.prune_failed',
+					message: 'Failed to prune expired home connector log entries.',
+					metadata: { error },
+				}),
 			)
 		}
 	}
 
 	function writeConsole(
 		level: HomeConnectorLogLevel,
+		event: string,
 		message: string,
 		metadata: Record<string, unknown>,
 	) {
-		const sanitizedMessage = sanitizeLogString(message)
-		const sanitizedMetadata = sanitizeLogMetadata(metadata)
-		if (Object.keys(sanitizedMetadata).length > 0) {
-			consoleSink[level](sanitizedMessage, sanitizedMetadata)
-			return
-		}
-		consoleSink[level](sanitizedMessage)
+		consoleSink[level](
+			stringifyConsoleLog({
+				level,
+				event,
+				message,
+				metadata,
+			}),
+		)
 	}
 
 	function write(
@@ -292,7 +317,7 @@ export function createHomeConnectorLogger(input: {
 		message: string,
 		metadata: Record<string, unknown> = {},
 	) {
-		writeConsole(level, message, metadata)
+		writeConsole(level, event, message, metadata)
 		const createdAt = now().toISOString()
 		const sanitizedMessage = sanitizeLogString(message)
 		const sanitizedMetadata = stringifyMetadata(metadata)
@@ -323,8 +348,12 @@ export function createHomeConnectorLogger(input: {
 				)
 		} catch (error) {
 			consoleSink.warn(
-				'Failed to persist home connector log entry.',
-				sanitizeLogValue(error),
+				stringifyConsoleLog({
+					level: 'warn',
+					event: 'logger.persist_failed',
+					message: 'Failed to persist home connector log entry.',
+					metadata: { error },
+				}),
 			)
 		}
 	}

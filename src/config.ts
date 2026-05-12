@@ -254,12 +254,24 @@ function derivePrivateAutoscanCidrsFromCidr(cidr: string): Array<string> {
 	return derived
 }
 
+function isLikelyContainerBridgeInterface(name: string) {
+	const normalized = name.toLowerCase()
+	return (
+		normalized === 'docker0' ||
+		normalized.startsWith('br-') ||
+		normalized.startsWith('veth') ||
+		normalized.startsWith('virbr') ||
+		normalized.startsWith('podman')
+	)
+}
+
 export function derivePrivateAutoscanCidrsFromInterfaces(
 	interfaces: ReturnType<typeof networkInterfaces>,
 ) {
 	const cidrs = new Set<string>()
-	for (const entries of Object.values(interfaces)) {
+	for (const [name, entries] of Object.entries(interfaces)) {
 		if (!entries) continue
+		if (isLikelyContainerBridgeInterface(name)) continue
 		for (const entry of entries) {
 			if (entry.internal || entry.family !== 'IPv4') continue
 			const cidr = entry.cidr
