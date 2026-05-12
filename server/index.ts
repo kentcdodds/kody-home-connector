@@ -38,7 +38,11 @@ function installGracefulShutdownHandlers(input: {
 		}
 
 		shutdownPromise = (async () => {
-			console.info(`Shutting down home connector reason=${reason}`)
+			input.connector.logger.info(
+				'server.shutdown.started',
+				`Shutting down home connector reason=${reason}`,
+				{ reason },
+			)
 			input.connector.workerConnector.stop()
 			await closeServerWithWatchdog()
 			await closeHomeConnectorSentry()
@@ -138,8 +142,12 @@ async function main() {
 	)
 
 	server.listen(connector.config.port, () => {
-		console.info(
+		connector.logger.info(
+			'server.http.listening',
 			`home-connector listening on http://localhost:${connector.config.port}`,
+			{
+				port: connector.config.port,
+			},
 		)
 	})
 

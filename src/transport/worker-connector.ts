@@ -17,6 +17,7 @@ import {
 	captureHomeConnectorException,
 	captureHomeConnectorMessage,
 } from '../sentry.ts'
+import { type HomeConnectorLogger } from '../logging/index.ts'
 
 const heartbeatIntervalMs = 10_000
 const initialReconnectDelayMs = 2_000
@@ -93,6 +94,7 @@ function createSocketPayloadPreview(data: unknown) {
 async function handleJsonRpcRequest(
 	message: JSONRPCRequest,
 	toolRegistry: HomeConnectorToolRegistry,
+	logger: HomeConnectorLogger,
 ) {
 	if (message.method === 'tools/list') {
 		return {
@@ -124,8 +126,14 @@ async function handleJsonRpcRequest(
 		const startedAt = Date.now()
 		const requestId = formatRequestId(message.id)
 		const argumentKeys = Object.keys(params.arguments ?? {})
-		console.info(
+		logger.info(
+			'tool.call.started',
 			`Home connector tool call started: ${name} requestId=${requestId} argKeys=${argumentKeys.join(',') || 'none'}`,
+			{
+				toolName: name,
+				requestId,
+				argumentKeys,
+			},
 		)
 
 		try {
@@ -135,10 +143,23 @@ async function handleJsonRpcRequest(
 				source: 'worker-connector',
 			})
 			const durationMs = Date.now() - startedAt
-			console.info(
+			logger.info(
+				'tool.call.finished',
 				`Home connector tool call finished: ${name} requestId=${requestId} durationMs=${durationMs}`,
+				{
+					toolName: name,
+					requestId,
+					durationMs,
+					argumentKeys,
+				},
 			)
 			if (durationMs >= slowToolCallThresholdMs) {
+				logger.warn('tool.call.slow', 'Home connector tool call was slow.', {
+					toolName: name,
+					requestId,
+					durationMs,
+					argumentKeys,
+				})
 				captureHomeConnectorMessage('Home connector tool call was slow.', {
 					level: 'warning',
 					tags: {
@@ -159,9 +180,16 @@ async function handleJsonRpcRequest(
 			} satisfies JSONRPCResponse
 		} catch (error: unknown) {
 			const durationMs = Date.now() - startedAt
-			console.error(
+			logger.error(
+				'tool.call.failed',
 				`Home connector tool call failed: ${name} requestId=${requestId} durationMs=${durationMs}`,
-				error,
+				{
+					toolName: name,
+					requestId,
+					durationMs,
+					argumentKeys,
+					error,
+				},
 			)
 			captureHomeConnectorException(error, {
 				tags: {
@@ -200,6 +228,7 @@ async function handleJsonRpcRequest(
 export function createWorkerConnector(input: {
 	config: HomeConnectorConfig
 	state: HomeConnectorState
+	logger: HomeConnectorLogger
 	toolRegistry: HomeConnectorToolRegistry
 }) {
 	let started = false
@@ -230,8 +259,17 @@ export function createWorkerConnector(input: {
 		if (stopped || reconnectTimer) return
 		consecutiveReconnects += 1
 		const reconnectDelayMs = getReconnectDelayMs(consecutiveReconnects)
-		console.info(
+		input.logger.info(
+			'worker.websocket.reconnect_scheduled',
 			`Scheduling home connector websocket reconnect in ${reconnectDelayMs}ms consecutiveReconnects=${consecutiveReconnects}`,
+			{
+				...createSocketEventContext({
+					config: input.config,
+					connectionAttempt,
+					consecutiveReconnects,
+				}),
+				reconnectDelayMs,
+			},
 		)
 		addHomeConnectorSentryBreadcrumb({
 			message: 'Scheduling home connector websocket reconnect.',
@@ -265,8 +303,14 @@ export function createWorkerConnector(input: {
 			connected: false,
 			lastError: null,
 		})
-		console.info(
+		input.logger.info(
+			'worker.websocket.connecting',
 			`Opening home connector websocket attempt=${connectionAttempt} url=${input.config.workerWebSocketUrl}`,
+			createSocketEventContext({
+				config: input.config,
+				connectionAttempt,
+				consecutiveReconnects,
+			}),
 		)
 		addHomeConnectorSentryBreadcrumb({
 			message: 'Opening home connector websocket.',
@@ -281,8 +325,14 @@ export function createWorkerConnector(input: {
 		socket = new WebSocket(input.config.workerWebSocketUrl)
 
 		socket.addEventListener('open', () => {
-			console.info(
+			input.logger.info(
+				'worker.websocket.opened',
 				`Home connector websocket opened attempt=${connectionAttempt} connectorId=${input.config.homeConnectorId}`,
+				createSocketEventContext({
+					config: input.config,
+					connectionAttempt,
+					consecutiveReconnects,
+				}),
 			)
 			addHomeConnectorSentryBreadcrumb({
 				message: 'Home connector websocket opened.',
@@ -343,7 +393,18 @@ export function createWorkerConnector(input: {
 								consecutiveReconnects,
 							}),
 						})
-						console.error(`Home connector error: ${value.message}`)
+						input.logger.error(
+							'worker.server.error',
+							`Home connector error: ${value.message}`,
+							{
+								...createSocketEventContext({
+									config: input.config,
+									connectionAttempt,
+									consecutiveReconnects,
+								}),
+								serverMessage: value.message,
+							},
+						)
 						return
 					case 'server.ack': {
 						hasReportedSocketIssue = false
@@ -354,8 +415,17 @@ export function createWorkerConnector(input: {
 							lastSyncAt: new Date().toISOString(),
 							lastError: null,
 						})
-						console.info(
+						input.logger.info(
+							'worker.websocket.acknowledged',
 							`Home connector websocket acknowledged connectorId=${value.connectorId}`,
+							{
+								...createSocketEventContext({
+									config: input.config,
+									connectionAttempt,
+									consecutiveReconnects: previousConsecutiveReconnects,
+								}),
+								acknowledgedConnectorId: value.connectorId,
+							},
 						)
 						addHomeConnectorSentryBreadcrumb({
 							message: 'Home connector websocket acknowledged.',
@@ -406,6 +476,7 @@ export function createWorkerConnector(input: {
 							const response = await handleJsonRpcRequest(
 								message,
 								input.toolRegistry,
+								input.logger,
 							)
 							socket.send(
 								stringifyConnectorMessage({
@@ -446,7 +517,20 @@ export function createWorkerConnector(input: {
 						...createSocketPayloadPreview(event.data),
 					},
 				})
-				console.error('Home connector websocket message handling failed', error)
+				input.logger.error(
+					'worker.websocket.message_failed',
+					'Home connector websocket message handling failed',
+					{
+						...createSocketEventContext({
+							config: input.config,
+							connectionAttempt,
+							consecutiveReconnects,
+						}),
+						readyState: socket?.readyState ?? null,
+						...createSocketPayloadPreview(event.data),
+						error,
+					},
+				)
 			}
 		})
 
@@ -471,7 +555,16 @@ export function createWorkerConnector(input: {
 					},
 				})
 			}
-			console.warn(closeMessage)
+			input.logger.warn('worker.websocket.closed', closeMessage, {
+				code: event.code,
+				reason: event.reason,
+				wasClean: event.wasClean,
+				...createSocketEventContext({
+					config: input.config,
+					connectionAttempt,
+					consecutiveReconnects,
+				}),
+			})
 			socket = null
 			scheduleReconnect()
 		})
@@ -496,12 +589,16 @@ export function createWorkerConnector(input: {
 					},
 				})
 			}
-			console.error('Home connector websocket error', {
-				eventType: event.type,
-				readyState: socket?.readyState,
-				url: input.config.workerWebSocketUrl,
-				attempt: connectionAttempt,
-			})
+			input.logger.error(
+				'worker.websocket.error',
+				'Home connector websocket error',
+				{
+					eventType: event.type,
+					readyState: socket?.readyState,
+					url: input.config.workerWebSocketUrl,
+					attempt: connectionAttempt,
+				},
+			)
 		})
 	}
 
@@ -510,10 +607,15 @@ export function createWorkerConnector(input: {
 			if (started) return
 			started = true
 			if (!input.config.sharedSecret) {
+				const message =
+					'Connector registration is disabled because HOME_CONNECTOR_SHARED_SECRET is not set. Start from the repo root with `npm run dev` or provide the secret manually.'
 				updateConnectionState(input.state, {
 					connected: false,
-					lastError:
-						'Connector registration is disabled because HOME_CONNECTOR_SHARED_SECRET is not set. Start from the repo root with `npm run dev` or provide the secret manually.',
+					lastError: message,
+				})
+				input.logger.warn('worker.registration.disabled', message, {
+					connectorId: input.config.homeConnectorId,
+					workerUrl: input.config.workerBaseUrl,
 				})
 				return
 			}
@@ -521,6 +623,14 @@ export function createWorkerConnector(input: {
 		},
 		stop() {
 			stopped = true
+			input.logger.info(
+				'worker.stopped',
+				'Stopping home connector websocket.',
+				{
+					connectorId: input.config.homeConnectorId,
+					readyState: socket?.readyState ?? null,
+				},
+			)
 			clearReconnectTimer()
 			clearInterval(heartbeat)
 			socket?.close()

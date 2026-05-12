@@ -14,9 +14,17 @@ import { createSamsungTvAdapter } from '../adapters/samsung-tv/index.ts'
 import { createVenstarAdapter } from '../adapters/venstar/index.ts'
 import { upsertVenstarThermostat } from '../adapters/venstar/repository.ts'
 import { loadHomeConnectorConfig } from '../config.ts'
+import { createHomeConnectorLogger } from '../logging/index.ts'
 import { createHomeConnectorMcpServer } from './server.ts'
 import { createAppState } from '../state.ts'
 import { createHomeConnectorStorage } from '../storage/index.ts'
+
+const silentConsole = {
+	debug() {},
+	info() {},
+	warn() {},
+	error() {},
+}
 
 function createConfig() {
 	process.env.MOCKS = 'true'
@@ -335,6 +343,14 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 	const config = createConfig()
 	const state = createAppState()
 	const storage = createHomeConnectorStorage(config)
+	const logger = createHomeConnectorLogger({
+		config,
+		storage,
+		console: silentConsole,
+	})
+	logger.info('test.event', 'Test log entry', {
+		token: 'super-secret',
+	})
 	upsertVenstarThermostat({
 		storage,
 		connectorId: config.homeConnectorId,
@@ -405,6 +421,7 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 	const mcp = createHomeConnectorMcpServer({
 		config,
 		state,
+		logger,
 		samsungTv,
 		lutron,
 		sonos,
@@ -418,6 +435,31 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 
 	try {
 		const tools = mcp.listTools()
+		const logsTool = tools.find(
+			(tool) => tool.name === 'home_connector_list_logs',
+		)
+		expect(logsTool?.annotations?.['readOnlyHint']).toBe(true)
+		const logsResult = await mcp.callTool('home_connector_list_logs', {
+			query: 'Test log',
+		})
+		expect(logsResult.content[0]?.type).toBe('text')
+		expect(logsResult.structuredContent).toMatchObject({
+			retentionDays: 8,
+			logs: [
+				{
+					event: 'test.event',
+					message: 'Test log entry',
+					metadata: {
+						token: '[redacted]',
+					},
+				},
+			],
+		})
+		await expect(
+			mcp.callTool('home_connector_list_logs', {
+				since: 'yesterday',
+			}),
+		).rejects.toThrow('since must be an ISO datetime string.')
 		const accessNetworksScanTool = tools.find(
 			(tool) => tool.name === 'access_networks_unleashed_scan_controllers',
 		)
