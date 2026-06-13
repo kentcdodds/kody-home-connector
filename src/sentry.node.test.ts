@@ -14,11 +14,6 @@ const sentryMock = vi.hoisted(() => ({
 
 vi.mock('@sentry/node', () => sentryMock)
 
-// eslint-disable-next-line epic-web/prefer-dispose-in-tests -- this reset protects following tests when Sentry is enabled.
-afterEach(() => {
-	sentryMock.isEnabled.mockReturnValue(false)
-})
-
 const {
 	buildHomeConnectorSentryOptions,
 	addHomeConnectorSentryBreadcrumb,
@@ -27,7 +22,14 @@ const {
 	flushHomeConnectorSentry,
 	getHomeConnectorErrorCaptureContext,
 	initializeHomeConnectorSentry,
+	resetHomeConnectorSentryDedupeForTests,
 } = await import('./sentry.ts')
+
+// eslint-disable-next-line epic-web/prefer-dispose-in-tests -- this reset protects following tests when Sentry is enabled.
+afterEach(() => {
+	sentryMock.isEnabled.mockReturnValue(false)
+	resetHomeConnectorSentryDedupeForTests()
+})
 
 function createTemporaryEnv(values: Record<string, string | undefined>) {
 	const previousValues = Object.fromEntries(
@@ -246,4 +248,60 @@ test('captureHomeConnectorException merges error capture context', () => {
 			durationMs: 48,
 		},
 	})
+})
+
+test('captureHomeConnectorException skips errors marked as expected noise', () => {
+	sentryMock.isEnabled.mockReturnValue(true)
+	sentryMock.captureException.mockReset()
+	const error = new Error('cooling down') as Error & {
+		homeConnectorCaptureContext?: {
+			tags?: Record<string, string>
+			shouldCapture?: boolean
+		}
+	}
+	error.homeConnectorCaptureContext = {
+		tags: {
+			connector_vendor: 'bond',
+			bond_circuit_breaker: 'true',
+		},
+		shouldCapture: false,
+	}
+
+	captureHomeConnectorException(error)
+
+	expect(sentryMock.captureException).not.toHaveBeenCalled()
+})
+
+test('captureHomeConnectorException dedupes repeated errors within a TTL', () => {
+	sentryMock.isEnabled.mockReturnValue(true)
+	sentryMock.captureException.mockReset()
+	vi.useFakeTimers()
+	vi.setSystemTime(new Date('2026-06-12T02:54:08.000Z'))
+	const error = new Error('Bond bridge unreachable') as Error & {
+		homeConnectorCaptureContext?: {
+			tags?: Record<string, string>
+			dedupe?: { key: string; ttlMs: number }
+		}
+	}
+	error.homeConnectorCaptureContext = {
+		tags: {
+			connector_vendor: 'bond',
+			bond_bridge_id: 'ZPGI01117',
+		},
+		dedupe: {
+			key: 'bond:default:ZPGI01117:2026-06-12T02',
+			ttlMs: 60_000,
+		},
+	}
+
+	try {
+		captureHomeConnectorException(error)
+		captureHomeConnectorException(error)
+		vi.advanceTimersByTime(60_000)
+		captureHomeConnectorException(error)
+
+		expect(sentryMock.captureException).toHaveBeenCalledTimes(2)
+	} finally {
+		vi.useRealTimers()
+	}
 })

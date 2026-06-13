@@ -23,6 +23,7 @@ const heartbeatIntervalMs = 10_000
 const initialReconnectDelayMs = 2_000
 const maxReconnectDelayMs = 30_000
 const slowToolCallThresholdMs = 5_000
+const websocketSentryReconnectThreshold = 3
 const homeConnectorDescription =
 	'Local-network home automation for Sonos, Bond shades, Venstar thermostats, Roku, Samsung TVs, Lutron, JellyFish lighting, and network gear.'
 
@@ -536,24 +537,62 @@ export function createWorkerConnector(input: {
 
 		socket.addEventListener('close', (event) => {
 			const closeMessage = formatCloseMessage(event)
+			const nextConsecutiveReconnects = consecutiveReconnects + 1
 			updateConnectionState(input.state, {
 				connected: false,
 				lastError: closeMessage,
 			})
-			if (!hasReportedSocketIssue) {
+			addHomeConnectorSentryBreadcrumb({
+				message: closeMessage,
+				category: 'websocket.close',
+				level: event.wasClean ? 'info' : 'warning',
+				data: {
+					...createSocketEventContext({
+						config: input.config,
+						connectionAttempt,
+						consecutiveReconnects: nextConsecutiveReconnects,
+					}),
+					code: event.code,
+					reason: event.reason,
+					wasClean: event.wasClean,
+				},
+			})
+			if (
+				!hasReportedSocketIssue &&
+				nextConsecutiveReconnects >= websocketSentryReconnectThreshold
+			) {
 				hasReportedSocketIssue = true
-				captureHomeConnectorMessage(closeMessage, {
-					level: 'warning',
-					tags: {
-						connector_event: 'websocket.close',
+				captureHomeConnectorMessage(
+					'Home connector websocket reconnects are failing.',
+					{
+						level: 'error',
+						fingerprint: [
+							'home-connector',
+							'websocket-sustained-reconnect',
+							input.config.homeConnectorId,
+						],
+						tags: {
+							home_connector_id: input.config.homeConnectorId,
+							connector_event: 'websocket.sustained_reconnect',
+						},
+						contexts: {
+							websocket: {
+								...createSocketEventContext({
+									config: input.config,
+									connectionAttempt,
+									consecutiveReconnects: nextConsecutiveReconnects,
+								}),
+								code: event.code,
+								reason: event.reason,
+								wasClean: event.wasClean,
+								reconnectThreshold: websocketSentryReconnectThreshold,
+							},
+						},
+						extra: {
+							closeMessage,
+						},
 					},
-					extra: {
-						code: event.code,
-						reason: event.reason,
-						wasClean: event.wasClean,
-						attempt: connectionAttempt,
-					},
-				})
+				)
 			}
 			input.logger.warn('worker.websocket.closed', closeMessage, {
 				code: event.code,
@@ -574,21 +613,20 @@ export function createWorkerConnector(input: {
 				connected: false,
 				lastError: 'Home connector websocket error.',
 			})
-			if (!hasReportedSocketIssue) {
-				hasReportedSocketIssue = true
-				captureHomeConnectorMessage('Home connector websocket error.', {
-					level: 'error',
-					tags: {
-						connector_event: 'websocket.error',
-					},
-					extra: {
-						eventType: event.type,
-						readyState: socket?.readyState,
-						url: input.config.workerWebSocketUrl,
-						attempt: connectionAttempt,
-					},
-				})
-			}
+			addHomeConnectorSentryBreadcrumb({
+				message: 'Home connector websocket error.',
+				category: 'websocket.error',
+				level: 'warning',
+				data: {
+					...createSocketEventContext({
+						config: input.config,
+						connectionAttempt,
+						consecutiveReconnects,
+					}),
+					eventType: event.type,
+					readyState: socket?.readyState,
+				},
+			})
 			input.logger.error(
 				'worker.websocket.error',
 				'Home connector websocket error',
