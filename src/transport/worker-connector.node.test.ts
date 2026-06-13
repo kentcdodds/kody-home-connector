@@ -50,6 +50,12 @@ class FakeWorkerWebSocket {
 		})
 	}
 
+	dispatchMessage(data: string) {
+		for (const listener of this.listeners.get('message') ?? []) {
+			listener({ data })
+		}
+	}
+
 	dispatchClose(event: { code: number; reason: string; wasClean: boolean }) {
 		this.readyState = FakeWorkerWebSocket.CLOSED
 		for (const listener of this.listeners.get('close') ?? []) {
@@ -221,4 +227,53 @@ test('websocket shutdown close does not trigger sustained reconnect reporting', 
 	}
 
 	expect(sentryMock.captureHomeConnectorMessage).not.toHaveBeenCalled()
+})
+
+test('websocket ping resets sustained reconnect threshold', async () => {
+	vi.useFakeTimers()
+	globalThis.WebSocket = FakeWorkerWebSocket as unknown as typeof WebSocket
+	const connector = createWorkerConnector({
+		config: createConfig(),
+		state: createAppState(),
+		logger: createLogger(),
+		toolRegistry: createToolRegistry(),
+	})
+
+	try {
+		await connector.start()
+		fakeWebSocketInstances[0]?.dispatchClose({
+			code: 1006,
+			reason: '',
+			wasClean: false,
+		})
+		await vi.advanceTimersByTimeAsync(2_000)
+		fakeWebSocketInstances[1]?.dispatchClose({
+			code: 1006,
+			reason: '',
+			wasClean: false,
+		})
+		await vi.advanceTimersByTimeAsync(4_000)
+		fakeWebSocketInstances[2]?.dispatchClose({
+			code: 1006,
+			reason: '',
+			wasClean: false,
+		})
+
+		expect(sentryMock.captureHomeConnectorMessage).toHaveBeenCalledTimes(1)
+		await vi.advanceTimersByTimeAsync(8_000)
+		fakeWebSocketInstances[3]?.dispatchMessage(
+			JSON.stringify({
+				type: 'server.ping',
+			}),
+		)
+		fakeWebSocketInstances[3]?.dispatchClose({
+			code: 1006,
+			reason: '',
+			wasClean: false,
+		})
+
+		expect(sentryMock.captureHomeConnectorMessage).toHaveBeenCalledTimes(1)
+	} finally {
+		connector.stop()
+	}
 })

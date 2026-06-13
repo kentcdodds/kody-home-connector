@@ -373,6 +373,7 @@ export function createWorkerConnector(input: {
 				switch (value.type) {
 					case 'server.ping':
 						hasReportedSocketIssue = false
+						consecutiveReconnects = 0
 						updateConnectionState(input.state, {
 							lastSyncAt: new Date().toISOString(),
 							lastError: null,
