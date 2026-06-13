@@ -1187,3 +1187,60 @@ test('bond enters cooldown after network failure and rejects queued requests', a
 		storage.close()
 	}
 })
+
+test('bond enters cooldown after wrapped AbortError failures', async () => {
+	const config = {
+		...createConfig(),
+		bondCircuitBreakerCooldownMs: 60_000,
+	}
+	const state = createAppState()
+	const storage = createHomeConnectorStorage(config)
+	const bond = createBondAdapter({
+		config,
+		state,
+		storage,
+	})
+	const previousFetch = globalThis.fetch
+	vi.useFakeTimers()
+	const fetchMock = vi.fn(async () => {
+		throw new DOMException('The user aborted a request.', 'AbortError')
+	})
+	globalThis.fetch = fetchMock as typeof fetch
+
+	try {
+		upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
+			{
+				bridgeId: 'BONDTEST15',
+				bondid: 'BONDTEST15',
+				instanceName: 'Abort Cooldown Bond',
+				host: '10.0.0.22',
+				port: 80,
+				address: null,
+				model: 'BD-TEST',
+				fwVer: 'v1.0.0',
+				lastSeenAt: '2026-04-27T22:10:00.000Z',
+				rawDiscovery: {},
+			},
+		])
+		adoptBondBridge(storage, config.homeConnectorId, 'BONDTEST15')
+		bond.setToken('BONDTEST15', 'bond-token')
+
+		await expect(bond.getDeviceState('BONDTEST15', 'dev1')).rejects.toThrow(
+			'Bond bridge "BONDTEST15" could not be reached',
+		)
+		await expect(bond.getDeviceState('BONDTEST15', 'dev2')).rejects.toThrow(
+			'cooling down after a recent network failure',
+		)
+
+		expect(fetchMock).toHaveBeenCalledTimes(1)
+		expect(
+			bond
+				.getReliabilityStatus({ bridgeId: 'BONDTEST15' })
+				.recentRequestLogs.map((log) => log.status),
+		).toEqual(['cooldown', 'failure'])
+	} finally {
+		vi.useRealTimers()
+		globalThis.fetch = previousFetch
+		storage.close()
+	}
+})

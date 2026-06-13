@@ -212,12 +212,24 @@ function isBondNetworkFailure(error: unknown) {
 		return false
 	}
 	const errorName = error.name.toLowerCase()
-	if (errorName === 'aborterror' || errorName === 'timeouterror') {
+	if (
+		errorName === 'timeouterror' ||
+		errorName.includes('abort') ||
+		errorName.includes('timeout')
+	) {
 		return true
+	}
+	const cause = error.cause
+	if (cause instanceof Error) {
+		const causeName = cause.name.toLowerCase()
+		if (causeName.includes('abort') || causeName.includes('timeout')) {
+			return true
+		}
 	}
 	const message = error.message.toLowerCase()
 	if (
 		message.includes('bond request timed out') ||
+		message.includes('aborted') ||
 		message.includes('fetch failed') ||
 		message.includes('enotfound') ||
 		message.includes('eai_again') ||
@@ -237,7 +249,7 @@ function isBondNetworkFailure(error: unknown) {
 		causeMessage.includes('ehostunreach') ||
 		causeMessage.includes('etimedout') ||
 		causeMessage.includes('getaddrinfo') ||
-		causeMessage.includes('the operation was aborted')
+		causeMessage.includes('aborted')
 	)
 }
 
