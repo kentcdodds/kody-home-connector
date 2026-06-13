@@ -43,6 +43,7 @@ import { type HomeConnectorErrorCaptureContext } from '../../sentry.ts'
 const defaultBondTransientAttemptsPerBaseUrl = 4
 const defaultBondTransientRetryBaseDelayMs = 100
 const bondRequestLogLimit = 200
+const bondOutageFingerprintWindowMs = 60 * 60 * 1000
 
 type BondRequestLogStatus = 'success' | 'failure' | 'cooldown'
 
@@ -54,6 +55,14 @@ type BondQueueState = {
 
 type BondStateReadCacheEntry = {
 	promise: Promise<Record<string, unknown>>
+}
+
+type BondBridgeRequestInput<T> = {
+	bridge: BondPersistedBridge
+	operation: string
+	request: (baseUrl: string) => Promise<T>
+	maxTransientAttemptsPerBaseUrl?: number
+	attemptedBaseUrls?: Array<string>
 }
 
 function normalizeQuery(value: string) {
@@ -203,12 +212,24 @@ function isBondNetworkFailure(error: unknown) {
 		return false
 	}
 	const errorName = error.name.toLowerCase()
-	if (errorName === 'aborterror' || errorName === 'timeouterror') {
+	if (
+		errorName === 'timeouterror' ||
+		errorName.includes('abort') ||
+		errorName.includes('timeout')
+	) {
 		return true
+	}
+	const cause = error.cause
+	if (cause instanceof Error) {
+		const causeName = cause.name.toLowerCase()
+		if (causeName.includes('abort') || causeName.includes('timeout')) {
+			return true
+		}
 	}
 	const message = error.message.toLowerCase()
 	if (
 		message.includes('bond request timed out') ||
+		message.includes('aborted') ||
 		message.includes('fetch failed') ||
 		message.includes('enotfound') ||
 		message.includes('eai_again') ||
@@ -228,7 +249,7 @@ function isBondNetworkFailure(error: unknown) {
 		causeMessage.includes('ehostunreach') ||
 		causeMessage.includes('etimedout') ||
 		causeMessage.includes('getaddrinfo') ||
-		causeMessage.includes('the operation was aborted')
+		causeMessage.includes('aborted')
 	)
 }
 
@@ -243,6 +264,55 @@ function isBondTransientNetworkFailure(error: unknown) {
 		(message) =>
 			message.includes('econnreset') || message.includes('socket hang up'),
 	)
+}
+
+function getBondOperationCategory(operation: string) {
+	const normalized = operation.toLowerCase()
+	if (normalized.includes('bridge version')) return 'bridge_version'
+	if (normalized.includes('token')) return 'token'
+	if (normalized === 'list devices') return 'device_list'
+	if (normalized.startsWith('fetch device') && normalized.includes(' state')) {
+		return 'device_state'
+	}
+	if (normalized.startsWith('fetch device')) return 'device'
+	if (normalized.startsWith('invoke device')) return 'device_action'
+	if (normalized === 'list groups') return 'group_list'
+	if (normalized.startsWith('fetch group') && normalized.includes(' state')) {
+		return 'group_state'
+	}
+	if (normalized.startsWith('fetch group')) return 'group'
+	if (normalized.startsWith('invoke group')) return 'group_action'
+	return 'bridge_request'
+}
+
+function getBondFailureCauseClass(error: unknown) {
+	if (error instanceof Error) {
+		const errorName = error.name.toLowerCase()
+		if (errorName === 'timeouterror') return 'timeout'
+		if (errorName === 'aborterror') return 'aborted'
+	}
+	const messages = getErrorMessages(error)
+		.map((message) => message.toLowerCase())
+		.join('\n')
+	if (messages.includes('econnreset') || messages.includes('socket hang up')) {
+		return 'connection_reset'
+	}
+	if (messages.includes('econnrefused')) return 'connection_refused'
+	if (
+		messages.includes('enotfound') ||
+		messages.includes('eai_again') ||
+		messages.includes('getaddrinfo')
+	) {
+		return 'dns'
+	}
+	if (messages.includes('ehostunreach') || messages.includes('enetunreach')) {
+		return 'host_unreachable'
+	}
+	if (messages.includes('etimedout') || messages.includes('timed out')) {
+		return 'timeout'
+	}
+	if (messages.includes('aborted')) return 'aborted'
+	return isBondNetworkFailure(error) ? 'network' : 'non_network'
 }
 
 function getBondNumericStateValue(state: Record<string, unknown>, key: string) {
@@ -289,12 +359,28 @@ function formatBondFailureReason(error: unknown) {
 	return String(error)
 }
 
+function getBondOutageWindow(timestampMs = Date.now()) {
+	return new Date(
+		Math.floor(timestampMs / bondOutageFingerprintWindowMs) *
+			bondOutageFingerprintWindowMs,
+	).toISOString()
+}
+
+function getBondBridgeNextAction(bridge: BondPersistedBridge) {
+	if (bridge.host.endsWith('.local')) {
+		return 'The stored Bond host ends in .local, so this usually means the container cannot resolve mDNS on the LAN. If this connector runs in a NAS/container without mDNS, update the bridge host to a stable IP with bond_update_bridge_connection or restore mDNS/DNS visibility for the container.'
+	}
+	return 'Verify the bridge host/IP is still reachable from the home-connector container and update it with bond_update_bridge_connection if it changed.'
+}
+
 function createBondCooldownError(input: {
+	connectorId: string
 	bridge: BondPersistedBridge
 	operation: string
 	cooldownUntil: number
 }) {
 	const cooldownUntilIso = new Date(input.cooldownUntil).toISOString()
+	const operationCategory = getBondOperationCategory(input.operation)
 	const error = new Error(
 		`Bond bridge "${input.bridge.bridgeId}" is cooling down after a recent network failure; refusing to ${input.operation} until ${cooldownUntilIso}.`,
 	) as Error & {
@@ -303,27 +389,38 @@ function createBondCooldownError(input: {
 	error.name = 'BondCircuitBreakerError'
 	error.homeConnectorCaptureContext = {
 		tags: {
+			home_connector_id: input.connectorId,
 			connector_vendor: 'bond',
 			bond_bridge_id: input.bridge.bridgeId,
+			bond_bridge_host: input.bridge.host,
+			bond_operation_category: operationCategory,
 			bond_network_failure: 'true',
 			bond_circuit_breaker: 'true',
+			bond_circuit_breaker_state: 'open',
+			bond_failure_cause_class: 'cooldown',
 		},
 		contexts: {
 			bond_bridge: {
+				connectorId: input.connectorId,
 				...getBondBridgeConnectionContext(input.bridge),
 				operation: input.operation,
+				operationCategory,
 				cooldownUntil: cooldownUntilIso,
+				circuitBreakerState: 'open',
 			},
 		},
 		extra: {
 			bondOperation: input.operation,
+			bondOperationCategory: operationCategory,
 			bondCooldownUntil: cooldownUntilIso,
 		},
+		shouldCapture: false,
 	}
 	return error
 }
 
 function createBondActionableError(input: {
+	connectorId: string
 	bridge: BondPersistedBridge
 	operation: string
 	error: unknown
@@ -331,10 +428,19 @@ function createBondActionableError(input: {
 }) {
 	const connection = getBondBridgeConnectionContext(input.bridge)
 	const failureReason = formatBondFailureReason(input.error)
-	const guidance = connection.host.endsWith('.local')
-		? ' The stored Bond host ends in .local, so this usually means the container cannot resolve mDNS on the LAN. If this connector runs in a NAS/container without mDNS, update the bridge host to a stable IP with bond_update_bridge_connection or restore mDNS/DNS visibility for the container.'
-		: ' Verify the bridge host/IP is still reachable from the home-connector container and update it with bond_update_bridge_connection if it changed.'
-	const errorMessage = `Bond bridge "${input.bridge.bridgeId}" could not be reached while trying to ${input.operation} at ${input.baseUrlsTried.join(', ')}. ${failureReason}.${guidance}`
+	const operationCategory = getBondOperationCategory(input.operation)
+	const causeClass = getBondFailureCauseClass(input.error)
+	const outageWindow = getBondOutageWindow()
+	const fingerprint = [
+		'home-connector',
+		'bond-bridge-unreachable',
+		input.connectorId,
+		input.bridge.bridgeId,
+		causeClass,
+		outageWindow,
+	]
+	const nextAction = getBondBridgeNextAction(input.bridge)
+	const errorMessage = `Bond bridge "${input.bridge.bridgeId}" could not be reached while trying to ${input.operation} at ${input.baseUrlsTried.join(', ')}. ${failureReason}. ${nextAction}`
 	const wrappedError = new Error(errorMessage, {
 		cause: input.error instanceof Error ? input.error : undefined,
 	}) as Error & {
@@ -343,32 +449,54 @@ function createBondActionableError(input: {
 	wrappedError.name = 'BondRequestError'
 	wrappedError.homeConnectorCaptureContext = {
 		tags: {
+			home_connector_id: input.connectorId,
 			connector_vendor: 'bond',
 			bond_bridge_id: input.bridge.bridgeId,
+			bond_bridge_host: input.bridge.host,
+			bond_operation_category: operationCategory,
 			bond_network_failure: isBondNetworkFailure(input.error)
 				? 'true'
 				: 'false',
 			bond_host_is_local: input.bridge.host.endsWith('.local')
 				? 'true'
 				: 'false',
+			bond_circuit_breaker_state: 'opened',
+			bond_failure_cause_class: causeClass,
+			bond_outage_window: outageWindow,
 		},
 		contexts: {
 			bond_bridge: {
+				connectorId: input.connectorId,
 				...connection,
 				baseUrlsTried: input.baseUrlsTried,
 				operation: input.operation,
+				operationCategory,
+				circuitBreakerState: 'opened',
+				failureCauseClass: causeClass,
+				outageWindow,
+				nextAction,
 			},
 		},
 		extra: {
 			bondOperation: input.operation,
+			bondOperationCategory: operationCategory,
 			bondBaseUrlsTried: input.baseUrlsTried,
 			bondFailureReason: failureReason,
+			bondFailureCauseClass: causeClass,
+			bondNextAction: nextAction,
+		},
+		fingerprint,
+		level: 'error',
+		dedupe: {
+			key: fingerprint.join(':'),
+			ttlMs: bondOutageFingerprintWindowMs,
 		},
 	}
 	return wrappedError
 }
 
 async function withBondBridgeRequest<T>(input: {
+	connectorId: string
 	bridge: BondPersistedBridge
 	operation: string
 	request: (baseUrl: string) => Promise<T>
@@ -414,6 +542,7 @@ async function withBondBridgeRequest<T>(input: {
 		}
 	}
 	throw createBondActionableError({
+		connectorId: input.connectorId,
 		bridge: input.bridge,
 		operation: input.operation,
 		error: lastError,
@@ -527,7 +656,7 @@ export function createBondAdapter(input: {
 	}
 
 	async function runQueuedBondBridgeRequest<T>(
-		requestInput: Parameters<typeof withBondBridgeRequest<T>>[0],
+		requestInput: BondBridgeRequestInput<T>,
 	) {
 		const queueState = getQueueState(requestInput.bridge.bridgeId)
 		const previousTail = queueState.tail
@@ -545,6 +674,7 @@ export function createBondAdapter(input: {
 			const now = Date.now()
 			if (queueState.cooldownUntil > now) {
 				const error = createBondCooldownError({
+					connectorId,
 					bridge: requestInput.bridge,
 					operation: requestInput.operation,
 					cooldownUntil: queueState.cooldownUntil,
@@ -566,6 +696,7 @@ export function createBondAdapter(input: {
 			}
 			const result = await withBondBridgeRequest({
 				...requestInput,
+				connectorId,
 				attemptedBaseUrls: baseUrlsTried,
 			})
 			runBestEffortPersistence('mark bridge seen', () => {
@@ -630,7 +761,7 @@ export function createBondAdapter(input: {
 	}
 
 	async function withTrackedBondBridgeRequest<T>(
-		requestInput: Parameters<typeof withBondBridgeRequest<T>>[0],
+		requestInput: BondBridgeRequestInput<T>,
 	) {
 		return await runQueuedBondBridgeRequest(requestInput)
 	}

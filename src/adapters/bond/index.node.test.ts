@@ -2,6 +2,7 @@ import { expect, test, vi } from 'vitest'
 import { createAppState } from '../../state.ts'
 import { type HomeConnectorConfig } from '../../config.ts'
 import { createHomeConnectorStorage } from '../../storage/index.ts'
+import { type HomeConnectorErrorCaptureContext } from '../../sentry.ts'
 import { createBondAdapter } from './index.ts'
 import {
 	adoptBondBridge,
@@ -265,6 +266,93 @@ test('bond surfaces actionable guidance when a .local bridge host cannot be reso
 			'If this connector runs in a NAS/container without mDNS, update the bridge host to a stable IP',
 		)
 	} finally {
+		globalThis.fetch = previousFetch
+		storage.close()
+	}
+})
+
+test('bond annotates bridge outages with stable low-cardinality Sentry metadata', async () => {
+	const config = createConfig()
+	const state = createAppState()
+	const storage = createHomeConnectorStorage(config)
+	const bond = createBondAdapter({
+		config,
+		state,
+		storage,
+	})
+	const previousFetch = globalThis.fetch
+	vi.useFakeTimers()
+	vi.setSystemTime(new Date('2026-06-12T02:54:08.000Z'))
+	globalThis.fetch = vi.fn(async () => {
+		throw createDnsFetchError('getaddrinfo ENOTFOUND 10.0.0.22')
+	}) as typeof fetch
+
+	try {
+		upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
+			{
+				bridgeId: 'ZPGI01117',
+				bondid: 'ZPGI01117',
+				instanceName: 'Bedroom Bond',
+				host: '10.0.0.22',
+				port: 80,
+				address: null,
+				model: 'BD-TEST',
+				fwVer: 'v1.0.0',
+				lastSeenAt: '2026-04-27T21:05:00.000Z',
+				rawDiscovery: {},
+			},
+		])
+		adoptBondBridge(storage, config.homeConnectorId, 'ZPGI01117')
+		bond.setToken('ZPGI01117', 'bond-token')
+
+		const error = (await bond
+			.getDeviceState('ZPGI01117', 'mockdev1')
+			.catch((caughtError: unknown) => caughtError)) as Error & {
+			homeConnectorCaptureContext?: HomeConnectorErrorCaptureContext
+		}
+
+		expect(error).toBeInstanceOf(Error)
+		expect(error.name).toBe('BondRequestError')
+		expect(error.homeConnectorCaptureContext).toMatchObject({
+			tags: {
+				home_connector_id: 'default',
+				connector_vendor: 'bond',
+				bond_bridge_id: 'ZPGI01117',
+				bond_bridge_host: '10.0.0.22',
+				bond_operation_category: 'device_state',
+				bond_network_failure: 'true',
+				bond_circuit_breaker_state: 'opened',
+				bond_failure_cause_class: 'dns',
+				bond_outage_window: '2026-06-12T02:00:00.000Z',
+			},
+			contexts: {
+				bond_bridge: {
+					connectorId: 'default',
+					bridgeId: 'ZPGI01117',
+					host: '10.0.0.22',
+					operation: 'fetch device mockdev1 state',
+					operationCategory: 'device_state',
+					circuitBreakerState: 'opened',
+					failureCauseClass: 'dns',
+					outageWindow: '2026-06-12T02:00:00.000Z',
+				},
+			},
+			fingerprint: [
+				'home-connector',
+				'bond-bridge-unreachable',
+				'default',
+				'ZPGI01117',
+				'dns',
+				'2026-06-12T02:00:00.000Z',
+			],
+			level: 'error',
+			dedupe: {
+				key: 'home-connector:bond-bridge-unreachable:default:ZPGI01117:dns:2026-06-12T02:00:00.000Z',
+				ttlMs: 3_600_000,
+			},
+		})
+	} finally {
+		vi.useRealTimers()
 		globalThis.fetch = previousFetch
 		storage.close()
 	}
@@ -786,6 +874,36 @@ test('bond cooldown prevents follow-up requests after network failures', async (
 
 		expect(error).toBeInstanceOf(Error)
 		expect((error as Error).name).toBe('BondCircuitBreakerError')
+		expect(
+			(
+				error as Error & {
+					homeConnectorCaptureContext?: HomeConnectorErrorCaptureContext
+				}
+			).homeConnectorCaptureContext,
+		).toMatchObject({
+			tags: {
+				home_connector_id: 'default',
+				connector_vendor: 'bond',
+				bond_bridge_id: 'BONDTEST13',
+				bond_bridge_host: '10.0.0.22',
+				bond_operation_category: 'device_state',
+				bond_network_failure: 'true',
+				bond_circuit_breaker: 'true',
+				bond_circuit_breaker_state: 'open',
+				bond_failure_cause_class: 'cooldown',
+			},
+			contexts: {
+				bond_bridge: {
+					connectorId: 'default',
+					bridgeId: 'BONDTEST13',
+					host: '10.0.0.22',
+					operation: 'fetch device mockdev2 state',
+					operationCategory: 'device_state',
+					circuitBreakerState: 'open',
+				},
+			},
+			shouldCapture: false,
+		})
 		expect(globalThis.fetch).toHaveBeenCalledTimes(1)
 		const status = bond.getReliabilityStatus({ bridgeId: 'BONDTEST13' })
 		expect(status.persisted?.lastFailureReason).toContain('fetch failed')
@@ -1063,6 +1181,63 @@ test('bond enters cooldown after network failure and rejects queued requests', a
 			{ status: 'cooldown', baseUrlsTried: [] },
 			{ status: 'failure', baseUrlsTried: ['http://10.0.0.22'] },
 		])
+	} finally {
+		vi.useRealTimers()
+		globalThis.fetch = previousFetch
+		storage.close()
+	}
+})
+
+test('bond enters cooldown after wrapped AbortError failures', async () => {
+	const config = {
+		...createConfig(),
+		bondCircuitBreakerCooldownMs: 60_000,
+	}
+	const state = createAppState()
+	const storage = createHomeConnectorStorage(config)
+	const bond = createBondAdapter({
+		config,
+		state,
+		storage,
+	})
+	const previousFetch = globalThis.fetch
+	vi.useFakeTimers()
+	const fetchMock = vi.fn(async () => {
+		throw new DOMException('The user aborted a request.', 'AbortError')
+	})
+	globalThis.fetch = fetchMock as typeof fetch
+
+	try {
+		upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
+			{
+				bridgeId: 'BONDTEST15',
+				bondid: 'BONDTEST15',
+				instanceName: 'Abort Cooldown Bond',
+				host: '10.0.0.22',
+				port: 80,
+				address: null,
+				model: 'BD-TEST',
+				fwVer: 'v1.0.0',
+				lastSeenAt: '2026-04-27T22:10:00.000Z',
+				rawDiscovery: {},
+			},
+		])
+		adoptBondBridge(storage, config.homeConnectorId, 'BONDTEST15')
+		bond.setToken('BONDTEST15', 'bond-token')
+
+		await expect(bond.getDeviceState('BONDTEST15', 'dev1')).rejects.toThrow(
+			'Bond bridge "BONDTEST15" could not be reached',
+		)
+		await expect(bond.getDeviceState('BONDTEST15', 'dev2')).rejects.toThrow(
+			'cooling down after a recent network failure',
+		)
+
+		expect(fetchMock).toHaveBeenCalledTimes(1)
+		expect(
+			bond
+				.getReliabilityStatus({ bridgeId: 'BONDTEST15' })
+				.recentRequestLogs.map((log) => log.status),
+		).toEqual(['cooldown', 'failure'])
 	} finally {
 		vi.useRealTimers()
 		globalThis.fetch = previousFetch

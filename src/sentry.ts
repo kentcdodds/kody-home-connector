@@ -3,10 +3,25 @@ import * as Sentry from '@sentry/node'
 type EnvRecord = Record<string, string | undefined>
 type SentryContextValue = Record<string, unknown> | undefined
 type SentryContextMap = Record<string, SentryContextValue>
+type HomeConnectorSentryLevel =
+	| 'fatal'
+	| 'error'
+	| 'warning'
+	| 'log'
+	| 'info'
+	| 'debug'
+
 export type HomeConnectorErrorCaptureContext = {
 	tags?: Record<string, string>
 	contexts?: SentryContextMap
 	extra?: Record<string, unknown>
+	fingerprint?: Array<string>
+	level?: HomeConnectorSentryLevel
+	shouldCapture?: boolean
+	dedupe?: {
+		key: string
+		ttlMs: number
+	}
 }
 
 type HomeConnectorErrorWithCaptureContext = {
@@ -16,6 +31,7 @@ type HomeConnectorErrorWithCaptureContext = {
 const defaultTracesSampleRate = 1.0
 
 let hasInitializedHomeConnectorSentry = false
+const exceptionDedupeExpirations = new Map<string, number>()
 
 function parseSentryTracesSampleRate(value: string | undefined) {
 	const trimmedValue = value?.trim()
@@ -56,6 +72,27 @@ function mergeContextRecords(
 	return merged
 }
 
+function shouldSkipForDedupe(
+	dedupe: HomeConnectorErrorCaptureContext['dedupe'],
+) {
+	if (!dedupe) return false
+	const key = dedupe.key.trim()
+	const ttlMs = Math.max(0, dedupe.ttlMs)
+	if (!key || ttlMs === 0) return false
+	const now = Date.now()
+	for (const [cachedKey, expiresAt] of exceptionDedupeExpirations) {
+		if (expiresAt <= now) {
+			exceptionDedupeExpirations.delete(cachedKey)
+		}
+	}
+	const expiresAt = exceptionDedupeExpirations.get(key)
+	if (expiresAt && expiresAt > now) {
+		return true
+	}
+	exceptionDedupeExpirations.set(key, now + ttlMs)
+	return false
+}
+
 export function getHomeConnectorErrorCaptureContext(
 	error: unknown,
 ): HomeConnectorErrorCaptureContext {
@@ -82,6 +119,12 @@ export function getHomeConnectorErrorCaptureContext(
 				}
 			: {}),
 		...(captureContext.extra ? { extra: { ...captureContext.extra } } : {}),
+		...(captureContext.fingerprint
+			? { fingerprint: [...captureContext.fingerprint] }
+			: {}),
+		...(captureContext.level ? { level: captureContext.level } : {}),
+		...(captureContext.shouldCapture === false ? { shouldCapture: false } : {}),
+		...(captureContext.dedupe ? { dedupe: { ...captureContext.dedupe } } : {}),
 	}
 }
 
@@ -145,24 +188,33 @@ export function captureHomeConnectorException(
 	}
 
 	const derivedCaptureContext = getHomeConnectorErrorCaptureContext(error)
+	const { shouldCapture, dedupe, ...derivedSentryCaptureContext } =
+		derivedCaptureContext
+	if (shouldCapture === false || shouldSkipForDedupe(dedupe)) {
+		return
+	}
 
 	Sentry.captureException(normalizeError(error), {
-		...derivedCaptureContext,
+		...derivedSentryCaptureContext,
 		...captureContext,
 		tags: {
 			service: 'home-connector',
-			...derivedCaptureContext.tags,
+			...derivedSentryCaptureContext.tags,
 			...captureContext.tags,
 		},
 		contexts: mergeContextRecords(
-			derivedCaptureContext.contexts,
+			derivedSentryCaptureContext.contexts,
 			captureContext.contexts as SentryContextMap | undefined,
 		),
 		extra: {
-			...derivedCaptureContext.extra,
+			...derivedSentryCaptureContext.extra,
 			...captureContext.extra,
 		},
 	})
+}
+
+export function resetHomeConnectorSentryDedupeForTests() {
+	exceptionDedupeExpirations.clear()
 }
 
 export function captureHomeConnectorMessage(
