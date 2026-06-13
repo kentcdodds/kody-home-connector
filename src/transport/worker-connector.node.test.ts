@@ -186,3 +186,35 @@ test('websocket close reporting waits for sustained reconnect failures', async (
 		connector.stop()
 	}
 })
+
+test('websocket shutdown close does not trigger sustained reconnect reporting', async () => {
+	vi.useFakeTimers()
+	globalThis.WebSocket = FakeWorkerWebSocket as unknown as typeof WebSocket
+	const connector = createWorkerConnector({
+		config: createConfig(),
+		state: createAppState(),
+		logger: createLogger(),
+		toolRegistry: createToolRegistry(),
+	})
+
+	await connector.start()
+	expect(fakeWebSocketInstances).toHaveLength(1)
+	fakeWebSocketInstances[0]?.dispatchClose({
+		code: 1006,
+		reason: '',
+		wasClean: false,
+	})
+	await vi.advanceTimersByTimeAsync(2_000)
+	fakeWebSocketInstances[1]?.dispatchClose({
+		code: 1006,
+		reason: '',
+		wasClean: false,
+	})
+	await vi.advanceTimersByTimeAsync(4_000)
+
+	expect(fakeWebSocketInstances).toHaveLength(3)
+	expect(sentryMock.captureHomeConnectorMessage).not.toHaveBeenCalled()
+	connector.stop()
+
+	expect(sentryMock.captureHomeConnectorMessage).not.toHaveBeenCalled()
+})

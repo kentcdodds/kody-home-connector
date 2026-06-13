@@ -537,7 +537,9 @@ export function createWorkerConnector(input: {
 
 		socket.addEventListener('close', (event) => {
 			const closeMessage = formatCloseMessage(event)
-			const nextConsecutiveReconnects = consecutiveReconnects + 1
+			const nextConsecutiveReconnects = stopped
+				? consecutiveReconnects
+				: consecutiveReconnects + 1
 			updateConnectionState(input.state, {
 				connected: false,
 				lastError: closeMessage,
@@ -558,6 +560,7 @@ export function createWorkerConnector(input: {
 				},
 			})
 			if (
+				!stopped &&
 				!hasReportedSocketIssue &&
 				nextConsecutiveReconnects >= websocketSentryReconnectThreshold
 			) {
