@@ -1396,6 +1396,71 @@ test('bond non-network failures reset bridge cooldown backoff streak', async () 
 	}
 })
 
+test('bond cooldown logs preserve outage backoff when original failure log is pruned', async () => {
+	const config = {
+		...createConfig(),
+		bondCircuitBreakerCooldownMs: 60_000,
+	}
+	const state = createAppState()
+	const storage = createHomeConnectorStorage(config)
+	const bond = createBondAdapter({
+		config,
+		state,
+		storage,
+	})
+	const previousFetch = globalThis.fetch
+	vi.useFakeTimers()
+	vi.setSystemTime(new Date('2026-06-12T02:54:08.000Z'))
+	const fetchMock = vi.fn(async () => {
+		throw createDnsFetchError('getaddrinfo ENOTFOUND 10.0.0.22')
+	})
+	globalThis.fetch = fetchMock as typeof fetch
+
+	try {
+		upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
+			{
+				bridgeId: 'BONDTEST19',
+				bondid: 'BONDTEST19',
+				instanceName: 'Cooldown Pruned Bond',
+				host: '10.0.0.22',
+				port: 80,
+				address: null,
+				model: 'BD-TEST',
+				fwVer: 'v1.0.0',
+				lastSeenAt: '2026-04-27T22:30:00.000Z',
+				rawDiscovery: {},
+			},
+		])
+		adoptBondBridge(storage, config.homeConnectorId, 'BONDTEST19')
+		bond.setToken('BONDTEST19', 'bond-token')
+
+		await bond.getDeviceState('BONDTEST19', 'initial').catch(() => null)
+		for (let index = 0; index < 200; index += 1) {
+			await bond
+				.getDeviceState('BONDTEST19', `cooldown-${String(index)}`)
+				.catch(() => null)
+		}
+		expect(
+			bond
+				.getReliabilityStatus({ bridgeId: 'BONDTEST19', limit: 200 })
+				.recentRequestLogs.every((log) => log.status === 'cooldown'),
+		).toBe(true)
+
+		await vi.advanceTimersByTimeAsync(60_001)
+		await bond.getDeviceState('BONDTEST19', 'next-failure').catch(() => null)
+
+		expect(fetchMock).toHaveBeenCalledTimes(2)
+		expect(bond.getBridgeHealth('BONDTEST19')).toMatchObject({
+			state: 'cooling_down',
+			retryAfterMs: 120_000,
+		})
+	} finally {
+		vi.useRealTimers()
+		globalThis.fetch = previousFetch
+		storage.close()
+	}
+})
+
 test('bond bridge cooldown backoff is capped at fifteen minutes', async () => {
 	const config = {
 		...createConfig(),

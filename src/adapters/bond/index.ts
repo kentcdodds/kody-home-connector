@@ -380,6 +380,7 @@ function countRecentConsecutiveBridgeFailures(
 	logs: ReturnType<typeof listRecentBondRequestLogs>,
 ) {
 	let failures = 0
+	let sawCooldown = false
 	for (const log of logs) {
 		if (log.status === 'success') {
 			break
@@ -390,8 +391,11 @@ function countRecentConsecutiveBridgeFailures(
 		if (log.status === 'failure' && log.networkFailure) {
 			failures += 1
 		}
+		if (log.status === 'cooldown') {
+			sawCooldown = true
+		}
 	}
-	return failures
+	return failures === 0 && sawCooldown ? 1 : failures
 }
 
 function getBondCircuitBreakerCooldownMs(input: {
@@ -797,7 +801,7 @@ export function createBondAdapter(input: {
 						storage: input.storage,
 						connectorId,
 						bridgeId: requestInput.bridge.bridgeId,
-						limit: 20,
+						limit: bondRequestLogLimit,
 					}),
 				)
 				const cooldownMs = getBondCircuitBreakerCooldownMs({
