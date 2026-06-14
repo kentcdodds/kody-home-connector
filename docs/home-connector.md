@@ -52,6 +52,32 @@ All surfaces are registered as MCP tools inside the connector and then exposed
 to the Worker through the existing outbound WebSocket session to
 `HomeConnectorSession`.
 
+## Bond bridge health and workflow fanout
+
+The Bond adapter owns bridge-level request pacing, cooldown, and reliability
+logs for all Bond MCP tools. Network failures put the whole bridge into a shared
+circuit-breaker cooldown; consecutive bridge failures extend that cooldown up to
+15 minutes so scheduled jobs and shade workflow retries do not keep probing an
+unreachable bridge every time a workflow fans out across devices.
+
+Workflow packages that may call more than one Bond device on the same bridge
+should call `bond_get_bridge_health` once before fanout and again before
+retrying after any Bond failure. If `shouldFanOut` or `shouldRetryNow` is false,
+the workflow should skip all per-device calls for that bridge and schedule one
+bridge-level retry at `nextRecommendedAttemptAt` (or after `retryAfterMs`). This
+avoids turning one bridge outage into one error per shade/device.
+
+`bond_get_reliability_status` includes the same `health` object plus recent
+request logs for diagnostics. Use it when investigating reliability history; use
+`bond_get_bridge_health` for lightweight workflow guards.
+
+The production "Bond bridge ZPGI01117 uptime monitor" is a Kody scheduled job,
+not source in this repository. It should be updated in Kody to call
+`home_default_bond_get_bridge_health({ bridgeId })` before
+`home_default_bond_get_bridge_version({ bridgeId })`. When health says the
+bridge is cooling down, the monitor should record a skipped/backoff sample and
+avoid the version fetch until `nextRecommendedAttemptAt`.
+
 ## Lutron integration
 
 The Lutron adapter lives under `src/adapters/lutron/` and supports a generic,
