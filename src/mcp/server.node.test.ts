@@ -730,6 +730,17 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 		expect(shadeMove.structuredContent).toMatchObject({
 			argument: 50,
 		})
+		const bondHealth = await mcp.callTool('bond_get_bridge_health', {
+			bridgeId: 'MOCKBOND1',
+		})
+		expect(bondHealth.structuredContent).toMatchObject({
+			state: 'available',
+			shouldAttemptRequests: true,
+			shouldFanOut: true,
+			bridge: {
+				bridgeId: 'MOCKBOND1',
+			},
+		})
 
 		const routerStatus = await mcp.callTool('router_get_status')
 		expect(routerStatus.structuredContent).toMatchObject({

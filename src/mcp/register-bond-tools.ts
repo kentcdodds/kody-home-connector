@@ -257,7 +257,7 @@ export function registerBondHomeConnectorTools(input: {
 			name: 'bond_get_bridge_version',
 			title: 'Get Bond Bridge Version',
 			description:
-				'Read Bond /v2/sys/version (no token required) for firmware and model metadata.',
+				'Read Bond /v2/sys/version (no token required) for firmware and model metadata. Scheduled monitors should call bond_get_bridge_health first and skip this request while shouldRetryNow is false.',
 			...bridgeScopedSchema({}),
 			annotations: {
 				readOnlyHint: true,
@@ -284,7 +284,7 @@ export function registerBondHomeConnectorTools(input: {
 			name: 'bond_get_reliability_status',
 			title: 'Get Bond Reliability Status',
 			description:
-				'Read recent Bond request pacing, cooldown, and network-failure logs for troubleshooting bridge reliability.',
+				'Read Bond bridge health, request pacing, cooldown, and recent network-failure logs for troubleshooting bridge reliability.',
 			...bridgeScopedSchema({
 				limit: z.number().int().min(1).max(200).optional(),
 			}),
@@ -305,6 +305,37 @@ export function registerBondHomeConnectorTools(input: {
 					},
 				],
 				structuredContent: status,
+			}
+		},
+	)
+
+	registerTool(
+		{
+			name: 'bond_get_bridge_health',
+			title: 'Get Bond Bridge Health',
+			description:
+				'Read one bridge-level health decision for workflow fanout/retry guards. If shouldFanOut is false, skip multi-device Bond actions and retry at nextRecommendedAttemptAt.',
+			...bridgeScopedSchema({}),
+			annotations: {
+				readOnlyHint: true,
+				idempotentHint: true,
+			},
+		},
+		async (args) => {
+			const bridgeId =
+				args['bridgeId'] == null ? undefined : String(args['bridgeId'])
+			const health = bond.getBridgeHealth(bridgeId)
+			return {
+				content: [
+					{
+						type: 'text' as const,
+						text:
+							health.state === 'available'
+								? `Bond bridge ${health.bridge.bridgeId} is available for bridge-scoped requests.`
+								: `Bond bridge ${health.bridge.bridgeId} is cooling down; retry after ${health.nextRecommendedAttemptAt}.`,
+					},
+				],
+				structuredContent: health,
 			}
 		},
 	)

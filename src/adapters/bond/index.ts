@@ -44,6 +44,7 @@ const defaultBondTransientAttemptsPerBaseUrl = 4
 const defaultBondTransientRetryBaseDelayMs = 100
 const bondRequestLogLimit = 200
 const bondOutageFingerprintWindowMs = 60 * 60 * 1000
+const maxBondCircuitBreakerCooldownMs = 15 * 60 * 1000
 
 type BondRequestLogStatus = 'success' | 'failure' | 'cooldown'
 
@@ -64,6 +65,8 @@ type BondBridgeRequestInput<T> = {
 	maxTransientAttemptsPerBaseUrl?: number
 	attemptedBaseUrls?: Array<string>
 }
+
+type BondBridgeHealthState = 'available' | 'cooling_down'
 
 function normalizeQuery(value: string) {
 	return value.trim().toLowerCase()
@@ -373,6 +376,34 @@ function getBondBridgeNextAction(bridge: BondPersistedBridge) {
 	return 'Verify the bridge host/IP is still reachable from the home-connector container and update it with bond_update_bridge_connection if it changed.'
 }
 
+function countRecentConsecutiveBridgeFailures(
+	logs: ReturnType<typeof listRecentBondRequestLogs>,
+) {
+	let failures = 0
+	for (const log of logs) {
+		if (log.status === 'success') {
+			break
+		}
+		if (log.status === 'failure' && log.networkFailure) {
+			failures += 1
+		}
+	}
+	return failures
+}
+
+function getBondCircuitBreakerCooldownMs(input: {
+	baseCooldownMs: number
+	consecutiveFailures: number
+}) {
+	const baseCooldownMs = Math.max(0, input.baseCooldownMs)
+	if (baseCooldownMs === 0) return 0
+	const multiplier = 2 ** Math.min(8, Math.max(0, input.consecutiveFailures))
+	return Math.min(
+		Math.max(baseCooldownMs, maxBondCircuitBreakerCooldownMs),
+		baseCooldownMs * multiplier,
+	)
+}
+
 function createBondCooldownError(input: {
 	connectorId: string
 	bridge: BondPersistedBridge
@@ -655,6 +686,44 @@ export function createBondAdapter(input: {
 		}
 	}
 
+	function getBridgeHealthSnapshot(bridge: BondPersistedBridge) {
+		const queueState = getQueueState(bridge.bridgeId)
+		syncPersistedCooldown(bridge, queueState)
+		const now = Date.now()
+		const cooldownUntilMs =
+			queueState.cooldownUntil > now ? queueState.cooldownUntil : 0
+		const retryAfterMs =
+			cooldownUntilMs > 0 ? Math.max(0, cooldownUntilMs - now) : 0
+		const state: BondBridgeHealthState =
+			cooldownUntilMs > 0 ? 'cooling_down' : 'available'
+		const nextRecommendedAttemptAt =
+			cooldownUntilMs > 0 ? new Date(cooldownUntilMs).toISOString() : null
+		const bridgeContext = getBondBridgeConnectionContext(bridge)
+		const persisted = getBondReliabilityState(
+			input.storage,
+			connectorId,
+			bridge.bridgeId,
+		)
+		const guidance =
+			state === 'cooling_down'
+				? `Bond bridge "${bridge.bridgeId}" is cooling down after a network failure. Do not fan out across devices or retry bridge actions until ${nextRecommendedAttemptAt}.`
+				: `Bond bridge "${bridge.bridgeId}" is available for one bridge-scoped request. Re-check this health before multi-device fanout or retries.`
+		return {
+			connectorId,
+			bridge: bridgeContext,
+			state,
+			shouldAttemptRequests: state === 'available',
+			shouldFanOut: state === 'available',
+			shouldRetryNow: state === 'available',
+			cooldownUntil: nextRecommendedAttemptAt,
+			retryAfterMs,
+			nextRecommendedAttemptAt,
+			lastFailureAt: persisted?.lastFailureAt ?? null,
+			lastFailureReason: persisted?.lastFailureReason ?? null,
+			guidance,
+		}
+	}
+
 	async function runQueuedBondBridgeRequest<T>(
 		requestInput: BondBridgeRequestInput<T>,
 	) {
@@ -723,7 +792,19 @@ export function createBondAdapter(input: {
 				isBondNetworkFailure(error) &&
 				(!(error instanceof Error) || error.name !== 'BondCircuitBreakerError')
 			) {
-				const cooldownUntil = Date.now() + circuitBreakerCooldownMs
+				const consecutiveFailures = countRecentConsecutiveBridgeFailures(
+					listRecentBondRequestLogs({
+						storage: input.storage,
+						connectorId,
+						bridgeId: requestInput.bridge.bridgeId,
+						limit: 20,
+					}),
+				)
+				const cooldownMs = getBondCircuitBreakerCooldownMs({
+					baseCooldownMs: circuitBreakerCooldownMs,
+					consecutiveFailures,
+				})
+				const cooldownUntil = Date.now() + cooldownMs
 				queueState.cooldownUntil = Math.max(
 					queueState.cooldownUntil,
 					cooldownUntil,
@@ -951,6 +1032,10 @@ export function createBondAdapter(input: {
 				connection,
 			)
 		},
+		getBridgeHealth(bridgeId?: string) {
+			const bridge = resolveBridge(bridgeId)
+			return getBridgeHealthSnapshot(bridge)
+		},
 		getReliabilityStatus(
 			inputStatus: {
 				bridgeId?: string
@@ -965,9 +1050,17 @@ export function createBondAdapter(input: {
 					? 50
 					: Math.max(1, Math.min(200, Math.floor(inputStatus.limit)))
 			return {
+				health: getBridgeHealthSnapshot(bridge),
 				config: {
 					requestPaceMs,
 					circuitBreakerCooldownMs,
+					maxCircuitBreakerCooldownMs:
+						circuitBreakerCooldownMs === 0
+							? 0
+							: Math.max(
+									circuitBreakerCooldownMs,
+									maxBondCircuitBreakerCooldownMs,
+								),
 					coalescesInFlightStateReads: true,
 				},
 				queue: {
