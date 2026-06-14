@@ -1313,3 +1313,142 @@ test('bond extends bridge cooldown after consecutive network failures', async ()
 		storage.close()
 	}
 })
+
+test('bond non-network failures reset bridge cooldown backoff streak', async () => {
+	const config = {
+		...createConfig(),
+		bondCircuitBreakerCooldownMs: 60_000,
+	}
+	const state = createAppState()
+	const storage = createHomeConnectorStorage(config)
+	const bond = createBondAdapter({
+		config,
+		state,
+		storage,
+	})
+	const previousFetch = globalThis.fetch
+	vi.useFakeTimers()
+	vi.setSystemTime(new Date('2026-06-12T02:54:08.000Z'))
+	const fetchMock = vi
+		.fn()
+		.mockRejectedValueOnce(
+			createDnsFetchError('getaddrinfo ENOTFOUND 10.0.0.22'),
+		)
+		.mockResolvedValueOnce(
+			new Response(JSON.stringify({ message: 'unauthorized' }), {
+				status: 401,
+				headers: {
+					'Content-Type': 'application/json',
+				},
+			}),
+		)
+		.mockRejectedValueOnce(
+			createDnsFetchError('getaddrinfo ENOTFOUND 10.0.0.22'),
+		)
+	globalThis.fetch = fetchMock as typeof fetch
+
+	try {
+		upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
+			{
+				bridgeId: 'BONDTEST17',
+				bondid: 'BONDTEST17',
+				instanceName: 'Backoff Reset Bond',
+				host: '10.0.0.22',
+				port: 80,
+				address: null,
+				model: 'BD-TEST',
+				fwVer: 'v1.0.0',
+				lastSeenAt: '2026-04-27T22:20:00.000Z',
+				rawDiscovery: {},
+			},
+		])
+		adoptBondBridge(storage, config.homeConnectorId, 'BONDTEST17')
+		bond.setToken('BONDTEST17', 'bond-token')
+
+		await bond.getDeviceState('BONDTEST17', 'dev1').catch(() => null)
+		await vi.advanceTimersByTimeAsync(60_001)
+		await expect(bond.getDeviceState('BONDTEST17', 'dev2')).rejects.toThrow(
+			'Bond HTTP 401',
+		)
+		await bond.getDeviceState('BONDTEST17', 'dev3').catch(() => null)
+
+		expect(fetchMock).toHaveBeenCalledTimes(3)
+		expect(bond.getBridgeHealth('BONDTEST17')).toMatchObject({
+			state: 'cooling_down',
+			retryAfterMs: 60_000,
+		})
+		expect(
+			bond
+				.getReliabilityStatus({ bridgeId: 'BONDTEST17' })
+				.recentRequestLogs.map((log) => ({
+					status: log.status,
+					networkFailure: log.networkFailure,
+				})),
+		).toEqual([
+			{ status: 'failure', networkFailure: true },
+			{ status: 'failure', networkFailure: false },
+			{ status: 'failure', networkFailure: true },
+		])
+	} finally {
+		vi.useRealTimers()
+		globalThis.fetch = previousFetch
+		storage.close()
+	}
+})
+
+test('bond bridge cooldown backoff is capped at fifteen minutes', async () => {
+	const config = {
+		...createConfig(),
+		bondCircuitBreakerCooldownMs: 20 * 60_000,
+	}
+	const state = createAppState()
+	const storage = createHomeConnectorStorage(config)
+	const bond = createBondAdapter({
+		config,
+		state,
+		storage,
+	})
+	const previousFetch = globalThis.fetch
+	vi.useFakeTimers()
+	vi.setSystemTime(new Date('2026-06-12T02:54:08.000Z'))
+	const fetchMock = vi.fn(async () => {
+		throw createDnsFetchError('getaddrinfo ENOTFOUND 10.0.0.22')
+	})
+	globalThis.fetch = fetchMock as typeof fetch
+
+	try {
+		upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
+			{
+				bridgeId: 'BONDTEST18',
+				bondid: 'BONDTEST18',
+				instanceName: 'Capped Backoff Bond',
+				host: '10.0.0.22',
+				port: 80,
+				address: null,
+				model: 'BD-TEST',
+				fwVer: 'v1.0.0',
+				lastSeenAt: '2026-04-27T22:25:00.000Z',
+				rawDiscovery: {},
+			},
+		])
+		adoptBondBridge(storage, config.homeConnectorId, 'BONDTEST18')
+		bond.setToken('BONDTEST18', 'bond-token')
+
+		await bond.getDeviceState('BONDTEST18', 'dev1').catch(() => null)
+
+		expect(bond.getBridgeHealth('BONDTEST18')).toMatchObject({
+			state: 'cooling_down',
+			retryAfterMs: 900_000,
+		})
+		expect(
+			bond.getReliabilityStatus({ bridgeId: 'BONDTEST18' }).config,
+		).toMatchObject({
+			circuitBreakerCooldownMs: 1_200_000,
+			maxCircuitBreakerCooldownMs: 900_000,
+		})
+	} finally {
+		vi.useRealTimers()
+		globalThis.fetch = previousFetch
+		storage.close()
+	}
+})

@@ -384,6 +384,9 @@ function countRecentConsecutiveBridgeFailures(
 		if (log.status === 'success') {
 			break
 		}
+		if (log.status === 'failure' && !log.networkFailure) {
+			break
+		}
 		if (log.status === 'failure' && log.networkFailure) {
 			failures += 1
 		}
@@ -398,10 +401,7 @@ function getBondCircuitBreakerCooldownMs(input: {
 	const baseCooldownMs = Math.max(0, input.baseCooldownMs)
 	if (baseCooldownMs === 0) return 0
 	const multiplier = 2 ** Math.min(8, Math.max(0, input.consecutiveFailures))
-	return Math.min(
-		Math.max(baseCooldownMs, maxBondCircuitBreakerCooldownMs),
-		baseCooldownMs * multiplier,
-	)
+	return Math.min(maxBondCircuitBreakerCooldownMs, baseCooldownMs * multiplier)
 }
 
 function createBondCooldownError(input: {
@@ -1057,10 +1057,7 @@ export function createBondAdapter(input: {
 					maxCircuitBreakerCooldownMs:
 						circuitBreakerCooldownMs === 0
 							? 0
-							: Math.max(
-									circuitBreakerCooldownMs,
-									maxBondCircuitBreakerCooldownMs,
-								),
+							: maxBondCircuitBreakerCooldownMs,
 					coalescesInFlightStateReads: true,
 				},
 				queue: {
