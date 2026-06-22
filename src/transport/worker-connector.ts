@@ -357,9 +357,9 @@ export function createWorkerConnector(input: {
 
 	function handleToolsListRequest(toolCount: number) {
 		toolsListRequestedForConnection = true
-		toolInventoryRefreshAttempts = 0
 		const listedAt = new Date().toISOString()
 		if (toolCount > 0) {
+			toolInventoryRefreshAttempts = 0
 			clearToolInventoryTimer()
 			updateToolInventoryStatus({
 				localToolCount: toolCount,
