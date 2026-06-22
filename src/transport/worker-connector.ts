@@ -826,12 +826,21 @@ export function createWorkerConnector(input: {
 			const nextConsecutiveReconnects = stopped
 				? consecutiveReconnects
 				: consecutiveReconnects + 1
+			const isToolInventoryRecoveryClose =
+				event.code === toolInventoryReconnectCloseCode ||
+				event.reason === toolInventoryReconnectReason ||
+				input.state.connection.toolInventoryStatus ===
+					'reconnecting_after_missing_remote_list'
 			updateConnectionState(input.state, {
 				connected: false,
 				lastError: closeMessage,
-				toolInventoryStatus: 'not_connected',
-				toolInventoryStatusReason:
-					'Websocket transport is closed; remote tool inventory is unavailable.',
+				...(isToolInventoryRecoveryClose
+					? {}
+					: {
+							toolInventoryStatus: 'not_connected',
+							toolInventoryStatusReason:
+								'Websocket transport is closed; remote tool inventory is unavailable.',
+						}),
 			})
 			addHomeConnectorSentryBreadcrumb({
 				message: closeMessage,

@@ -450,6 +450,12 @@ test('connected websocket retries and reconnects when Kody never lists tools', a
 			}),
 		)
 		expect(state.connection.connected).toBe(false)
+		expect(state.connection.toolInventoryStatus).toBe(
+			'reconnecting_after_missing_remote_list',
+		)
+		expect(state.connection.toolInventoryStatusReason).toContain(
+			'Kody did not request tools/list',
+		)
 		expect(state.connection.toolInventoryRecoveryCount).toBe(1)
 
 		await vi.advanceTimersByTimeAsync(2_000)
