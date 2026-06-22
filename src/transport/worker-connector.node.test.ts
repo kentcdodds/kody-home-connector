@@ -52,11 +52,11 @@ class FakeWorkerWebSocket {
 		})
 	}
 
-	dispatchOpen() {
+	async dispatchOpen() {
 		this.readyState = FakeWorkerWebSocket.OPEN
-		for (const listener of this.listeners.get('open') ?? []) {
-			void listener({})
-		}
+		await Promise.all(
+			(this.listeners.get('open') ?? []).map((listener) => listener({})),
+		)
 	}
 
 	async dispatchMessage(data: string) {
@@ -338,7 +338,7 @@ test('acknowledged websocket registers non-empty tool inventory when Kody lists 
 		await connector.start()
 		const socket = fakeWebSocketInstances[0]
 		if (!socket) throw new Error('Expected websocket instance')
-		socket.dispatchOpen()
+		await socket.dispatchOpen()
 		await socket.dispatchMessage(
 			JSON.stringify({
 				type: 'server.ack',
@@ -406,7 +406,7 @@ test('connected websocket retries and reconnects when Kody never lists tools', a
 		await connector.start()
 		const socket = fakeWebSocketInstances[0]
 		if (!socket) throw new Error('Expected websocket instance')
-		socket.dispatchOpen()
+		await socket.dispatchOpen()
 		await socket.dispatchMessage(
 			JSON.stringify({
 				type: 'server.ack',
@@ -481,7 +481,7 @@ test('connected websocket recovers when local registry is initially empty', asyn
 		await connector.start()
 		const socket = fakeWebSocketInstances[0]
 		if (!socket) throw new Error('Expected websocket instance')
-		socket.dispatchOpen()
+		await socket.dispatchOpen()
 		await socket.dispatchMessage(
 			JSON.stringify({
 				type: 'server.ack',
@@ -525,6 +525,82 @@ test('connected websocket recovers when local registry is initially empty', asyn
 				},
 			},
 		})
+	} finally {
+		connector.stop()
+	}
+})
+
+test('connected websocket keeps empty local registry status after Kody lists zero tools', async () => {
+	vi.useFakeTimers()
+	globalThis.WebSocket = FakeWorkerWebSocket as unknown as typeof WebSocket
+	const state = createAppState()
+	const logger = createLogger()
+	const connector = createWorkerConnector({
+		config: createConfig(),
+		state,
+		logger,
+		toolRegistry: createRegisteredToolRegistry(() => []),
+	})
+
+	try {
+		await connector.start()
+		const socket = fakeWebSocketInstances[0]
+		if (!socket) throw new Error('Expected websocket instance')
+		await socket.dispatchOpen()
+		await socket.dispatchMessage(
+			JSON.stringify({
+				type: 'server.ack',
+				connectorId: 'default',
+			}),
+		)
+		await socket.dispatchMessage(
+			JSON.stringify({
+				type: 'connector.jsonrpc',
+				message: {
+					jsonrpc: '2.0',
+					id: 'empty-tools',
+					method: 'tools/list',
+				},
+			}),
+		)
+
+		expect(state.connection.toolInventoryStatus).toBe('empty_local_registry')
+		expect(getSentMessage(socket, 2)).toMatchObject({
+			type: 'connector.jsonrpc',
+			message: {
+				id: 'empty-tools',
+				result: {
+					tools: [],
+				},
+			},
+		})
+
+		await vi.advanceTimersByTimeAsync(15_000)
+
+		expect(fakeWebSocketInstances).toHaveLength(1)
+		expect(state.connection.connected).toBe(true)
+		expect(state.connection.toolInventoryStatus).toBe('empty_local_registry')
+		expect(state.connection.toolInventoryStatusReason).toContain(
+			'stayed empty after retries',
+		)
+		expect(state.connection.toolInventoryRecoveryCount).toBe(0)
+		expect(logger.error).toHaveBeenCalledWith(
+			'worker.tools.empty_registry_persistent',
+			'Home connector local tool registry stayed empty after Kody requested tools/list.',
+			expect.objectContaining({
+				localToolCount: 0,
+				attempts: 3,
+			}),
+		)
+		expect(sentryMock.captureHomeConnectorMessage).toHaveBeenCalledWith(
+			'Home connector local tool registry stayed empty.',
+			expect.objectContaining({
+				level: 'error',
+				tags: expect.objectContaining({
+					connector_event: 'tool_inventory.empty_local_registry',
+				}),
+			}),
+		)
 	} finally {
 		connector.stop()
 	}

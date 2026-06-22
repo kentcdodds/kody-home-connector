@@ -977,6 +977,8 @@ export function createSystemStatusHandler(deps: DashboardDependencies) {
 									deps.state.connection.toolInventoryStatus === 'registered'
 										? 'good'
 										: deps.state.connection.toolInventoryStatus ===
+													'not_connected' ||
+											  deps.state.connection.toolInventoryStatus ===
 													'empty_local_registry' ||
 											  deps.state.connection.toolInventoryStatus ===
 													'reconnecting_after_missing_remote_list'

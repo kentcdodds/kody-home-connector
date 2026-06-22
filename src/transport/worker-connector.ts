@@ -472,6 +472,52 @@ export function createWorkerConnector(input: {
 			return
 		}
 
+		if (localToolCount === 0 && toolsListRequestedForConnection) {
+			updateToolInventoryStatus({
+				localToolCount,
+				status: 'empty_local_registry',
+				reason:
+					'Kody requested tools/list, but the connector local tool registry stayed empty after retries. Websocket reconnect is not expected to rebuild a process-local registry.',
+				recoveryCount: input.state.connection.toolInventoryRecoveryCount,
+			})
+			input.logger.error(
+				'worker.tools.empty_registry_persistent',
+				'Home connector local tool registry stayed empty after Kody requested tools/list.',
+				{
+					...createSocketEventContext({
+						config: input.config,
+						connectionAttempt,
+						consecutiveReconnects,
+					}),
+					localToolCount,
+					attempts: toolInventoryRefreshAttempts,
+				},
+			)
+			captureHomeConnectorMessage(
+				'Home connector local tool registry stayed empty.',
+				{
+					level: 'error',
+					fingerprint: [
+						'home-connector',
+						'empty-local-tool-registry',
+						input.config.homeConnectorId,
+					],
+					tags: {
+						home_connector_id: input.config.homeConnectorId,
+						connector_event: 'tool_inventory.empty_local_registry',
+					},
+					contexts: {
+						tool_inventory: {
+							localToolCount,
+							attempts: toolInventoryRefreshAttempts,
+							toolsListRequestedForConnection,
+						},
+					},
+				},
+			)
+			return
+		}
+
 		const recoveryCount = input.state.connection.toolInventoryRecoveryCount + 1
 		updateToolInventoryStatus({
 			localToolCount,
