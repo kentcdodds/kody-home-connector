@@ -586,7 +586,65 @@ test('connected websocket keeps empty local registry status after Kody lists zer
 		expect(state.connection.toolInventoryRecoveryCount).toBe(0)
 		expect(logger.error).toHaveBeenCalledWith(
 			'worker.tools.empty_registry_persistent',
-			'Home connector local tool registry stayed empty after Kody requested tools/list.',
+			'Home connector local tool registry stayed empty after retries.',
+			expect.objectContaining({
+				localToolCount: 0,
+				attempts: 3,
+			}),
+		)
+		expect(sentryMock.captureHomeConnectorMessage).toHaveBeenCalledWith(
+			'Home connector local tool registry stayed empty.',
+			expect.objectContaining({
+				level: 'error',
+				tags: expect.objectContaining({
+					connector_event: 'tool_inventory.empty_local_registry',
+				}),
+			}),
+		)
+	} finally {
+		connector.stop()
+	}
+})
+
+test('connected websocket does not reconnect when local registry remains empty before tools/list', async () => {
+	vi.useFakeTimers()
+	globalThis.WebSocket = FakeWorkerWebSocket as unknown as typeof WebSocket
+	const state = createAppState()
+	const logger = createLogger()
+	const connector = createWorkerConnector({
+		config: createConfig(),
+		state,
+		logger,
+		toolRegistry: createRegisteredToolRegistry(() => []),
+	})
+
+	try {
+		await connector.start()
+		const socket = fakeWebSocketInstances[0]
+		if (!socket) throw new Error('Expected websocket instance')
+		await socket.dispatchOpen()
+		await socket.dispatchMessage(
+			JSON.stringify({
+				type: 'server.ack',
+				connectorId: 'default',
+			}),
+		)
+
+		await vi.advanceTimersByTimeAsync(15_000)
+
+		expect(fakeWebSocketInstances).toHaveLength(1)
+		expect(state.connection.connected).toBe(true)
+		expect(state.connection.toolInventoryStatus).toBe('empty_local_registry')
+		expect(state.connection.toolInventoryStatusReason).toContain(
+			'Kody did not request tools/list',
+		)
+		expect(state.connection.toolInventoryStatusReason).toContain(
+			'stayed empty after retries',
+		)
+		expect(state.connection.toolInventoryRecoveryCount).toBe(0)
+		expect(logger.error).toHaveBeenCalledWith(
+			'worker.tools.empty_registry_persistent',
+			'Home connector local tool registry stayed empty after retries.',
 			expect.objectContaining({
 				localToolCount: 0,
 				attempts: 3,
