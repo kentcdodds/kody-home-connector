@@ -749,20 +749,28 @@ export function createWorkerConnector(input: {
 						hasReportedSocketIssue = false
 						const previousConsecutiveReconnects = consecutiveReconnects
 						consecutiveReconnects = 0
-						toolsListRequestedForConnection = false
-						toolInventoryRefreshAttempts = 0
 						const localToolCount = listLocalTools().length
+						const alreadyListedTools =
+							toolsListRequestedForConnection &&
+							input.state.connection.toolInventoryStatus === 'registered' &&
+							localToolCount > 0
+						if (!alreadyListedTools) {
+							toolsListRequestedForConnection = false
+							toolInventoryRefreshAttempts = 0
+						}
 						updateConnectionState(input.state, {
 							connected: true,
 							lastSyncAt: new Date().toISOString(),
 							lastError: null,
 							localToolCount,
-							toolInventoryStatus:
-								localToolCount > 0
+							toolInventoryStatus: alreadyListedTools
+								? 'registered'
+								: localToolCount > 0
 									? 'pending_remote_list'
 									: 'empty_local_registry',
-							toolInventoryStatusReason:
-								localToolCount > 0
+							toolInventoryStatusReason: alreadyListedTools
+								? `Kody requested tools/list before ack and the connector returned ${localToolCount} local tool(s).`
+								: localToolCount > 0
 									? `Transport is connected with ${localToolCount} local tool(s); waiting for Kody to request tools/list.`
 									: 'Transport is connected, but the local tool registry is empty.',
 						})
@@ -793,8 +801,10 @@ export function createWorkerConnector(input: {
 								localToolCount,
 							},
 						})
-						sendToolsChangedNotification('server-ack')
-						scheduleToolInventoryMonitor(connectionAttempt)
+						if (!alreadyListedTools) {
+							sendToolsChangedNotification('server-ack')
+							scheduleToolInventoryMonitor(connectionAttempt)
+						}
 						return
 					}
 					case 'connector.jsonrpc': {

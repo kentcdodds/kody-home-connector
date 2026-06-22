@@ -390,6 +390,62 @@ test('acknowledged websocket registers non-empty tool inventory when Kody lists 
 	}
 })
 
+test('ack preserves tool inventory when Kody lists tools before ack', async () => {
+	vi.useFakeTimers()
+	globalThis.WebSocket = FakeWorkerWebSocket as unknown as typeof WebSocket
+	const state = createAppState()
+	const connector = createWorkerConnector({
+		config: createConfig(),
+		state,
+		logger: createLogger(),
+		toolRegistry: createRegisteredToolRegistry(() => [bondShadeTool]),
+	})
+
+	try {
+		await connector.start()
+		const socket = fakeWebSocketInstances[0]
+		if (!socket) throw new Error('Expected websocket instance')
+		await socket.dispatchOpen()
+		await socket.dispatchMessage(
+			JSON.stringify({
+				type: 'connector.jsonrpc',
+				message: {
+					jsonrpc: '2.0',
+					id: 'pre-ack-tools',
+					method: 'tools/list',
+				},
+			}),
+		)
+
+		expect(state.connection.toolInventoryStatus).toBe('registered')
+		expect(getSentMessage(socket, 1)).toMatchObject({
+			type: 'connector.jsonrpc',
+			message: {
+				id: 'pre-ack-tools',
+				result: {
+					tools: [bondShadeTool],
+				},
+			},
+		})
+
+		await socket.dispatchMessage(
+			JSON.stringify({
+				type: 'server.ack',
+				connectorId: 'default',
+			}),
+		)
+		await vi.advanceTimersByTimeAsync(5_000)
+
+		expect(state.connection.connected).toBe(true)
+		expect(state.connection.toolInventoryStatus).toBe('registered')
+		expect(state.connection.toolInventoryStatusReason).toContain('before ack')
+		expect(countToolsChangedNotifications(socket)).toBe(0)
+		expect(socket.sentMessages).toHaveLength(2)
+	} finally {
+		connector.stop()
+	}
+})
+
 test('connected websocket retries and reconnects when Kody never lists tools', async () => {
 	vi.useFakeTimers()
 	globalThis.WebSocket = FakeWorkerWebSocket as unknown as typeof WebSocket
