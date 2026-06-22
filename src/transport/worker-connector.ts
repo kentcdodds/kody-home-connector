@@ -873,8 +873,8 @@ export function createWorkerConnector(input: {
 				? consecutiveReconnects
 				: consecutiveReconnects + 1
 			const isToolInventoryRecoveryClose =
-				event.code === toolInventoryReconnectCloseCode ||
-				event.reason === toolInventoryReconnectReason ||
+				(event.code === toolInventoryReconnectCloseCode &&
+					event.reason === toolInventoryReconnectReason) ||
 				input.state.connection.toolInventoryStatus ===
 					'reconnecting_after_missing_remote_list'
 			updateConnectionState(input.state, {
