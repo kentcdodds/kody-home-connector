@@ -587,6 +587,19 @@ test('health route returns ok json', async () => {
 			ok: true,
 			service: 'home-connector',
 			connectorId: '',
+			connection: {
+				connected: false,
+				lastSyncAt: null,
+				lastError: null,
+			},
+			toolInventory: {
+				status: 'not_connected',
+				reason: 'Worker transport is not connected yet.',
+				localToolCount: 0,
+				lastToolsChangedNotificationAt: null,
+				lastToolsListRequestAt: null,
+				recoveryCount: 0,
+			},
 		})
 	} finally {
 		storage.close()

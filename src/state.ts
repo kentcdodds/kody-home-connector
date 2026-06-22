@@ -24,6 +24,18 @@ export type HomeConnectorConnectionState = {
 	lastError: string | null
 	sharedSecret: string | null
 	mocksEnabled: boolean
+	localToolCount: number
+	toolInventoryStatus:
+		| 'not_connected'
+		| 'pending_remote_list'
+		| 'refresh_requested'
+		| 'registered'
+		| 'empty_local_registry'
+		| 'reconnecting_after_missing_remote_list'
+	toolInventoryStatusReason: string
+	lastToolsChangedNotificationAt: string | null
+	lastToolsListRequestAt: string | null
+	toolInventoryRecoveryCount: number
 }
 
 export type HomeConnectorState = {
@@ -50,6 +62,12 @@ const initialState: HomeConnectorState = {
 		lastError: null,
 		sharedSecret: null,
 		mocksEnabled: false,
+		localToolCount: 0,
+		toolInventoryStatus: 'not_connected',
+		toolInventoryStatusReason: 'Worker transport is not connected yet.',
+		lastToolsChangedNotificationAt: null,
+		lastToolsListRequestAt: null,
+		toolInventoryRecoveryCount: 0,
 	},
 	devices: [],
 	rokuDiscoveryDiagnostics: null,

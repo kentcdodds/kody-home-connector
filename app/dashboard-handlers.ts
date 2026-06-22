@@ -133,12 +133,43 @@ type LoadDashboardSnapshotInput = {
 
 function getConnectionTone(state: HomeConnectorState): StatusTone {
 	if (!state.connection.connected) return 'bad'
+	if (
+		state.connection.toolInventoryStatus === 'empty_local_registry' ||
+		state.connection.toolInventoryStatus ===
+			'reconnecting_after_missing_remote_list'
+	) {
+		return 'bad'
+	}
+	if (
+		state.connection.toolInventoryStatus === 'pending_remote_list' ||
+		state.connection.toolInventoryStatus === 'refresh_requested'
+	) {
+		return 'warn'
+	}
 	if (!state.connection.sharedSecret) return 'warn'
 	return 'good'
 }
 
 function getConnectionLabel(state: HomeConnectorState) {
 	if (!state.connection.connected) return 'Disconnected'
+	if (state.connection.toolInventoryStatus === 'registered') {
+		return 'Connected with tools registered'
+	}
+	if (state.connection.toolInventoryStatus === 'empty_local_registry') {
+		return 'Connected with empty local tool registry'
+	}
+	if (
+		state.connection.toolInventoryStatus ===
+		'reconnecting_after_missing_remote_list'
+	) {
+		return 'Reconnecting tool inventory'
+	}
+	if (state.connection.toolInventoryStatus === 'refresh_requested') {
+		return 'Connected; tool inventory refresh requested'
+	}
+	if (state.connection.toolInventoryStatus === 'pending_remote_list') {
+		return 'Connected; awaiting tool inventory registration'
+	}
 	if (!state.connection.sharedSecret) return 'Connected with missing secret'
 	return 'Connected'
 }
@@ -155,6 +186,14 @@ function getConnectionIssues(state: HomeConnectorState) {
 	}
 	if (state.connection.lastError) {
 		issues.push(`Last connector error: ${state.connection.lastError}`)
+	}
+	if (
+		state.connection.connected &&
+		state.connection.toolInventoryStatus !== 'registered'
+	) {
+		issues.push(
+			`Tool inventory: ${state.connection.toolInventoryStatusReason}`,
+		)
 	}
 	return issues
 }
@@ -403,6 +442,10 @@ function renderConnectionSummary(
 			{
 				label: 'Last sync',
 				value: state.connection.lastSyncAt ?? 'never',
+			},
+			{
+				label: 'Tool inventory',
+				value: `${state.connection.toolInventoryStatus} (${state.connection.localToolCount})`,
 			},
 			{
 				label: 'Mocks',
@@ -929,6 +972,20 @@ export function createSystemStatusHandler(deps: DashboardDependencies) {
 								tone: snapshot.connectionTone,
 							})}
 							${renderMetricCard({
+								label: 'Tool inventory',
+								value: deps.state.connection.toolInventoryStatus,
+								detail: `${deps.state.connection.localToolCount} local tool(s)`,
+								tone:
+									deps.state.connection.toolInventoryStatus === 'registered'
+										? 'good'
+										: deps.state.connection.toolInventoryStatus ===
+												'empty_local_registry' ||
+											deps.state.connection.toolInventoryStatus ===
+												'reconnecting_after_missing_remote_list'
+											? 'bad'
+											: 'warn',
+							})}
+							${renderMetricCard({
 								label: 'Worker secret',
 								value: deps.state.connection.sharedSecret
 									? 'configured'
@@ -995,6 +1052,35 @@ export function createSystemStatusHandler(deps: DashboardDependencies) {
 									{
 										label: 'Last connector error',
 										value: deps.state.connection.lastError ?? 'none',
+									},
+									{
+										label: 'Tool inventory status',
+										value: deps.state.connection.toolInventoryStatus,
+									},
+									{
+										label: 'Tool inventory reason',
+										value: deps.state.connection.toolInventoryStatusReason,
+									},
+									{
+										label: 'Local tool count',
+										value: String(deps.state.connection.localToolCount),
+									},
+									{
+										label: 'Last tools/list request',
+										value:
+											deps.state.connection.lastToolsListRequestAt ?? 'never',
+									},
+									{
+										label: 'Last tools changed notification',
+										value:
+											deps.state.connection.lastToolsChangedNotificationAt ??
+											'never',
+									},
+									{
+										label: 'Tool inventory recoveries',
+										value: String(
+											deps.state.connection.toolInventoryRecoveryCount,
+										),
 									},
 								])}
 							</section>

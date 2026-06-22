@@ -14,7 +14,9 @@ vi.mock('../sentry.ts', () => sentryMock)
 
 const { createWorkerConnector } = await import('./worker-connector.ts')
 
-type FakeWebSocketListener = (event: Record<string, unknown>) => void
+type FakeWebSocketListener = (
+	event: Record<string, unknown>,
+) => void | Promise<void>
 
 class FakeWorkerWebSocket {
 	static readonly CONNECTING = 0
@@ -42,17 +44,24 @@ class FakeWorkerWebSocket {
 		this.sentMessages.push(message)
 	}
 
-	close() {
+	close(code = 1000, reason = 'client stop') {
 		this.dispatchClose({
-			code: 1000,
-			reason: 'client stop',
-			wasClean: true,
+			code,
+			reason,
+			wasClean: code === 1000,
 		})
 	}
 
-	dispatchMessage(data: string) {
+	dispatchOpen() {
+		this.readyState = FakeWorkerWebSocket.OPEN
+		for (const listener of this.listeners.get('open') ?? []) {
+			void listener({})
+		}
+	}
+
+	async dispatchMessage(data: string) {
 		for (const listener of this.listeners.get('message') ?? []) {
-			listener({ data })
+			await listener({ data })
 		}
 	}
 
@@ -70,6 +79,7 @@ const originalWebSocket = globalThis.WebSocket
 afterEach(() => {
 	globalThis.WebSocket = originalWebSocket
 	fakeWebSocketInstances.length = 0
+	vi.clearAllMocks()
 	vi.useRealTimers()
 })
 
@@ -129,6 +139,30 @@ function createToolRegistry(): HomeConnectorToolRegistry {
 		})),
 	}
 }
+
+function createRegisteredToolRegistry(
+	tools: HomeConnectorToolRegistry['list'],
+): HomeConnectorToolRegistry {
+	return {
+		list: vi.fn(tools),
+		call: vi.fn(async () => ({
+			content: [{ type: 'text', text: 'ok' }],
+		})),
+	}
+}
+
+function getSentMessage(socket: FakeWorkerWebSocket, index: number) {
+	const raw = socket.sentMessages[index]
+	if (!raw) return null
+	return JSON.parse(raw) as Record<string, unknown>
+}
+
+const bondShadeTool = {
+	name: 'bond_shade_set_position',
+	title: 'Set Bond Shade Position',
+	description: 'Set a Bond shade position.',
+	inputSchema: {},
+} satisfies ReturnType<HomeConnectorToolRegistry['list']>[number]
 
 test('websocket close reporting waits for sustained reconnect failures', async () => {
 	vi.useFakeTimers()
@@ -273,6 +307,207 @@ test('websocket ping resets sustained reconnect threshold', async () => {
 		})
 
 		expect(sentryMock.captureHomeConnectorMessage).toHaveBeenCalledTimes(1)
+	} finally {
+		connector.stop()
+	}
+})
+
+test('acknowledged websocket registers non-empty tool inventory when Kody lists tools', async () => {
+	vi.useFakeTimers()
+	globalThis.WebSocket = FakeWorkerWebSocket as unknown as typeof WebSocket
+	const state = createAppState()
+	const connector = createWorkerConnector({
+		config: createConfig(),
+		state,
+		logger: createLogger(),
+		toolRegistry: createRegisteredToolRegistry(() => [bondShadeTool]),
+	})
+
+	try {
+		await connector.start()
+		const socket = fakeWebSocketInstances[0]
+		if (!socket) throw new Error('Expected websocket instance')
+		socket.dispatchOpen()
+		await socket.dispatchMessage(
+			JSON.stringify({
+				type: 'server.ack',
+				connectorId: 'default',
+			}),
+		)
+
+		expect(getSentMessage(socket, 0)).toMatchObject({
+			type: 'connector.hello',
+		})
+		expect(getSentMessage(socket, 1)).toMatchObject({
+			type: 'connector.jsonrpc',
+			message: {
+				method: 'notifications/tools/list_changed',
+			},
+		})
+		expect(state.connection.connected).toBe(true)
+		expect(state.connection.localToolCount).toBe(1)
+		expect(state.connection.toolInventoryStatus).toBe('refresh_requested')
+
+		await socket.dispatchMessage(
+			JSON.stringify({
+				type: 'connector.jsonrpc',
+				message: {
+					jsonrpc: '2.0',
+					id: 1,
+					method: 'tools/list',
+				},
+			}),
+		)
+
+		expect(getSentMessage(socket, 2)).toMatchObject({
+			type: 'connector.jsonrpc',
+			message: {
+				id: 1,
+				result: {
+					tools: [bondShadeTool],
+				},
+			},
+		})
+		expect(state.connection.toolInventoryStatus).toBe('registered')
+		expect(state.connection.lastToolsListRequestAt).not.toBeNull()
+
+		await vi.advanceTimersByTimeAsync(5_000)
+
+		expect(socket.sentMessages).toHaveLength(3)
+	} finally {
+		connector.stop()
+	}
+})
+
+test('connected websocket retries and reconnects when Kody never lists tools', async () => {
+	vi.useFakeTimers()
+	globalThis.WebSocket = FakeWorkerWebSocket as unknown as typeof WebSocket
+	const state = createAppState()
+	const logger = createLogger()
+	const connector = createWorkerConnector({
+		config: createConfig(),
+		state,
+		logger,
+		toolRegistry: createRegisteredToolRegistry(() => [bondShadeTool]),
+	})
+
+	try {
+		await connector.start()
+		const socket = fakeWebSocketInstances[0]
+		if (!socket) throw new Error('Expected websocket instance')
+		socket.dispatchOpen()
+		await socket.dispatchMessage(
+			JSON.stringify({
+				type: 'server.ack',
+				connectorId: 'default',
+			}),
+		)
+
+		expect(socket.sentMessages).toHaveLength(2)
+
+		await vi.advanceTimersByTimeAsync(5_000)
+		expect(socket.sentMessages).toHaveLength(3)
+		expect(logger.warn).toHaveBeenCalledWith(
+			'worker.tools.remote_list_missing',
+			expect.stringContaining('Kody has not requested'),
+			expect.objectContaining({
+				localToolCount: 1,
+				attempt: 1,
+			}),
+		)
+
+		await vi.advanceTimersByTimeAsync(5_000)
+		expect(socket.sentMessages).toHaveLength(4)
+
+		await vi.advanceTimersByTimeAsync(5_000)
+		expect(logger.error).toHaveBeenCalledWith(
+			'worker.tools.inventory_reconnect',
+			expect.stringContaining('Reconnecting home connector websocket'),
+			expect.objectContaining({
+				localToolCount: 1,
+				attempts: 3,
+				recoveryCount: 1,
+			}),
+		)
+		expect(sentryMock.captureHomeConnectorMessage).toHaveBeenCalledWith(
+			'Home connector tool inventory registration did not complete.',
+			expect.objectContaining({
+				level: 'error',
+				tags: expect.objectContaining({
+					connector_event: 'tool_inventory.registration_incomplete',
+				}),
+			}),
+		)
+		expect(state.connection.connected).toBe(false)
+		expect(state.connection.toolInventoryRecoveryCount).toBe(1)
+
+		await vi.advanceTimersByTimeAsync(2_000)
+		expect(fakeWebSocketInstances).toHaveLength(2)
+	} finally {
+		connector.stop()
+	}
+})
+
+test('connected websocket recovers when local registry is initially empty', async () => {
+	vi.useFakeTimers()
+	globalThis.WebSocket = FakeWorkerWebSocket as unknown as typeof WebSocket
+	let tools: ReturnType<HomeConnectorToolRegistry['list']> = []
+	const state = createAppState()
+	const connector = createWorkerConnector({
+		config: createConfig(),
+		state,
+		logger: createLogger(),
+		toolRegistry: createRegisteredToolRegistry(() => tools),
+	})
+
+	try {
+		await connector.start()
+		const socket = fakeWebSocketInstances[0]
+		if (!socket) throw new Error('Expected websocket instance')
+		socket.dispatchOpen()
+		await socket.dispatchMessage(
+			JSON.stringify({
+				type: 'server.ack',
+				connectorId: 'default',
+			}),
+		)
+
+		expect(state.connection.toolInventoryStatus).toBe('empty_local_registry')
+		expect(state.connection.localToolCount).toBe(0)
+
+		tools = [bondShadeTool]
+		await vi.advanceTimersByTimeAsync(5_000)
+
+		expect(state.connection.toolInventoryStatus).toBe('refresh_requested')
+		expect(state.connection.localToolCount).toBe(1)
+		expect(getSentMessage(socket, 2)).toMatchObject({
+			type: 'connector.jsonrpc',
+			message: {
+				method: 'notifications/tools/list_changed',
+			},
+		})
+
+		await socket.dispatchMessage(
+			JSON.stringify({
+				type: 'connector.jsonrpc',
+				message: {
+					jsonrpc: '2.0',
+					id: 'tools',
+					method: 'tools/list',
+				},
+			}),
+		)
+
+		expect(state.connection.toolInventoryStatus).toBe('registered')
+		expect(getSentMessage(socket, 3)).toMatchObject({
+			type: 'connector.jsonrpc',
+			message: {
+				id: 'tools',
+				result: {
+					tools: [bondShadeTool],
+				},
+			},
+		})
 	} finally {
 		connector.stop()
 	}
