@@ -622,6 +622,20 @@ export function createHealthHandler(state: HomeConnectorState) {
 					ok: true,
 					service: 'home-connector',
 					connectorId: state.connection.connectorId,
+					connection: {
+						connected: state.connection.connected,
+						lastSyncAt: state.connection.lastSyncAt,
+						lastError: state.connection.lastError,
+					},
+					toolInventory: {
+						status: state.connection.toolInventoryStatus,
+						reason: state.connection.toolInventoryStatusReason,
+						localToolCount: state.connection.localToolCount,
+						lastToolsChangedNotificationAt:
+							state.connection.lastToolsChangedNotificationAt,
+						lastToolsListRequestAt: state.connection.lastToolsListRequestAt,
+						recoveryCount: state.connection.toolInventoryRecoveryCount,
+					},
 				},
 				{
 					headers: {

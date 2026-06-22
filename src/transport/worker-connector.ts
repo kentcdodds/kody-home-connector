@@ -24,6 +24,10 @@ const initialReconnectDelayMs = 2_000
 const maxReconnectDelayMs = 30_000
 const slowToolCallThresholdMs = 5_000
 const websocketSentryReconnectThreshold = 3
+const toolInventoryRegistrationGraceMs = 5_000
+const maxToolInventoryRefreshAttempts = 2
+const toolInventoryReconnectCloseCode = 4_000
+const toolInventoryReconnectReason = 'tool inventory registration recovery'
 const homeConnectorDescription =
 	'Local-network home automation for Sonos, Bond shades, Venstar thermostats, Roku, Samsung TVs, Lutron, JellyFish lighting, and network gear.'
 
@@ -96,13 +100,16 @@ async function handleJsonRpcRequest(
 	message: JSONRPCRequest,
 	toolRegistry: HomeConnectorToolRegistry,
 	logger: HomeConnectorLogger,
+	onToolsListRequest: (toolCount: number) => void,
 ) {
 	if (message.method === 'tools/list') {
+		const tools = toolRegistry.list()
+		onToolsListRequest(tools.length)
 		return {
 			jsonrpc: '2.0',
 			id: message.id,
 			result: {
-				tools: toolRegistry.list(),
+				tools,
 			},
 		} satisfies JSONRPCResponse
 	}
@@ -239,6 +246,9 @@ export function createWorkerConnector(input: {
 	let hasReportedSocketIssue = false
 	let connectionAttempt = 0
 	let consecutiveReconnects = 0
+	let toolInventoryTimer: ReturnType<typeof setTimeout> | null = null
+	let toolsListRequestedForConnection = false
+	let toolInventoryRefreshAttempts = 0
 
 	const heartbeat = setInterval(() => {
 		if (socket?.readyState === WebSocket.OPEN) {
@@ -254,6 +264,323 @@ export function createWorkerConnector(input: {
 		if (!reconnectTimer) return
 		clearTimeout(reconnectTimer)
 		reconnectTimer = null
+	}
+
+	function clearToolInventoryTimer() {
+		if (!toolInventoryTimer) return
+		clearTimeout(toolInventoryTimer)
+		toolInventoryTimer = null
+	}
+
+	function updateToolInventoryStatus(inputStatus: {
+		localToolCount: number
+		status: HomeConnectorState['connection']['toolInventoryStatus']
+		reason: string
+		lastToolsChangedNotificationAt?: string
+		lastToolsListRequestAt?: string
+		recoveryCount?: number
+	}) {
+		updateConnectionState(input.state, {
+			localToolCount: inputStatus.localToolCount,
+			toolInventoryStatus: inputStatus.status,
+			toolInventoryStatusReason: inputStatus.reason,
+			...(inputStatus.lastToolsChangedNotificationAt
+				? {
+						lastToolsChangedNotificationAt:
+							inputStatus.lastToolsChangedNotificationAt,
+					}
+				: {}),
+			...(inputStatus.lastToolsListRequestAt
+				? { lastToolsListRequestAt: inputStatus.lastToolsListRequestAt }
+				: {}),
+			...(inputStatus.recoveryCount == null
+				? {}
+				: { toolInventoryRecoveryCount: inputStatus.recoveryCount }),
+		})
+	}
+
+	function listLocalTools() {
+		return input.toolRegistry.list()
+	}
+
+	function sendToolsChangedNotification(reason: string) {
+		const localToolCount = listLocalTools().length
+		const sentAt = new Date().toISOString()
+		updateToolInventoryStatus({
+			localToolCount,
+			status: localToolCount > 0 ? 'refresh_requested' : 'empty_local_registry',
+			reason:
+				localToolCount > 0
+					? `Sent tools/list_changed notification to refresh remote registry (${reason}).`
+					: `Local registry is empty while trying to refresh remote registry (${reason}).`,
+			lastToolsChangedNotificationAt: sentAt,
+			recoveryCount: input.state.connection.toolInventoryRecoveryCount,
+		})
+		input.logger.info(
+			'worker.tools.list_changed_sent',
+			`Sending home connector tools changed notification reason=${reason} localToolCount=${localToolCount}`,
+			{
+				...createSocketEventContext({
+					config: input.config,
+					connectionAttempt,
+					consecutiveReconnects,
+				}),
+				reason,
+				localToolCount,
+			},
+		)
+		if (socket?.readyState !== WebSocket.OPEN) {
+			return localToolCount
+		}
+		addHomeConnectorSentryBreadcrumb({
+			message: 'Sending home connector tools changed notification.',
+			category: 'tools.list_changed.sent',
+			level: 'info',
+			data: {
+				...createSocketEventContext({
+					config: input.config,
+					connectionAttempt,
+					consecutiveReconnects,
+				}),
+				reason,
+				localToolCount,
+			},
+		})
+		socket.send(
+			stringifyConnectorMessage({
+				type: 'connector.jsonrpc',
+				message: createToolsChangedNotification(),
+			}),
+		)
+		return localToolCount
+	}
+
+	function handleToolsListRequest(toolCount: number) {
+		toolsListRequestedForConnection = true
+		const listedAt = new Date().toISOString()
+		if (toolCount > 0) {
+			toolInventoryRefreshAttempts = 0
+			clearToolInventoryTimer()
+			updateToolInventoryStatus({
+				localToolCount: toolCount,
+				status: 'registered',
+				reason: `Kody requested tools/list and the connector returned ${toolCount} local tool(s).`,
+				lastToolsListRequestAt: listedAt,
+				recoveryCount: input.state.connection.toolInventoryRecoveryCount,
+			})
+			input.logger.info(
+				'worker.tools.listed',
+				`Home connector returned ${toolCount} tool(s) for remote registry refresh.`,
+				{
+					...createSocketEventContext({
+						config: input.config,
+						connectionAttempt,
+						consecutiveReconnects,
+					}),
+					localToolCount: toolCount,
+				},
+			)
+			return
+		}
+
+		updateToolInventoryStatus({
+			localToolCount: toolCount,
+			status: 'empty_local_registry',
+			reason:
+				'Kody requested tools/list, but the connector local tool registry was empty.',
+			lastToolsListRequestAt: listedAt,
+			recoveryCount: input.state.connection.toolInventoryRecoveryCount,
+		})
+		input.logger.warn(
+			'worker.tools.empty_registry',
+			'Home connector local tool registry is empty during tools/list.',
+			createSocketEventContext({
+				config: input.config,
+				connectionAttempt,
+				consecutiveReconnects,
+			}),
+		)
+		if (
+			!toolInventoryTimer &&
+			toolInventoryRefreshAttempts <= maxToolInventoryRefreshAttempts
+		) {
+			scheduleToolInventoryMonitor(connectionAttempt)
+		}
+	}
+
+	function recoverToolInventoryRegistration(expectedConnectionAttempt: number) {
+		toolInventoryTimer = null
+		if (
+			stopped ||
+			expectedConnectionAttempt !== connectionAttempt ||
+			socket?.readyState !== WebSocket.OPEN
+		) {
+			return
+		}
+
+		const localToolCount = listLocalTools().length
+		toolInventoryRefreshAttempts += 1
+		if (localToolCount === 0) {
+			updateToolInventoryStatus({
+				localToolCount,
+				status: 'empty_local_registry',
+				reason: `Local registry is still empty after grace period; refresh attempt ${toolInventoryRefreshAttempts}.`,
+				recoveryCount: input.state.connection.toolInventoryRecoveryCount,
+			})
+			input.logger.warn(
+				'worker.tools.empty_registry_recovery',
+				`Home connector local tool registry is empty after grace period attempt=${toolInventoryRefreshAttempts}.`,
+				{
+					...createSocketEventContext({
+						config: input.config,
+						connectionAttempt,
+						consecutiveReconnects,
+					}),
+					attempt: toolInventoryRefreshAttempts,
+				},
+			)
+		} else {
+			const missingListReason = toolsListRequestedForConnection
+				? `Local registry recovered to ${localToolCount} tool(s), but Kody previously received an empty tools/list response for this session; refresh attempt ${toolInventoryRefreshAttempts}.`
+				: `Transport is connected with ${localToolCount} local tool(s), but Kody has not requested tools/list for this session; refresh attempt ${toolInventoryRefreshAttempts}.`
+			const missingListMessage = toolsListRequestedForConnection
+				? `Home connector local tool registry recovered after an empty tools/list response attempt=${toolInventoryRefreshAttempts} localToolCount=${localToolCount}.`
+				: `Kody has not requested home connector tools/list after ack attempt=${toolInventoryRefreshAttempts} localToolCount=${localToolCount}.`
+			updateToolInventoryStatus({
+				localToolCount,
+				status: 'refresh_requested',
+				reason: missingListReason,
+				recoveryCount: input.state.connection.toolInventoryRecoveryCount,
+			})
+			input.logger.warn(
+				'worker.tools.remote_list_missing',
+				missingListMessage,
+				{
+					...createSocketEventContext({
+						config: input.config,
+						connectionAttempt,
+						consecutiveReconnects,
+					}),
+					attempt: toolInventoryRefreshAttempts,
+					localToolCount,
+				},
+			)
+		}
+
+		if (toolInventoryRefreshAttempts <= maxToolInventoryRefreshAttempts) {
+			sendToolsChangedNotification(
+				localToolCount === 0
+					? 'empty-local-registry-retry'
+					: 'missing-remote-tools-list-retry',
+			)
+			scheduleToolInventoryMonitor(expectedConnectionAttempt)
+			return
+		}
+
+		if (localToolCount === 0) {
+			const emptyRegistryReason = toolsListRequestedForConnection
+				? 'Kody requested tools/list, but the connector local tool registry stayed empty after retries. Websocket reconnect is not expected to rebuild a process-local registry.'
+				: 'Kody did not request tools/list, and the connector local tool registry stayed empty after retries. Websocket reconnect is not expected to rebuild a process-local registry.'
+			updateToolInventoryStatus({
+				localToolCount,
+				status: 'empty_local_registry',
+				reason: emptyRegistryReason,
+				recoveryCount: input.state.connection.toolInventoryRecoveryCount,
+			})
+			input.logger.error(
+				'worker.tools.empty_registry_persistent',
+				'Home connector local tool registry stayed empty after retries.',
+				{
+					...createSocketEventContext({
+						config: input.config,
+						connectionAttempt,
+						consecutiveReconnects,
+					}),
+					localToolCount,
+					attempts: toolInventoryRefreshAttempts,
+				},
+			)
+			captureHomeConnectorMessage(
+				'Home connector local tool registry stayed empty.',
+				{
+					level: 'error',
+					fingerprint: [
+						'home-connector',
+						'empty-local-tool-registry',
+						input.config.homeConnectorId,
+					],
+					tags: {
+						home_connector_id: input.config.homeConnectorId,
+						connector_event: 'tool_inventory.empty_local_registry',
+					},
+					contexts: {
+						tool_inventory: {
+							localToolCount,
+							attempts: toolInventoryRefreshAttempts,
+							toolsListRequestedForConnection,
+						},
+					},
+				},
+			)
+			return
+		}
+
+		const recoveryCount = input.state.connection.toolInventoryRecoveryCount + 1
+		updateToolInventoryStatus({
+			localToolCount,
+			status: 'reconnecting_after_missing_remote_list',
+			reason: toolsListRequestedForConnection
+				? 'Local registry recovered after Kody received an empty tools/list response, but Kody did not request a follow-up tools/list after refresh retries; reconnecting websocket session to rebuild remote registration state.'
+				: 'Kody did not request tools/list after retries; reconnecting websocket session to rebuild remote registration state.',
+			recoveryCount,
+		})
+		input.logger.error(
+			'worker.tools.inventory_reconnect',
+			`Reconnecting home connector websocket to recover tool inventory registration localToolCount=${localToolCount}.`,
+			{
+				...createSocketEventContext({
+					config: input.config,
+					connectionAttempt,
+					consecutiveReconnects,
+				}),
+				localToolCount,
+				attempts: toolInventoryRefreshAttempts,
+				recoveryCount,
+				toolsListRequestedForConnection,
+			},
+		)
+		captureHomeConnectorMessage(
+			'Home connector tool inventory registration did not complete.',
+			{
+				level: 'error',
+				fingerprint: [
+					'home-connector',
+					'tool-inventory-registration',
+					input.config.homeConnectorId,
+				],
+				tags: {
+					home_connector_id: input.config.homeConnectorId,
+					connector_event: 'tool_inventory.registration_incomplete',
+				},
+				contexts: {
+					tool_inventory: {
+						localToolCount,
+						attempts: toolInventoryRefreshAttempts,
+						recoveryCount,
+						toolsListRequestedForConnection,
+					},
+				},
+			},
+		)
+		socket.close(toolInventoryReconnectCloseCode, toolInventoryReconnectReason)
+	}
+
+	function scheduleToolInventoryMonitor(expectedConnectionAttempt: number) {
+		if (stopped) return
+		clearToolInventoryTimer()
+		toolInventoryTimer = setTimeout(() => {
+			recoverToolInventoryRegistration(expectedConnectionAttempt)
+		}, toolInventoryRegistrationGraceMs)
 	}
 
 	function scheduleReconnect() {
@@ -299,10 +626,16 @@ export function createWorkerConnector(input: {
 			return
 		}
 		clearReconnectTimer()
+		clearToolInventoryTimer()
+		toolsListRequestedForConnection = false
+		toolInventoryRefreshAttempts = 0
 		connectionAttempt += 1
 		updateConnectionState(input.state, {
 			connected: false,
 			lastError: null,
+			toolInventoryStatus: 'not_connected',
+			toolInventoryStatusReason:
+				'Opening websocket transport; tool inventory is not registered yet.',
 		})
 		input.logger.info(
 			'worker.websocket.connecting',
@@ -380,9 +713,13 @@ export function createWorkerConnector(input: {
 						})
 						return
 					case 'server.error':
+						clearToolInventoryTimer()
 						updateConnectionState(input.state, {
 							connected: false,
 							lastError: value.message,
+							toolInventoryStatus: 'not_connected',
+							toolInventoryStatusReason:
+								'Kody reported a server error for this connector session.',
 						})
 						captureHomeConnectorMessage(value.message, {
 							level: 'error',
@@ -412,14 +749,34 @@ export function createWorkerConnector(input: {
 						hasReportedSocketIssue = false
 						const previousConsecutiveReconnects = consecutiveReconnects
 						consecutiveReconnects = 0
+						const localToolCount = listLocalTools().length
+						const alreadyListedTools =
+							toolsListRequestedForConnection &&
+							input.state.connection.toolInventoryStatus === 'registered' &&
+							localToolCount > 0
+						if (!alreadyListedTools) {
+							toolsListRequestedForConnection = false
+							toolInventoryRefreshAttempts = 0
+						}
 						updateConnectionState(input.state, {
 							connected: true,
 							lastSyncAt: new Date().toISOString(),
 							lastError: null,
+							localToolCount,
+							toolInventoryStatus: alreadyListedTools
+								? 'registered'
+								: localToolCount > 0
+									? 'pending_remote_list'
+									: 'empty_local_registry',
+							toolInventoryStatusReason: alreadyListedTools
+								? `Kody requested tools/list before ack and the connector returned ${localToolCount} local tool(s).`
+								: localToolCount > 0
+									? `Transport is connected with ${localToolCount} local tool(s); waiting for Kody to request tools/list.`
+									: 'Transport is connected, but the local tool registry is empty.',
 						})
 						input.logger.info(
 							'worker.websocket.acknowledged',
-							`Home connector websocket acknowledged connectorId=${value.connectorId}`,
+							`Home connector websocket acknowledged connectorId=${value.connectorId} localToolCount=${localToolCount}`,
 							{
 								...createSocketEventContext({
 									config: input.config,
@@ -427,6 +784,7 @@ export function createWorkerConnector(input: {
 									consecutiveReconnects: previousConsecutiveReconnects,
 								}),
 								acknowledgedConnectorId: value.connectorId,
+								localToolCount,
 							},
 						)
 						addHomeConnectorSentryBreadcrumb({
@@ -440,25 +798,12 @@ export function createWorkerConnector(input: {
 									consecutiveReconnects: previousConsecutiveReconnects,
 								}),
 								acknowledgedConnectorId: value.connectorId,
+								localToolCount,
 							},
 						})
-						if (socket?.readyState === WebSocket.OPEN) {
-							addHomeConnectorSentryBreadcrumb({
-								message: 'Sending home connector tools changed notification.',
-								category: 'tools.list_changed.sent',
-								level: 'info',
-								data: createSocketEventContext({
-									config: input.config,
-									connectionAttempt,
-									consecutiveReconnects: previousConsecutiveReconnects,
-								}),
-							})
-							socket.send(
-								stringifyConnectorMessage({
-									type: 'connector.jsonrpc',
-									message: createToolsChangedNotification(),
-								}),
-							)
+						if (!alreadyListedTools) {
+							sendToolsChangedNotification('server-ack')
+							scheduleToolInventoryMonitor(connectionAttempt)
 						}
 						return
 					}
@@ -479,6 +824,7 @@ export function createWorkerConnector(input: {
 								message,
 								input.toolRegistry,
 								input.logger,
+								handleToolsListRequest,
 							)
 							socket.send(
 								stringifyConnectorMessage({
@@ -537,13 +883,26 @@ export function createWorkerConnector(input: {
 		})
 
 		socket.addEventListener('close', (event) => {
+			clearToolInventoryTimer()
 			const closeMessage = formatCloseMessage(event)
 			const nextConsecutiveReconnects = stopped
 				? consecutiveReconnects
 				: consecutiveReconnects + 1
+			const isToolInventoryRecoveryClose =
+				(event.code === toolInventoryReconnectCloseCode &&
+					event.reason === toolInventoryReconnectReason) ||
+				input.state.connection.toolInventoryStatus ===
+					'reconnecting_after_missing_remote_list'
 			updateConnectionState(input.state, {
 				connected: false,
 				lastError: closeMessage,
+				...(isToolInventoryRecoveryClose
+					? {}
+					: {
+							toolInventoryStatus: 'not_connected',
+							toolInventoryStatusReason:
+								'Websocket transport is closed; remote tool inventory is unavailable.',
+						}),
 			})
 			addHomeConnectorSentryBreadcrumb({
 				message: closeMessage,
@@ -613,9 +972,13 @@ export function createWorkerConnector(input: {
 		})
 
 		socket.addEventListener('error', (event) => {
+			clearToolInventoryTimer()
 			updateConnectionState(input.state, {
 				connected: false,
 				lastError: 'Home connector websocket error.',
+				toolInventoryStatus: 'not_connected',
+				toolInventoryStatusReason:
+					'Websocket transport error; remote tool inventory is unavailable.',
 			})
 			addHomeConnectorSentryBreadcrumb({
 				message: 'Home connector websocket error.',
@@ -654,6 +1017,9 @@ export function createWorkerConnector(input: {
 				updateConnectionState(input.state, {
 					connected: false,
 					lastError: message,
+					toolInventoryStatus: 'not_connected',
+					toolInventoryStatusReason:
+						'Registration is disabled because the shared secret is missing.',
 				})
 				input.logger.warn('worker.registration.disabled', message, {
 					connectorId: input.config.homeConnectorId,
@@ -674,6 +1040,7 @@ export function createWorkerConnector(input: {
 				},
 			)
 			clearReconnectTimer()
+			clearToolInventoryTimer()
 			clearInterval(heartbeat)
 			socket?.close()
 			socket = null
