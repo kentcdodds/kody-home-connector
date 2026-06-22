@@ -191,9 +191,7 @@ function getConnectionIssues(state: HomeConnectorState) {
 		state.connection.connected &&
 		state.connection.toolInventoryStatus !== 'registered'
 	) {
-		issues.push(
-			`Tool inventory: ${state.connection.toolInventoryStatusReason}`,
-		)
+		issues.push(`Tool inventory: ${state.connection.toolInventoryStatusReason}`)
 	}
 	return issues
 }
@@ -979,9 +977,9 @@ export function createSystemStatusHandler(deps: DashboardDependencies) {
 									deps.state.connection.toolInventoryStatus === 'registered'
 										? 'good'
 										: deps.state.connection.toolInventoryStatus ===
-												'empty_local_registry' ||
-											deps.state.connection.toolInventoryStatus ===
-												'reconnecting_after_missing_remote_list'
+													'empty_local_registry' ||
+											  deps.state.connection.toolInventoryStatus ===
+													'reconnecting_after_missing_remote_list'
 											? 'bad'
 											: 'warn',
 							})}

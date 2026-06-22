@@ -308,8 +308,7 @@ export function createWorkerConnector(input: {
 		const sentAt = new Date().toISOString()
 		updateToolInventoryStatus({
 			localToolCount,
-			status:
-				localToolCount > 0 ? 'refresh_requested' : 'empty_local_registry',
+			status: localToolCount > 0 ? 'refresh_requested' : 'empty_local_registry',
 			reason:
 				localToolCount > 0
 					? `Sent tools/list_changed notification to refresh remote registry (${reason}).`
