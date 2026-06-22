@@ -672,6 +672,115 @@ test('empty tools/list responses do not reset empty registry retry counter', asy
 	}
 })
 
+test('empty tools/list polling does not postpone recovery timer', async () => {
+	vi.useFakeTimers()
+	globalThis.WebSocket = FakeWorkerWebSocket as unknown as typeof WebSocket
+	const state = createAppState()
+	const logger = createLogger()
+	const connector = createWorkerConnector({
+		config: createConfig(),
+		state,
+		logger,
+		toolRegistry: createRegisteredToolRegistry(() => []),
+	})
+
+	try {
+		await connector.start()
+		const socket = fakeWebSocketInstances[0]
+		if (!socket) throw new Error('Expected websocket instance')
+		await socket.dispatchOpen()
+		await socket.dispatchMessage(
+			JSON.stringify({
+				type: 'server.ack',
+				connectorId: 'default',
+			}),
+		)
+		await socket.dispatchMessage(
+			JSON.stringify({
+				type: 'connector.jsonrpc',
+				message: {
+					jsonrpc: '2.0',
+					id: 'empty-tools-1',
+					method: 'tools/list',
+				},
+			}),
+		)
+
+		await vi.advanceTimersByTimeAsync(4_000)
+		await socket.dispatchMessage(
+			JSON.stringify({
+				type: 'connector.jsonrpc',
+				message: {
+					jsonrpc: '2.0',
+					id: 'empty-tools-2',
+					method: 'tools/list',
+				},
+			}),
+		)
+		await vi.advanceTimersByTimeAsync(1_000)
+
+		expect(countToolsChangedNotifications(socket)).toBe(2)
+		expect(logger.warn).toHaveBeenCalledWith(
+			'worker.tools.empty_registry_recovery',
+			expect.stringContaining('attempt=1'),
+			expect.objectContaining({
+				attempt: 1,
+			}),
+		)
+	} finally {
+		connector.stop()
+	}
+})
+
+test('reconnect reason reflects recovery after an empty tools/list response', async () => {
+	vi.useFakeTimers()
+	globalThis.WebSocket = FakeWorkerWebSocket as unknown as typeof WebSocket
+	let tools: ReturnType<HomeConnectorToolRegistry['list']> = []
+	const state = createAppState()
+	const connector = createWorkerConnector({
+		config: createConfig(),
+		state,
+		logger: createLogger(),
+		toolRegistry: createRegisteredToolRegistry(() => tools),
+	})
+
+	try {
+		await connector.start()
+		const socket = fakeWebSocketInstances[0]
+		if (!socket) throw new Error('Expected websocket instance')
+		await socket.dispatchOpen()
+		await socket.dispatchMessage(
+			JSON.stringify({
+				type: 'server.ack',
+				connectorId: 'default',
+			}),
+		)
+		await socket.dispatchMessage(
+			JSON.stringify({
+				type: 'connector.jsonrpc',
+				message: {
+					jsonrpc: '2.0',
+					id: 'empty-tools',
+					method: 'tools/list',
+				},
+			}),
+		)
+
+		tools = [bondShadeTool]
+		await vi.advanceTimersByTimeAsync(15_000)
+
+		expect(state.connection.connected).toBe(false)
+		expect(state.connection.toolInventoryStatus).toBe(
+			'reconnecting_after_missing_remote_list',
+		)
+		expect(state.connection.toolInventoryStatusReason).toContain(
+			'Kody received an empty tools/list response',
+		)
+	} finally {
+		connector.stop()
+	}
+})
+
 test('connected websocket does not reconnect when local registry remains empty before tools/list', async () => {
 	vi.useFakeTimers()
 	globalThis.WebSocket = FakeWorkerWebSocket as unknown as typeof WebSocket

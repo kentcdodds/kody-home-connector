@@ -400,7 +400,12 @@ export function createWorkerConnector(input: {
 				consecutiveReconnects,
 			}),
 		)
-		scheduleToolInventoryMonitor(connectionAttempt)
+		if (
+			!toolInventoryTimer &&
+			toolInventoryRefreshAttempts <= maxToolInventoryRefreshAttempts
+		) {
+			scheduleToolInventoryMonitor(connectionAttempt)
+		}
 	}
 
 	function recoverToolInventoryRegistration(expectedConnectionAttempt: number) {
@@ -524,10 +529,9 @@ export function createWorkerConnector(input: {
 		updateToolInventoryStatus({
 			localToolCount,
 			status: 'reconnecting_after_missing_remote_list',
-			reason:
-				localToolCount === 0
-					? 'Local tool registry remained empty after retries; reconnecting websocket session to rebuild registration state.'
-					: 'Kody did not request tools/list after retries; reconnecting websocket session to rebuild remote registration state.',
+			reason: toolsListRequestedForConnection
+				? 'Local registry recovered after Kody received an empty tools/list response, but Kody did not request a follow-up tools/list after refresh retries; reconnecting websocket session to rebuild remote registration state.'
+				: 'Kody did not request tools/list after retries; reconnecting websocket session to rebuild remote registration state.',
 			recoveryCount,
 		})
 		input.logger.error(
