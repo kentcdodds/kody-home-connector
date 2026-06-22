@@ -157,6 +157,17 @@ function getSentMessage(socket: FakeWorkerWebSocket, index: number) {
 	return JSON.parse(raw) as Record<string, unknown>
 }
 
+function countToolsChangedNotifications(socket: FakeWorkerWebSocket) {
+	return socket.sentMessages
+		.map((message) => JSON.parse(message) as Record<string, unknown>)
+		.filter((message) => {
+			const jsonRpcMessage = message['message'] as
+				| Record<string, unknown>
+				| undefined
+			return jsonRpcMessage?.['method'] === 'notifications/tools/list_changed'
+		}).length
+}
+
 const bondShadeTool = {
 	name: 'bond_shade_set_position',
 	title: 'Set Bond Shade Position',
@@ -403,10 +414,10 @@ test('connected websocket retries and reconnects when Kody never lists tools', a
 			}),
 		)
 
-		expect(socket.sentMessages).toHaveLength(2)
+		expect(countToolsChangedNotifications(socket)).toBe(1)
 
 		await vi.advanceTimersByTimeAsync(5_000)
-		expect(socket.sentMessages).toHaveLength(3)
+		expect(countToolsChangedNotifications(socket)).toBe(2)
 		expect(logger.warn).toHaveBeenCalledWith(
 			'worker.tools.remote_list_missing',
 			expect.stringContaining('Kody has not requested'),
@@ -417,7 +428,7 @@ test('connected websocket retries and reconnects when Kody never lists tools', a
 		)
 
 		await vi.advanceTimersByTimeAsync(5_000)
-		expect(socket.sentMessages).toHaveLength(4)
+		expect(countToolsChangedNotifications(socket)).toBe(3)
 
 		await vi.advanceTimersByTimeAsync(5_000)
 		expect(logger.error).toHaveBeenCalledWith(
