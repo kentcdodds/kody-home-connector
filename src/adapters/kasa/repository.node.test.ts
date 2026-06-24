@@ -148,3 +148,64 @@ test('sqlite storage persists Kasa plugs and encrypted credentials', () => {
 		})
 	}
 })
+
+test('upsert migrates adopted host fallback rows to stable plug ids', () => {
+	const directory = mkdtempSync(
+		path.join(tmpdir(), 'kody-home-connector-kasa-'),
+	)
+	const dbPath = path.join(directory, 'home-connector.sqlite')
+	const storage = createHomeConnectorStorage(createConfig(dbPath))
+
+	try {
+		upsertDiscoveredKasaPlugs(storage, 'default', [
+			{
+				plugId: 'host:192.168.1.145',
+				alias: 'Kasa plug 192.168.1.145',
+				host: '192.168.1.145',
+				port: 80,
+				model: null,
+				mac: null,
+				deviceId: null,
+				relayState: 'unknown',
+				rawSysinfo: null,
+				rawDiscovery: { server: 'SHIP 2.0' },
+				lastSeenAt: '2026-06-24T17:52:00.000Z',
+			},
+		])
+		adoptKasaPlug(storage, 'default', 'host:192.168.1.145')
+
+		upsertDiscoveredKasaPlugs(storage, 'default', [
+			{
+				plugId: 'stable-device-id',
+				alias: 'Water recirculating pump',
+				host: '192.168.1.145',
+				port: 80,
+				model: 'EP25',
+				mac: 'aabbccddeeff',
+				deviceId: 'stable-device-id',
+				relayState: 'off',
+				rawSysinfo: {
+					alias: 'Water recirculating pump',
+					device_id: 'stable-device-id',
+					relay_state: 0,
+				},
+				rawDiscovery: { server: 'SHIP 2.0' },
+				lastSeenAt: '2026-06-24T17:53:00.000Z',
+			},
+		])
+
+		expect(listKasaPlugs(storage, 'default')).toEqual([
+			expect.objectContaining({
+				plugId: 'stable-device-id',
+				adopted: true,
+				alias: 'Water recirculating pump',
+			}),
+		])
+	} finally {
+		storage.close()
+		rmSync(directory, {
+			force: true,
+			recursive: true,
+		})
+	}
+})

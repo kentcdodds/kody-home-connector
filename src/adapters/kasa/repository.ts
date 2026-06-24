@@ -178,6 +178,13 @@ function getDeletePlugStatement(storage: HomeConnectorStorage) {
 	`)
 }
 
+function getDeletePlugByHostStatement(storage: HomeConnectorStorage) {
+	return storage.db.query(`
+		DELETE FROM kasa_plugs
+		WHERE connector_id = ? AND host = ? AND port = ? AND plug_id = ?
+	`)
+}
+
 function getUpdateRelayStateStatement(storage: HomeConnectorStorage) {
 	return storage.db.query(`
 		UPDATE kasa_plugs
@@ -276,6 +283,10 @@ export function getKasaPlug(
 	)
 }
 
+function isHostFallbackPlugId(plugId: string) {
+	return plugId.startsWith('host:')
+}
+
 export function upsertDiscoveredKasaPlugs(
 	storage: HomeConnectorStorage,
 	connectorId: string,
@@ -286,7 +297,16 @@ export function upsertDiscoveredKasaPlugs(
 	)
 	const now = new Date().toISOString()
 	const upsertStatement = getUpsertPlugStatement(storage)
+	const deleteHostFallbackStatement = getDeletePlugByHostStatement(storage)
 	for (const plug of plugs) {
+		const hostFallback = [...existing.values()].find(
+			(current) =>
+				current.host === plug.host &&
+				current.port === plug.port &&
+				isHostFallbackPlugId(current.plugId) &&
+				!isHostFallbackPlugId(plug.plugId),
+		)
+		const adopted = existing.get(plug.plugId)?.adopted || hostFallback?.adopted
 		upsertStatement.run(
 			connectorId,
 			plug.plugId,
@@ -297,12 +317,20 @@ export function upsertDiscoveredKasaPlugs(
 			plug.mac,
 			plug.deviceId,
 			plug.relayState,
-			existing.get(plug.plugId)?.adopted ? 1 : 0,
+			adopted ? 1 : 0,
 			plug.rawSysinfo ? JSON.stringify(plug.rawSysinfo) : null,
 			plug.rawDiscovery ? JSON.stringify(plug.rawDiscovery) : null,
 			plug.lastSeenAt,
 			now,
 		)
+		if (hostFallback) {
+			deleteHostFallbackStatement.run(
+				connectorId,
+				hostFallback.host,
+				hostFallback.port,
+				hostFallback.plugId,
+			)
+		}
 	}
 	getDeleteMissingUnadoptedPlugsStatement(storage).run(
 		connectorId,

@@ -451,21 +451,27 @@ export class KasaKlapClient implements KasaClient {
 		payload: Record<string, unknown>,
 	): Promise<T> {
 		const session = await this.#ensureSession()
-		session.sequence += 1
+		const sequence = session.sequence + 1
 		const requestJson = JSON.stringify(payload)
 		const encrypted = encryptKlapPayload({
 			localSeed: session.localSeed,
 			remoteSeed: session.remoteSeed,
 			authHash: session.authHash,
-			sequence: session.sequence,
+			sequence,
 			payload: requestJson,
 		})
-		const response = await this.#post(
-			'request',
-			encrypted,
-			session.sessionCookie,
-			session.sequence,
-		)
+		let response: Response
+		try {
+			response = await this.#post(
+				'request',
+				encrypted,
+				session.sessionCookie,
+				sequence,
+			)
+		} catch (error) {
+			this.reset()
+			throw error
+		}
 		if (response.status === 403) {
 			this.reset()
 			throw new Error(
@@ -473,6 +479,7 @@ export class KasaKlapClient implements KasaClient {
 			)
 		}
 		if (response.status !== 200) {
+			this.reset()
 			throw new Error(
 				`Kasa plug ${this.#host} responded with ${response.status} to KLAP request.`,
 			)
@@ -482,9 +489,10 @@ export class KasaKlapClient implements KasaClient {
 			localSeed: session.localSeed,
 			remoteSeed: session.remoteSeed,
 			authHash: session.authHash,
-			sequence: session.sequence,
+			sequence,
 			payload: encryptedResponse,
 		})
+		session.sequence = sequence
 		return JSON.parse(decrypted) as T
 	}
 
