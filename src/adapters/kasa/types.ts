@@ -7,6 +7,7 @@ export type KasaSysInfo = Record<string, unknown> & {
 	mac?: string
 	device_id?: string
 	relay_state?: number | boolean
+	device_on?: boolean
 }
 
 export type KasaCredentials = {

@@ -1,8 +1,10 @@
+import http from 'node:http'
 import {
 	createCipheriv,
 	createDecipheriv,
 	createHash,
 	randomBytes,
+	randomUUID,
 	timingSafeEqual,
 } from 'node:crypto'
 import {
@@ -31,12 +33,25 @@ type KlapCandidate = {
 	password: string
 }
 
+type KlapPostResponse = {
+	status: number
+	headers: Headers
+	arrayBuffer(): Promise<ArrayBuffer>
+}
+
 type KlapClientInput = {
 	host: string
 	port?: number
 	credentials: KasaClientCredentials
 	timeoutMs?: number
-	fetchImpl?: typeof fetch
+	postImpl?: (
+		url: URL,
+		input: {
+			body: Buffer
+			cookie?: string
+			timeoutMs: number
+		},
+	) => Promise<KlapPostResponse>
 	localSeedFactory?: () => Buffer
 	now?: () => number
 	hashVersion?: KlapHashVersion
@@ -279,6 +294,9 @@ export function decryptKlapPayload(input: {
 }
 
 function getRelayStateFromSysinfo(sysinfo: KasaSysInfo) {
+	if (typeof sysinfo.device_on === 'boolean') {
+		return sysinfo.device_on ? 'on' : 'off'
+	}
 	const relay = sysinfo.relay_state
 	return relay === true || relay === 1
 		? 'on'
@@ -287,8 +305,123 @@ function getRelayStateFromSysinfo(sysinfo: KasaSysInfo) {
 			: 'unknown'
 }
 
+function createTerminalUuid() {
+	return createHash('md5').update(randomUUID()).digest('base64')
+}
+
+function getSmartErrorCode(response: Record<string, unknown>) {
+	const errorCode = response.error_code
+	return typeof errorCode === 'number' ? errorCode : 0
+}
+
+function decodeMaybeBase64Alias(value: string) {
+	try {
+		const decoded = Buffer.from(value, 'base64').toString('utf8').trim()
+		if (decoded.length > 0 && !decoded.includes('\u0000')) return decoded
+	} catch {
+		// Keep the raw nickname when it is not base64-encoded.
+	}
+	return value.trim()
+}
+
+function getNestedRecord(
+	value: Record<string, unknown>,
+	path: Array<string>,
+): Record<string, unknown> | null {
+	let current: unknown = value
+	for (const key of path) {
+		if (!current || typeof current !== 'object' || Array.isArray(current)) {
+			return null
+		}
+		current = (current as Record<string, unknown>)[key]
+	}
+	return current && typeof current === 'object' && !Array.isArray(current)
+		? (current as Record<string, unknown>)
+		: null
+}
+
+function normalizeSmartDeviceInfo(info: Record<string, unknown>): KasaSysInfo {
+	const nickname =
+		typeof info.nickname === 'string'
+			? decodeMaybeBase64Alias(info.nickname)
+			: undefined
+	return {
+		...info,
+		alias:
+			nickname ??
+			(typeof info.alias === 'string' ? decodeMaybeBase64Alias(info.alias) : undefined),
+		relay_state:
+			typeof info.device_on === 'boolean' ? info.device_on : info.relay_state,
+	}
+}
+
 export function kasaRelayStateFromSysinfo(sysinfo: KasaSysInfo) {
 	return getRelayStateFromSysinfo(sysinfo)
+}
+
+function headersFromNodeResponse(
+	headers: http.IncomingHttpHeaders,
+): Headers {
+	const result = new Headers()
+	for (const [name, value] of Object.entries(headers)) {
+		if (value == null) continue
+		result.set(name, Array.isArray(value) ? value.join(', ') : value)
+	}
+	return result
+}
+
+function postWithNodeHttp(
+	url: URL,
+	input: {
+		body: Buffer
+		cookie?: string
+		timeoutMs: number
+	},
+): Promise<KlapPostResponse> {
+	return new Promise((resolve, reject) => {
+		const request = http.request(
+			{
+				hostname: url.hostname,
+				port: url.port ? Number(url.port) : 80,
+				path: `${url.pathname}${url.search}`,
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/octet-stream',
+					'Content-Length': input.body.length,
+					Connection: 'close',
+					...(input.cookie
+						? { Cookie: `TP_SESSIONID=${input.cookie}` }
+						: {}),
+				},
+				timeout: input.timeoutMs,
+			},
+			(response) => {
+				const chunks: Array<Buffer> = []
+				response.on('data', (chunk) => {
+					chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+				})
+				response.on('end', () => {
+					const body = Buffer.concat(chunks)
+					resolve({
+						status: response.statusCode ?? 0,
+						headers: headersFromNodeResponse(response.headers),
+						arrayBuffer: async () =>
+							body.buffer.slice(
+								body.byteOffset,
+								body.byteOffset + body.byteLength,
+							),
+					})
+				})
+			},
+		)
+		request.on('timeout', () => {
+			request.destroy(
+				new Error(`Kasa KLAP request timed out for ${url.hostname}.`),
+			)
+		})
+		request.on('error', reject)
+		request.end(input.body)
+	})
 }
 
 export class KasaKlapClient implements KasaClient {
@@ -296,21 +429,23 @@ export class KasaKlapClient implements KasaClient {
 	#port: number
 	#credentials: KasaClientCredentials
 	#timeoutMs: number
-	#fetchImpl: typeof fetch
+	#postImpl: KlapClientInput['postImpl']
 	#localSeedFactory: () => Buffer
 	#now: () => number
 	#hashVersion: KlapHashVersion
 	#session: KlapSession | null = null
+	#terminalUuid: string
 
 	constructor(input: KlapClientInput) {
 		this.#host = input.host
 		this.#port = input.port ?? 80
 		this.#credentials = input.credentials
 		this.#timeoutMs = input.timeoutMs ?? 8_000
-		this.#fetchImpl = input.fetchImpl ?? fetch
+		this.#postImpl = input.postImpl ?? postWithNodeHttp
 		this.#localSeedFactory = input.localSeedFactory ?? (() => randomBytes(16))
 		this.#now = input.now ?? (() => Date.now())
 		this.#hashVersion = input.hashVersion ?? 1
+		this.#terminalUuid = createTerminalUuid()
 	}
 
 	get authLabel() {
@@ -330,25 +465,17 @@ export class KasaKlapClient implements KasaClient {
 			`http://${this.#host}:${String(this.#port)}/app/${path}`,
 		)
 		if (seq != null) url.searchParams.set('seq', String(seq))
-		const controller = new AbortController()
-		const timeout = setTimeout(() => controller.abort(), this.#timeoutMs)
 		try {
-			return await this.#fetchImpl(url, {
-				method: 'POST',
+			return await this.#postImpl!(url, {
 				body,
-				headers: {
-					'Content-Type': 'application/octet-stream',
-					...(cookie ? { Cookie: `TP_SESSIONID=${cookie}` } : {}),
-				},
-				signal: controller.signal,
+				cookie,
+				timeoutMs: this.#timeoutMs,
 			})
 		} catch (error) {
-			if (error instanceof Error && error.name === 'AbortError') {
+			if (error instanceof Error && /timed out/i.test(error.message)) {
 				throw new Error(`Kasa KLAP request timed out for ${this.#host}.`)
 			}
 			throw error
-		} finally {
-			clearTimeout(timeout)
 		}
 	}
 
@@ -493,7 +620,7 @@ export class KasaKlapClient implements KasaClient {
 			sequence,
 			payload: requestJson,
 		})
-		let response: Response
+		let response: KlapPostResponse
 		try {
 			response = await this.#post(
 				'request',
@@ -529,7 +656,39 @@ export class KasaKlapClient implements KasaClient {
 		return JSON.parse(decrypted) as T
 	}
 
+	async #smartRequest(
+		method: string,
+		params?: Record<string, unknown>,
+	) {
+		const payload: Record<string, unknown> = {
+			method,
+			request_time_milis: this.#now(),
+			terminal_uuid: this.#terminalUuid,
+		}
+		if (params && Object.keys(params).length > 0) {
+			payload.params = params
+		}
+		const response = await this.request<Record<string, unknown>>(payload)
+		const errorCode = getSmartErrorCode(response)
+		if (errorCode !== 0) {
+			throw new Error(
+				`Kasa smart request ${method} failed with error_code ${String(errorCode)}.`,
+			)
+		}
+		return response
+	}
+
 	async getSysInfo() {
+		try {
+			const smartResponse = await this.#smartRequest('get_device_info')
+			const smartInfo = smartResponse.result
+			if (smartInfo && typeof smartInfo === 'object' && !Array.isArray(smartInfo)) {
+				return normalizeSmartDeviceInfo(smartInfo as Record<string, unknown>)
+			}
+		} catch {
+			// Fall back to legacy IOT sysinfo queries.
+		}
+
 		const response = await this.request<{
 			system?: { get_sysinfo?: KasaSysInfo }
 			result?: { system?: { get_sysinfo?: KasaSysInfo } }
@@ -542,20 +701,26 @@ export class KasaKlapClient implements KasaClient {
 			response.system?.get_sysinfo ?? response.result?.system?.get_sysinfo
 		if (!sysinfo || typeof sysinfo !== 'object') {
 			throw new Error(
-				`Kasa plug ${this.#host} did not return system.get_sysinfo.`,
+				`Kasa plug ${this.#host} did not return device info from KLAP.`,
 			)
 		}
 		return sysinfo
 	}
 
 	async setRelayState(state: boolean) {
-		return await this.request({
-			system: {
-				set_relay_state: {
-					state: state ? 1 : 0,
+		try {
+			return await this.#smartRequest('set_device_info', {
+				device_on: state,
+			})
+		} catch {
+			return await this.request({
+				system: {
+					set_relay_state: {
+						state: state ? 1 : 0,
+					},
 				},
-			},
-		})
+			})
+		}
 	}
 }
 
