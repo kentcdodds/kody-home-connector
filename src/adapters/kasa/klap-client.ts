@@ -484,6 +484,16 @@ function normalizeKlapHandshake1Payload(body: Buffer, headers: Headers) {
 	return trimmed
 }
 
+function normalizeKlapEncryptedPayload(body: Buffer, headers: Headers) {
+	let normalized = truncateBodyToContentLength(body, headers)
+	if (normalized.length <= 32) return normalized
+	const remainder = (normalized.length - 32) % 16
+	if (remainder !== 0) {
+		normalized = normalized.subarray(0, normalized.length - remainder)
+	}
+	return normalized
+}
+
 function createKlapPostResponse(
 	body: Buffer,
 	input: { status: number; headers: Headers },
@@ -636,7 +646,10 @@ function postWithNodeHttpAndRawHandshakeFallback(
 		return postWithNodeHttp(url, input)
 	}
 	return postWithNodeHttp(url, input).then((response) => {
-		if (getCookieValue(response.headers, 'TP_SESSIONID')) {
+		if (
+			response.status === 200 &&
+			getCookieValue(response.headers, 'TP_SESSIONID')
+		) {
 			return response
 		}
 		return postWithRawSocket(url, input)
@@ -884,7 +897,10 @@ export class KasaKlapClient implements KasaClient {
 				`Kasa plug ${this.#host} responded with ${response.status} to KLAP request.`,
 			)
 		}
-		const encryptedResponse = Buffer.from(await response.arrayBuffer())
+		const encryptedResponse = normalizeKlapEncryptedPayload(
+			Buffer.from(await response.arrayBuffer()),
+			response.headers,
+		)
 		const decrypted = decryptKlapPayload({
 			localSeed: session.localSeed,
 			remoteSeed: session.remoteSeed,
