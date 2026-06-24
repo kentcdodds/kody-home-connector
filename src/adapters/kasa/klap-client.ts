@@ -624,12 +624,34 @@ function postWithNodeHttp(
 	})
 }
 
+function postWithNodeHttpAndRawHandshakeFallback(
+	url: URL,
+	input: {
+		body: Buffer
+		cookie?: string
+		timeoutMs: number
+	},
+): Promise<KlapPostResponse> {
+	if (!url.pathname.endsWith('/handshake1')) {
+		return postWithNodeHttp(url, input)
+	}
+	return postWithNodeHttp(url, input).then((response) => {
+		if (getCookieValue(response.headers, 'TP_SESSIONID')) {
+			return response
+		}
+		return postWithRawSocket(url, input)
+	})
+}
+
 function createKlapPostImpl(input?: KlapClientInput['postImpl']) {
 	if (input) return input
 	if (process.env.KASA_KLAP_USE_RAW_SOCKET === 'true') {
 		return postWithRawSocket
 	}
-	return postWithNodeHttp
+	if (process.env.KASA_KLAP_USE_NODE_HTTP === 'true') {
+		return postWithNodeHttp
+	}
+	return postWithNodeHttpAndRawHandshakeFallback
 }
 
 export class KasaKlapClient implements KasaClient {
