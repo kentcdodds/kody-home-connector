@@ -414,10 +414,6 @@ function isHostFallbackPlugId(plugId: string) {
 	return plugId.startsWith('host:')
 }
 
-function hasStablePlugIdentity(plug: KasaDiscoveredPlug) {
-	return !isHostFallbackPlugId(plug.plugId)
-}
-
 export function upsertKasaDiscoveredPlugByStableIdentity(
 	plugs: Map<string, KasaDiscoveredPlug>,
 	plug: KasaDiscoveredPlug,
@@ -466,9 +462,7 @@ async function discoverKasaPlugs(input: {
 			sysinfo: null,
 			lastSeenAt: new Date().toISOString(),
 		})
-		if (hasStablePlugIdentity(plug)) {
-			upsertKasaDiscoveredPlugByStableIdentity(plugs, plug)
-		}
+		upsertKasaDiscoveredPlugByStableIdentity(plugs, plug)
 		probes.push({
 			host: hit.host,
 			port: hit.port,
@@ -498,7 +492,7 @@ async function discoverKasaPlugs(input: {
 				clientFactory,
 			})
 			probes.push(result.diagnostic)
-			if (result.plug && hasStablePlugIdentity(result.plug)) {
+			if (result.plug) {
 				upsertKasaDiscoveredPlugByStableIdentity(plugs, result.plug)
 			}
 		}

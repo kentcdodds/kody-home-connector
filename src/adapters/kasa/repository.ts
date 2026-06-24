@@ -348,10 +348,12 @@ export function upsertDiscoveredKasaPlugs(
 			)
 		}
 	}
-	getDeleteMissingUnadoptedPlugsStatement(storage).run(
-		connectorId,
-		JSON.stringify(plugs.map((plug) => plug.plugId)),
-	)
+	if (plugs.length > 0) {
+		getDeleteMissingUnadoptedPlugsStatement(storage).run(
+			connectorId,
+			JSON.stringify(plugs.map((plug) => plug.plugId)),
+		)
+	}
 	return listKasaPlugs(storage, connectorId)
 }
 

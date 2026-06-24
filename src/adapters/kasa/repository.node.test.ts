@@ -226,3 +226,44 @@ test('upsert migrates adopted host fallback rows to stable plug ids', () => {
 		})
 	}
 })
+
+test('empty Kasa scan does not prune existing unadopted plugs', () => {
+	const directory = mkdtempSync(
+		path.join(tmpdir(), 'kody-home-connector-kasa-'),
+	)
+	const dbPath = path.join(directory, 'home-connector.sqlite')
+	const storage = createHomeConnectorStorage(createConfig(dbPath))
+
+	try {
+		upsertDiscoveredKasaPlugs(storage, 'default', [
+			{
+				plugId: 'plug-1',
+				alias: 'Water recirculating pump',
+				host: '192.168.1.145',
+				port: 80,
+				model: 'EP25',
+				mac: 'aabbccddeeff',
+				deviceId: 'plug-1',
+				relayState: 'off',
+				rawSysinfo: null,
+				rawDiscovery: { server: 'SHIP 2.0' },
+				lastSeenAt: '2026-06-24T17:52:00.000Z',
+			},
+		])
+
+		upsertDiscoveredKasaPlugs(storage, 'default', [])
+
+		expect(listKasaPlugs(storage, 'default')).toEqual([
+			expect.objectContaining({
+				plugId: 'plug-1',
+				adopted: false,
+			}),
+		])
+	} finally {
+		storage.close()
+		rmSync(directory, {
+			force: true,
+			recursive: true,
+		})
+	}
+})
