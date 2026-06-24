@@ -450,6 +450,8 @@ function parseRawHttpResponse(raw: Buffer) {
 	return { status, headers, body }
 }
 
+const klapHandshake1PayloadLength = 48
+
 function truncateBodyToContentLength(body: Buffer, headers: Headers) {
 	const contentLengthHeader = headers.get('content-length')
 	if (!contentLengthHeader) return body
@@ -457,6 +459,15 @@ function truncateBodyToContentLength(body: Buffer, headers: Headers) {
 	if (!Number.isFinite(contentLength) || contentLength < 0) return body
 	if (body.length > contentLength) return body.subarray(0, contentLength)
 	return body
+}
+
+function normalizeKlapHandshake1Payload(body: Buffer, headers: Headers) {
+	const trimmed = truncateBodyToContentLength(body, headers)
+	if (trimmed.length === klapHandshake1PayloadLength) return trimmed
+	if (trimmed.length === klapHandshake1PayloadLength + 1) {
+		return trimmed.subarray(0, klapHandshake1PayloadLength)
+	}
+	return trimmed
 }
 
 function createKlapPostResponse(
@@ -684,19 +695,25 @@ export class KasaKlapClient implements KasaClient {
 	async #performHandshake() {
 		const localSeed = normalizeLocalSeed(this.#localSeedFactory())
 		let handshake1 = await this.#post('handshake1', localSeed)
-		let handshake1Payload = Buffer.from(await handshake1.arrayBuffer())
-		if (handshake1Payload.length !== 48) {
+		let handshake1Payload = normalizeKlapHandshake1Payload(
+			Buffer.from(await handshake1.arrayBuffer()),
+			handshake1.headers,
+		)
+		if (handshake1Payload.length !== klapHandshake1PayloadLength) {
 			handshake1 = await this.#post('handshake1', localSeed)
-			handshake1Payload = Buffer.from(await handshake1.arrayBuffer())
+			handshake1Payload = normalizeKlapHandshake1Payload(
+				Buffer.from(await handshake1.arrayBuffer()),
+				handshake1.headers,
+			)
 		}
 		if (handshake1.status !== 200) {
 			throw new Error(
 				`Kasa plug ${this.#host} responded with ${handshake1.status} to KLAP handshake1.`,
 			)
 		}
-		if (handshake1Payload.length !== 48) {
+		if (handshake1Payload.length !== klapHandshake1PayloadLength) {
 			throw new Error(
-				`Kasa plug ${this.#host} returned an unexpected KLAP handshake1 payload (${String(handshake1Payload.length)} bytes, expected 48).`,
+				`Kasa plug ${this.#host} returned an unexpected KLAP handshake1 payload (${String(handshake1Payload.length)} bytes, expected ${String(klapHandshake1PayloadLength)}).`,
 			)
 		}
 		const sessionCookie = getCookieValue(handshake1.headers, 'TP_SESSIONID')
