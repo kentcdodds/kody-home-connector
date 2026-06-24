@@ -20,16 +20,30 @@ import { type HomeConnectorState } from '../src/state.ts'
 
 type Banner = { tone: 'success' | 'error'; message: string } | null
 
+function getAllowedFormOrigins(request: Request) {
+	const requestUrl = new URL(request.url)
+	const origins = new Set([requestUrl.origin])
+	const host = request.headers.get('host')?.trim()
+	if (host) {
+		try {
+			origins.add(`${requestUrl.protocol}//${host}`)
+		} catch {
+			// Ignore malformed Host headers; the request URL origin remains valid.
+		}
+	}
+	return origins
+}
+
 function assertSameOriginFormPost(request: Request) {
-	const expectedOrigin = new URL(request.url).origin
+	const allowedOrigins = getAllowedFormOrigins(request)
 	const origin = request.headers.get('origin')
-	if (origin && origin !== expectedOrigin) {
+	if (origin && !allowedOrigins.has(origin)) {
 		throw new Error('Rejected cross-origin credential submission.')
 	}
 	const referer = request.headers.get('referer')
 	if (!origin && referer) {
 		try {
-			if (new URL(referer).origin !== expectedOrigin) {
+			if (!allowedOrigins.has(new URL(referer).origin)) {
 				throw new Error('Rejected cross-origin credential submission.')
 			}
 		} catch {
