@@ -120,11 +120,18 @@ function getSetCookieValues(headers: Headers) {
 }
 
 function getCookieValue(headers: Headers, name: string) {
+	const target = name.toLowerCase()
 	for (const cookie of getSetCookieValues(headers)) {
 		for (const part of cookie.split(/,(?=[^;,]+=)/)) {
-			const [pair] = part.split(';')
-			const [cookieName, ...valueParts] = (pair ?? '').split('=')
-			if (cookieName?.trim() === name) return valueParts.join('=').trim()
+			for (const segment of part.split(';')) {
+				const trimmed = segment.trim()
+				if (!trimmed) continue
+				const separatorIndex = trimmed.indexOf('=')
+				if (separatorIndex === -1) continue
+				const cookieName = trimmed.slice(0, separatorIndex).trim()
+				if (cookieName.toLowerCase() !== target) continue
+				return trimmed.slice(separatorIndex + 1).trim()
+			}
 		}
 	}
 	return null
@@ -393,6 +400,13 @@ function headersFromNodeResponse(headers: http.IncomingHttpHeaders): Headers {
 	const result = new Headers()
 	for (const [name, value] of Object.entries(headers)) {
 		if (value == null) continue
+		if (name.toLowerCase() === 'set-cookie') {
+			const values = Array.isArray(value) ? value : [value]
+			for (const cookie of values) {
+				result.append('set-cookie', cookie)
+			}
+			continue
+		}
 		result.set(name, Array.isArray(value) ? value.join(', ') : value)
 	}
 	return result
@@ -612,10 +626,10 @@ function postWithNodeHttp(
 
 function createKlapPostImpl(input?: KlapClientInput['postImpl']) {
 	if (input) return input
-	if (process.env.KASA_KLAP_USE_RAW_SOCKET === 'true') {
-		return postWithRawSocket
+	if (process.env.KASA_KLAP_USE_NODE_HTTP === 'true') {
+		return postWithNodeHttp
 	}
-	return postWithNodeHttp
+	return postWithRawSocket
 }
 
 export class KasaKlapClient implements KasaClient {
