@@ -8,7 +8,6 @@ import {
 	getKasaCredentials,
 	getKasaPlug,
 	listKasaPlugs,
-	listKasaPublicPlugs,
 	removeKasaPlug,
 	saveKasaCredentials,
 	toKasaPublicPlug,
@@ -76,6 +75,29 @@ function mapStatusResult(input: {
 	}
 }
 
+function getNestedNumber(value: unknown, path: Array<string>) {
+	let current = value
+	for (const key of path) {
+		if (!current || typeof current !== 'object' || Array.isArray(current)) {
+			return null
+		}
+		current = (current as Record<string, unknown>)[key]
+	}
+	return typeof current === 'number' ? current : null
+}
+
+function getRelaySetErrorCode(response: Record<string, unknown>) {
+	return (
+		getNestedNumber(response, ['system', 'set_relay_state', 'err_code']) ??
+		getNestedNumber(response, [
+			'result',
+			'system',
+			'set_relay_state',
+			'err_code',
+		])
+	)
+}
+
 export function createKasaAdapter(input: {
 	config: HomeConnectorConfig
 	state: HomeConnectorState
@@ -116,7 +138,10 @@ export function createKasaAdapter(input: {
 	}
 
 	function listPlugs() {
-		return listKasaPublicPlugs(storage, connectorId)
+		const credentials = getCredentials()
+		return listKasaPlugs(storage, connectorId).map((plug) =>
+			toKasaPublicPlug(plug, credentials),
+		)
 	}
 
 	function requirePlug(plugId: string) {
@@ -231,9 +256,21 @@ export function createKasaAdapter(input: {
 		const client = createClient(plug)
 		try {
 			const response = await client.setRelayState(state)
+			const errCode = getRelaySetErrorCode(response)
+			if (errCode != null && errCode !== 0) {
+				throw new Error(
+					`Kasa plug "${plug.alias}" rejected relay update with err_code ${String(errCode)}.`,
+				)
+			}
 			const sysinfo = await client.getSysInfo()
 			updateSuccessfulAuth()
 			const relayState = kasaRelayStateFromSysinfo(sysinfo)
+			const requestedRelayState = state ? 'on' : 'off'
+			if (relayState !== requestedRelayState) {
+				throw new Error(
+					`Kasa plug "${plug.alias}" did not report relay state ${requestedRelayState} after control; current state is ${relayState}.`,
+				)
+			}
 			const updated =
 				updateKasaPlugSysinfo({
 					storage,
@@ -245,7 +282,7 @@ export function createKasaAdapter(input: {
 				}) ?? plug
 			return {
 				plug: updated,
-				requestedRelayState: state ? 'on' : 'off',
+				requestedRelayState,
 				relayState,
 				response,
 				sysinfo,

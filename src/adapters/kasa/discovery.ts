@@ -410,6 +410,32 @@ async function probeShipHost(input: {
 	}
 }
 
+function isHostFallbackPlugId(plugId: string) {
+	return plugId.startsWith('host:')
+}
+
+export function upsertKasaDiscoveredPlugByStableIdentity(
+	plugs: Map<string, KasaDiscoveredPlug>,
+	plug: KasaDiscoveredPlug,
+) {
+	const sameHostEntries = [...plugs.entries()].filter(
+		([, current]) => current.host === plug.host && current.port === plug.port,
+	)
+	if (isHostFallbackPlugId(plug.plugId)) {
+		const stableExisting = sameHostEntries.find(
+			([plugId]) => !isHostFallbackPlugId(plugId),
+		)
+		if (stableExisting) return
+	} else {
+		for (const [plugId] of sameHostEntries) {
+			if (isHostFallbackPlugId(plugId)) {
+				plugs.delete(plugId)
+			}
+		}
+	}
+	plugs.set(plug.plugId, plug)
+}
+
 async function discoverKasaPlugs(input: {
 	config: HomeConnectorConfig
 	credentials: KasaClientCredentials | null
@@ -436,7 +462,7 @@ async function discoverKasaPlugs(input: {
 			sysinfo: null,
 			lastSeenAt: new Date().toISOString(),
 		})
-		plugs.set(plug.plugId, plug)
+		upsertKasaDiscoveredPlugByStableIdentity(plugs, plug)
 		probes.push({
 			host: hit.host,
 			port: hit.port,
@@ -467,7 +493,7 @@ async function discoverKasaPlugs(input: {
 			})
 			probes.push(result.diagnostic)
 			if (result.plug) {
-				plugs.set(result.plug.plugId, result.plug)
+				upsertKasaDiscoveredPlugByStableIdentity(plugs, result.plug)
 			}
 		}
 	}

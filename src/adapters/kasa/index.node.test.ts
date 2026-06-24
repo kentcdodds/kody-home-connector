@@ -169,3 +169,147 @@ test('adapter scans, adopts, reads status, and controls adopted Kasa plugs', asy
 		storage.close()
 	}
 })
+
+test('adapter marks plugs credential-ready when env credentials are configured', async () => {
+	const config = {
+		...createConfig(),
+		kasaUsername: 'kent@example.com',
+		kasaPassword: 'secret-password',
+	}
+	const state = createAppState()
+	const storage = createHomeConnectorStorage(config)
+	const adapter = createKasaAdapter({
+		config,
+		state,
+		storage,
+		scanPlugs: async () => ({
+			plugs: [
+				{
+					plugId: 'plug-1',
+					alias: 'Water recirculating pump',
+					host: '192.168.1.145',
+					port: 80,
+					model: 'EP25',
+					mac: 'aabbccddeeff',
+					deviceId: 'plug-1',
+					relayState: 'off',
+					rawSysinfo: null,
+					rawDiscovery: { server: 'SHIP 2.0' },
+					lastSeenAt: '2026-06-24T17:52:00.000Z',
+				},
+			],
+			diagnostics: {
+				protocol: 'klap',
+				discoveryUrl: '192.168.1.145/32',
+				scannedAt: '2026-06-24T17:52:00.000Z',
+				udpPorts: [9999, 20002],
+				probes: [],
+				subnetProbe: {
+					cidrs: ['192.168.1.145/32'],
+					hostsProbed: 1,
+					shipMatches: 1,
+					authenticatedMatches: 1,
+				},
+				credentialStatus: 'present',
+			},
+		}),
+	})
+
+	try {
+		await adapter.scan()
+		expect(adapter.getStatus()).toMatchObject({
+			config: {
+				configured: true,
+				hasEnvCredentials: true,
+				hasStoredCredentials: false,
+				username: 'kent@example.com',
+			},
+			plugs: [
+				expect.objectContaining({
+					hasCredentials: true,
+				}),
+			],
+		})
+	} finally {
+		storage.close()
+	}
+})
+
+test('adapter rejects relay control when device reports an error or unchanged state', async () => {
+	const config = createConfig()
+	const state = createAppState()
+	const storage = createHomeConnectorStorage(config)
+	let responseMode: 'err' | 'unchanged' = 'err'
+	const fakeClient: KasaClient = {
+		async getSysInfo() {
+			return {
+				alias: 'Water recirculating pump',
+				model: 'EP25',
+				device_id: 'plug-1',
+				relay_state: 0,
+			}
+		},
+		async setRelayState() {
+			return {
+				system: {
+					set_relay_state: {
+						err_code: responseMode === 'err' ? -1 : 0,
+					},
+				},
+			}
+		},
+	}
+	const adapter = createKasaAdapter({
+		config,
+		state,
+		storage,
+		clientFactory: () => fakeClient,
+		scanPlugs: async () => ({
+			plugs: [
+				{
+					plugId: 'plug-1',
+					alias: 'Water recirculating pump',
+					host: '192.168.1.145',
+					port: 80,
+					model: 'EP25',
+					mac: 'aabbccddeeff',
+					deviceId: 'plug-1',
+					relayState: 'off',
+					rawSysinfo: null,
+					rawDiscovery: { server: 'SHIP 2.0' },
+					lastSeenAt: '2026-06-24T17:52:00.000Z',
+				},
+			],
+			diagnostics: {
+				protocol: 'klap',
+				discoveryUrl: '192.168.1.145/32',
+				scannedAt: '2026-06-24T17:52:00.000Z',
+				udpPorts: [9999, 20002],
+				probes: [],
+				subnetProbe: {
+					cidrs: ['192.168.1.145/32'],
+					hostsProbed: 1,
+					shipMatches: 1,
+					authenticatedMatches: 1,
+				},
+				credentialStatus: 'present',
+			},
+		}),
+	})
+
+	try {
+		adapter.setCredentials('kent@example.com', 'secret-password')
+		await adapter.scan()
+		adapter.adoptPlug({ plugId: 'plug-1' })
+
+		await expect(adapter.turnOn({ plugId: 'plug-1' })).rejects.toThrow(
+			'err_code -1',
+		)
+		responseMode = 'unchanged'
+		await expect(adapter.turnOn({ plugId: 'plug-1' })).rejects.toThrow(
+			'did not report relay state on',
+		)
+	} finally {
+		storage.close()
+	}
+})

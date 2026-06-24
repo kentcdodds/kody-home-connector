@@ -389,6 +389,7 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 		storage,
 	})
 	const venstar = createVenstarAdapter({ config, state, storage })
+	let kasaRelayState = 1
 	const kasa = createKasaAdapter({
 		config,
 		state,
@@ -447,10 +448,11 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 					alias: 'Water recirculating pump',
 					model: 'EP25',
 					device_id: 'kasa-plug-1',
-					relay_state: 1,
+					relay_state: kasaRelayState,
 				}
 			},
-			async setRelayState() {
+			async setRelayState(state) {
+				kasaRelayState = state ? 1 : 0
 				return { system: { set_relay_state: { err_code: 0 } } }
 			},
 		}),
