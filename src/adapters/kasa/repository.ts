@@ -42,14 +42,30 @@ function encryptPassword(password: string, sharedSecret: string | null) {
 	})
 }
 
+function encryptUsername(username: string, sharedSecret: string | null) {
+	return encryptSecret({
+		value: username,
+		sharedSecret,
+		missingSecretMessage:
+			'Cannot store Kasa credentials without HOME_CONNECTOR_SHARED_SECRET.',
+	})
+}
+
 function decryptPassword(password: string | null, sharedSecret: string | null) {
 	return decryptSecret(password, sharedSecret)
+}
+
+function decryptUsername(username: string | null, sharedSecret: string | null) {
+	return decryptSecret(username, sharedSecret)
 }
 
 function safeParseJson(value: string | null) {
 	if (!value) return null
 	try {
-		return JSON.parse(value) as Record<string, unknown>
+		const parsed = JSON.parse(value) as unknown
+		return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+			? (parsed as Record<string, unknown>)
+			: null
 	} catch {
 		return null
 	}
@@ -385,7 +401,7 @@ export function saveKasaCredentials(input: {
 	const now = new Date().toISOString()
 	getUpsertCredentialsStatement(input.storage).run(
 		input.connectorId,
-		input.username,
+		encryptUsername(input.username, input.storage.sharedSecret),
 		encryptPassword(input.password, input.storage.sharedSecret),
 		input.lastAuthenticatedAt ?? null,
 		input.lastAuthError ?? null,
@@ -400,10 +416,11 @@ export function getKasaCredentials(
 ): KasaCredentials | null {
 	const row = getCredentialsRow(storage, connectorId)
 	if (!row) return null
+	const username = decryptUsername(row.username, storage.sharedSecret)
 	const password = decryptPassword(row.password, storage.sharedSecret)
-	if (!password) return null
+	if (!username || !password) return null
 	return {
-		username: row.username,
+		username,
 		password,
 		lastAuthenticatedAt: row.last_authenticated_at,
 		lastAuthError: row.last_auth_error,

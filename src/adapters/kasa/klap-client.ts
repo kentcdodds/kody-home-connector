@@ -3,6 +3,7 @@ import {
 	createDecipheriv,
 	createHash,
 	randomBytes,
+	timingSafeEqual,
 } from 'node:crypto'
 import {
 	type KasaClient,
@@ -21,6 +22,7 @@ type KlapSession = {
 	expiresAt: number
 	authLabel: string
 	hashVersion: KlapHashVersion
+	usedConfiguredCredentials: boolean
 }
 
 type KlapCandidate = {
@@ -248,12 +250,27 @@ export function decryptKlapPayload(input: {
 }) {
 	const key = deriveKlapKey(input)
 	const iv = deriveKlapIv(input)
+	const signature = input.payload.subarray(0, 32)
+	const ciphertext = input.payload.subarray(32)
+	const expectedSignature = hash(
+		'sha256',
+		concat(
+			deriveKlapSignatureSeed(input),
+			signedInt32ToBuffer(input.sequence),
+			ciphertext,
+		),
+	)
+	if (
+		signature.length !== expectedSignature.length ||
+		!timingSafeEqual(signature, expectedSignature)
+	) {
+		throw new Error('Kasa KLAP response signature did not match.')
+	}
 	const decipher = createDecipheriv(
 		'aes-128-cbc',
 		key,
 		concat(iv.prefix, signedInt32ToBuffer(input.sequence)),
 	)
-	const ciphertext = input.payload.subarray(32)
 	const plaintext = Buffer.concat([
 		decipher.update(ciphertext),
 		decipher.final(),
@@ -298,6 +315,10 @@ export class KasaKlapClient implements KasaClient {
 
 	get authLabel() {
 		return this.#session?.authLabel ?? null
+	}
+
+	get usedConfiguredCredentials() {
+		return this.#session?.usedConfiguredCredentials ?? false
 	}
 
 	reset() {
@@ -374,26 +395,37 @@ export class KasaKlapClient implements KasaClient {
 		const serverHash = handshake1Payload.subarray(16)
 		let matchedAuthHash: Buffer | null = null
 		let matchedLabel = ''
-		for (const candidate of this.#getAuthCandidates()) {
-			const authHash = generateKlapAuthHash(candidate, this.#hashVersion)
-			const expected = generateKlapHandshake1Hash({
-				localSeed,
-				remoteSeed,
-				authHash,
-				hashVersion: this.#hashVersion,
-			})
-			const promptDocumentedFallback =
-				this.#hashVersion === 1
-					? hash('sha256', concat(remoteSeed, authHash))
-					: null
-			if (
-				expected.equals(serverHash) ||
-				Boolean(promptDocumentedFallback?.equals(serverHash))
-			) {
-				matchedAuthHash = authHash
-				matchedLabel = candidate.label
-				break
+		let matchedHashVersion = this.#hashVersion
+		let usedConfiguredCredentials = false
+		const hashVersions =
+			this.#hashVersion === 1
+				? ([1, 2] as const)
+				: ([this.#hashVersion] as const)
+		for (const hashVersion of hashVersions) {
+			for (const [index, candidate] of this.#getAuthCandidates().entries()) {
+				const authHash = generateKlapAuthHash(candidate, hashVersion)
+				const expected = generateKlapHandshake1Hash({
+					localSeed,
+					remoteSeed,
+					authHash,
+					hashVersion,
+				})
+				const promptDocumentedFallback =
+					hashVersion === 1
+						? hash('sha256', concat(remoteSeed, authHash))
+						: null
+				if (
+					expected.equals(serverHash) ||
+					Boolean(promptDocumentedFallback?.equals(serverHash))
+				) {
+					matchedAuthHash = authHash
+					matchedLabel = candidate.label
+					matchedHashVersion = hashVersion
+					usedConfiguredCredentials = index === 0
+					break
+				}
 			}
+			if (matchedAuthHash) break
 		}
 		if (!matchedAuthHash) {
 			throw new Error(
@@ -404,7 +436,7 @@ export class KasaKlapClient implements KasaClient {
 			localSeed,
 			remoteSeed,
 			authHash: matchedAuthHash,
-			hashVersion: this.#hashVersion,
+			hashVersion: matchedHashVersion,
 		})
 		const handshake2 = await this.#post(
 			'handshake2',
@@ -434,7 +466,8 @@ export class KasaKlapClient implements KasaClient {
 					getTimeoutMs(handshake1.headers) - sessionExpireBufferMs,
 				),
 			authLabel: matchedLabel,
-			hashVersion: this.#hashVersion,
+			hashVersion: matchedHashVersion,
+			usedConfiguredCredentials,
 		}
 	}
 

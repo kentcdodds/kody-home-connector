@@ -108,12 +108,14 @@ test('sqlite storage persists Kasa plugs and encrypted credentials', () => {
 		const rawPasswordRow = storage.db
 			.query(
 				`
-					SELECT password
+					SELECT username, password
 					FROM kasa_credentials
 					WHERE connector_id = ?
 				`,
 			)
-			.get('default') as { password: string } | undefined
+			.get('default') as { username: string; password: string } | undefined
+		expect(rawPasswordRow?.username).toMatch(/^enc:v1:/)
+		expect(rawPasswordRow?.username).not.toContain('kent@example.com')
 		expect(rawPasswordRow?.password).toMatch(/^enc:v1:/)
 		expect(rawPasswordRow?.password).not.toContain('kasa-password')
 
@@ -131,6 +133,21 @@ test('sqlite storage persists Kasa plugs and encrypted credentials', () => {
 				rawSysinfo: null,
 				rawDiscovery: null,
 				relayState: 'unknown',
+			}),
+		])
+		storage.db
+			.query(
+				`
+					UPDATE kasa_plugs
+					SET raw_sysinfo_json = ?, raw_discovery_json = ?
+					WHERE connector_id = ? AND plug_id = ?
+				`,
+			)
+			.run('[]', '"scalar"', 'default', 'plug-1')
+		expect(listKasaPlugs(storage, 'default')).toEqual([
+			expect.objectContaining({
+				rawSysinfo: null,
+				rawDiscovery: null,
 			}),
 		])
 

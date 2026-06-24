@@ -313,3 +313,78 @@ test('adapter rejects relay control when device reports an error or unchanged st
 		storage.close()
 	}
 })
+
+test('adapter does not mark stored credentials healthy when fallback auth was used', async () => {
+	const config = createConfig()
+	const state = createAppState()
+	const storage = createHomeConnectorStorage(config)
+	const fakeClient: KasaClient = {
+		usedConfiguredCredentials: false,
+		async getSysInfo() {
+			return {
+				alias: 'Water recirculating pump',
+				model: 'EP25',
+				device_id: 'plug-1',
+				relay_state: 0,
+			}
+		},
+		async setRelayState() {
+			return {
+				system: {
+					set_relay_state: {
+						err_code: 0,
+					},
+				},
+			}
+		},
+	}
+	const adapter = createKasaAdapter({
+		config,
+		state,
+		storage,
+		clientFactory: () => fakeClient,
+		scanPlugs: async () => ({
+			plugs: [
+				{
+					plugId: 'plug-1',
+					alias: 'Water recirculating pump',
+					host: '192.168.1.145',
+					port: 80,
+					model: 'EP25',
+					mac: 'aabbccddeeff',
+					deviceId: 'plug-1',
+					relayState: 'off',
+					rawSysinfo: null,
+					rawDiscovery: { server: 'SHIP 2.0' },
+					lastSeenAt: '2026-06-24T17:52:00.000Z',
+				},
+			],
+			diagnostics: {
+				protocol: 'klap',
+				discoveryUrl: '192.168.1.145/32',
+				scannedAt: '2026-06-24T17:52:00.000Z',
+				udpPorts: [9999, 20002],
+				probes: [],
+				subnetProbe: {
+					cidrs: ['192.168.1.145/32'],
+					hostsProbed: 1,
+					shipMatches: 1,
+					authenticatedMatches: 1,
+				},
+				credentialStatus: 'present',
+			},
+		}),
+	})
+
+	try {
+		adapter.setCredentials('kent@example.com', 'bad-password')
+		await adapter.scan()
+		await adapter.getPlugStatus({ plugId: 'plug-1' })
+		expect(adapter.getConfigStatus()).toMatchObject({
+			lastAuthenticatedAt: null,
+			lastAuthError: null,
+		})
+	} finally {
+		storage.close()
+	}
+})

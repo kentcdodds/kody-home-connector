@@ -20,6 +20,24 @@ import { type HomeConnectorState } from '../src/state.ts'
 
 type Banner = { tone: 'success' | 'error'; message: string } | null
 
+function assertSameOriginFormPost(request: Request) {
+	const expectedOrigin = new URL(request.url).origin
+	const origin = request.headers.get('origin')
+	if (origin && origin !== expectedOrigin) {
+		throw new Error('Rejected cross-origin credential submission.')
+	}
+	const referer = request.headers.get('referer')
+	if (!origin && referer) {
+		try {
+			if (new URL(referer).origin !== expectedOrigin) {
+				throw new Error('Rejected cross-origin credential submission.')
+			}
+		} catch {
+			throw new Error('Rejected cross-origin credential submission.')
+		}
+	}
+}
+
 function renderKasaPlugList(plugs: Array<KasaPublicPlug>) {
 	if (plugs.length === 0) {
 		return renderEmptyState('No Kasa smart plugs are currently known.')
@@ -299,6 +317,7 @@ export function createKasaSetupHandler(
 		async handler({ request }: { request: Request }) {
 			if (request.method === 'POST') {
 				try {
+					assertSameOriginFormPost(request)
 					const form = await request.formData()
 					const intent = String(form.get('intent') ?? '')
 					if (intent !== 'save-credentials') {
@@ -364,7 +383,7 @@ export function createKasaStatusHandler(
 				try {
 					const plugs = await kasa.scan()
 					return renderPage({
-						scanMessage: `Scan complete. Discovered ${plugs.length} Kasa smart plug(s).`,
+						scanMessage: `Scan complete. ${plugs.length} Kasa smart plug(s) are known after the scan.`,
 					})
 				} catch (error) {
 					captureHomeConnectorException(error, {

@@ -330,9 +330,7 @@ async function loadDashboardSnapshot(
 		kasa: {
 			plugs: kasaStatus.plugs.length,
 			adopted: kasaStatus.adopted.length,
-			withCredentials: kasaStatus.config.configured
-				? kasaStatus.plugs.length
-				: 0,
+			withCredentials: kasaStatus.config.configured ? 1 : 0,
 			diagnosticsCaptured: deps.state.kasaDiscoveryDiagnostics != null,
 		},
 		sonos: {

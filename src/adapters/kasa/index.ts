@@ -205,8 +205,11 @@ export function createKasaAdapter(input: {
 		return client
 	}
 
-	function updateSuccessfulAuth() {
-		if (getKasaCredentials(storage, connectorId)) {
+	function updateSuccessfulAuth(client: KasaClient) {
+		if (
+			getKasaCredentials(storage, connectorId) &&
+			client.usedConfiguredCredentials !== false
+		) {
 			updateKasaAuthStatus({
 				storage,
 				connectorId,
@@ -233,7 +236,7 @@ export function createKasaAdapter(input: {
 		const client = createClient(plug)
 		try {
 			const sysinfo = await client.getSysInfo()
-			updateSuccessfulAuth()
+			updateSuccessfulAuth(client)
 			const relayState = kasaRelayStateFromSysinfo(sysinfo)
 			const updated =
 				updateKasaPlugSysinfo({
@@ -263,7 +266,7 @@ export function createKasaAdapter(input: {
 				)
 			}
 			const sysinfo = await client.getSysInfo()
-			updateSuccessfulAuth()
+			updateSuccessfulAuth(client)
 			const relayState = kasaRelayStateFromSysinfo(sysinfo)
 			const requestedRelayState = state ? 'on' : 'off'
 			if (relayState !== requestedRelayState) {

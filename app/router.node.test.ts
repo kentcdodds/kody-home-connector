@@ -589,6 +589,27 @@ test('kasa setup saves credentials without echoing the password', async () => {
 			hasStoredCredentials: true,
 			username: 'kent@example.com',
 		})
+		const crossOriginResponse = await router.fetch(
+			'http://example.test/kasa/setup',
+			{
+				method: 'POST',
+				headers: {
+					'content-type': 'application/x-www-form-urlencoded',
+					origin: 'http://attacker.test',
+				},
+				body: new URLSearchParams({
+					intent: 'save-credentials',
+					username: 'evil@example.com',
+					password: 'evil-password',
+				}).toString(),
+			},
+		)
+		expect(crossOriginResponse.status).toBe(200)
+		const crossOriginHtml = await crossOriginResponse.text()
+		expect(crossOriginHtml).toContain(
+			'Rejected cross-origin credential submission.',
+		)
+		expect(kasa.getConfigStatus().username).toBe('kent@example.com')
 	} finally {
 		storage.close()
 	}

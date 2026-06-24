@@ -80,6 +80,18 @@ test('KLAP frame encryption and decryption use the same sequence IV', () => {
 			payload: encrypted,
 		}),
 	).toBe(payload)
+
+	const tampered = Buffer.from(encrypted)
+	tampered[tampered.length - 1] = (tampered[tampered.length - 1] ?? 0) ^ 1
+	expect(() =>
+		decryptKlapPayload({
+			localSeed,
+			remoteSeed,
+			authHash,
+			sequence,
+			payload: tampered,
+		}),
+	).toThrow('signature')
 })
 
 test('KLAP client authenticates and sends encrypted requests to a fake server', async () => {
@@ -264,4 +276,91 @@ test('KLAP client resets the session after failed encrypted requests', async () 
 		alias: 'Water recirculating pump',
 	})
 	expect(handshakeCount).toBe(2)
+})
+
+test('KLAP client can match KLAP v2 handshake hashes', async () => {
+	const credentials = {
+		username: 'kent@example.com',
+		password: 'secret-password',
+	}
+	const localSeed = Buffer.from('00112233445566778899aabbccddeeff', 'hex')
+	const remoteSeed = Buffer.from('ffeeddccbbaa99887766554433221100', 'hex')
+	const authHash = generateKlapAuthHash(credentials, 2)
+	let handshake2Payload: Buffer | null = null
+
+	const server = http.createServer(async (request, response) => {
+		const url = new URL(request.url ?? '/', 'http://127.0.0.1')
+		const body = await readRequestBody(request)
+
+		if (url.pathname === '/app/handshake1') {
+			response.setHeader('set-cookie', [
+				'TP_SESSIONID=session-123; Path=/app',
+				'TIMEOUT=86400; Path=/app',
+			])
+			response.end(
+				Buffer.concat([
+					remoteSeed,
+					generateKlapHandshake1Hash({
+						localSeed: body,
+						remoteSeed,
+						authHash,
+						hashVersion: 2,
+					}),
+				]),
+			)
+			return
+		}
+
+		if (url.pathname === '/app/handshake2') {
+			handshake2Payload = body
+			response.end()
+			return
+		}
+
+		if (url.pathname === '/app/request') {
+			const sequence = Number(url.searchParams.get('seq'))
+			response.end(
+				encryptKlapPayload({
+					localSeed,
+					remoteSeed,
+					authHash,
+					sequence,
+					payload: JSON.stringify({
+						system: {
+							get_sysinfo: {
+								alias: 'Water recirculating pump',
+								device_id: 'device-1',
+								relay_state: 1,
+							},
+						},
+					}),
+				}),
+			)
+			return
+		}
+
+		response.statusCode = 404
+		response.end()
+	})
+
+	const port = await listen(server)
+	const client = createKasaKlapClient({
+		host: '127.0.0.1',
+		port,
+		credentials,
+		localSeedFactory: () => localSeed,
+	})
+
+	await expect(client.getSysInfo()).resolves.toMatchObject({
+		alias: 'Water recirculating pump',
+	})
+	expect(handshake2Payload).toEqual(
+		generateKlapHandshake2Hash({
+			localSeed,
+			remoteSeed,
+			authHash,
+			hashVersion: 2,
+		}),
+	)
+	expect(client.usedConfiguredCredentials).toBe(true)
 })

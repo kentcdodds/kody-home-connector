@@ -66,8 +66,8 @@ export function registerKasaHomeConnectorTools(input: {
 			const plugs = await kasa.scan()
 			return structuredTextResult(
 				plugs.length === 0
-					? 'No Kasa smart plugs were discovered.'
-					: `Discovered ${plugs.length} Kasa smart plug(s).`,
+					? 'No Kasa smart plugs are currently known after the scan.'
+					: `Scan complete. ${plugs.length} Kasa smart plug(s) are known after the scan.`,
 				{
 					plugs,
 					diagnostics: kasa.getDiscoveryDiagnostics(),
