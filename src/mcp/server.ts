@@ -8,6 +8,7 @@ import { type createBondAdapter } from '../adapters/bond/index.ts'
 import { type createIslandRouterApiAdapter } from '../adapters/island-router-api/index.ts'
 import { type createIslandRouterAdapter } from '../adapters/island-router/index.ts'
 import { type createJellyfishAdapter } from '../adapters/jellyfish/index.ts'
+import { type createKasaAdapter } from '../adapters/kasa/index.ts'
 import { isLutronProcessorNotFoundError } from '../adapters/lutron/errors.ts'
 import { type createLutronAdapter } from '../adapters/lutron/index.ts'
 import { createRokuAdapter } from '../adapters/roku/index.ts'
@@ -24,6 +25,7 @@ import { registerAccessNetworksUnleashedHomeConnectorTools } from './register-ac
 import { registerBondHomeConnectorTools } from './register-bond-tools.ts'
 import { registerIslandRouterApiHomeConnectorTools } from './register-island-router-api-tools.ts'
 import { registerIslandRouterHomeConnectorTools } from './register-island-router-tools.ts'
+import { registerKasaHomeConnectorTools } from './register-kasa-tools.ts'
 import { type HomeConnectorState } from '../state.ts'
 import {
 	buildToolInputSchema,
@@ -90,6 +92,7 @@ export function createHomeConnectorMcpServer(input: {
 	accessNetworksUnleashed: ReturnType<
 		typeof createAccessNetworksUnleashedAdapter
 	>
+	kasa: ReturnType<typeof createKasaAdapter>
 }): HomeConnectorMcpServer {
 	const roku = createRokuAdapter({
 		config: input.config,
@@ -104,6 +107,7 @@ export function createHomeConnectorMcpServer(input: {
 	const islandRouter = input.islandRouter
 	const islandRouterApi = input.islandRouterApi
 	const accessNetworksUnleashed = input.accessNetworksUnleashed
+	const kasa = input.kasa
 
 	const server = new McpServer(
 		{
@@ -112,7 +116,7 @@ export function createHomeConnectorMcpServer(input: {
 		},
 		{
 			instructions:
-				"Home connector MCP server. Tools support Roku, Samsung TV, Lutron, Sonos, Bond (Olibra Bond Bridge / shades, groups, and RF devices), JellyFish Lighting, Venstar WiFi thermostat control, Island router status plus a generic allowlisted Island CLI catalog executor, a generic Island Router HTTP API proxy, and a single generic Access Networks / RUCKUS Unleashed WiFi raw-request capability. Use 'home_connector_list_logs' to inspect the connector's sanitized local operational log history. Use 'access_networks_unleashed_scan_controllers', 'access_networks_unleashed_adopt_controller', 'access_networks_unleashed_set_credentials', and 'access_networks_unleashed_authenticate_controller' to wire up a controller, then 'access_networks_unleashed_request' to issue authenticated AJAX requests. Use 'router_get_status' for Island SSH readiness and 'router_run_command' for catalog command ids; arbitrary CLI text is never accepted and write-risk entries require a reason plus exact confirmation. Use 'island_router_api_set_pin' before 'island_router_api_request' for the LAN-only Island Router HTTP API proxy; non-GET proxy requests require a reason plus exact confirmation. Island router and Access Networks Unleashed write operations are high risk and must be used only when highly certain. Bond local API tokens are configured only in the admin UI (/bond/setup); use bond_authentication_guide when you need a reminder.",
+				"Home connector MCP server. Tools support Roku, Samsung TV, Lutron, Sonos, Bond (Olibra Bond Bridge / shades, groups, and RF devices), JellyFish Lighting, Venstar WiFi thermostat control, TP-Link Kasa KLAP smart plugs, Island router status plus a generic allowlisted Island CLI catalog executor, a generic Island Router HTTP API proxy, and a single generic Access Networks / RUCKUS Unleashed WiFi raw-request capability. Use 'home_connector_list_logs' to inspect the connector's sanitized local operational log history. Use 'kasa_set_credentials', 'kasa_scan_plugs', 'kasa_adopt_plug', then 'kasa_turn_plug_on' or 'kasa_turn_plug_off' for adopted Kasa plugs only. Use 'access_networks_unleashed_scan_controllers', 'access_networks_unleashed_adopt_controller', 'access_networks_unleashed_set_credentials', and 'access_networks_unleashed_authenticate_controller' to wire up a controller, then 'access_networks_unleashed_request' to issue authenticated AJAX requests. Use 'router_get_status' for Island SSH readiness and 'router_run_command' for catalog command ids; arbitrary CLI text is never accepted and write-risk entries require a reason plus exact confirmation. Use 'island_router_api_set_pin' before 'island_router_api_request' for the LAN-only Island Router HTTP API proxy; non-GET proxy requests require a reason plus exact confirmation. Island router and Access Networks Unleashed write operations are high risk and must be used only when highly certain. Bond local API tokens are configured only in the admin UI (/bond/setup); use bond_authentication_guide when you need a reminder.",
 		},
 	)
 
@@ -2912,6 +2916,11 @@ export function createHomeConnectorMcpServer(input: {
 	registerAccessNetworksUnleashedHomeConnectorTools({
 		registerTool,
 		accessNetworksUnleashed,
+	})
+
+	registerKasaHomeConnectorTools({
+		registerTool,
+		kasa,
 	})
 
 	return {

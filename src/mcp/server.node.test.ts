@@ -8,6 +8,7 @@ import { renderIslandRouterCommand } from '../adapters/island-router/command-cat
 import { type IslandRouterCommandRequest } from '../adapters/island-router/types.ts'
 import { createIslandRouterAdapter } from '../adapters/island-router/index.ts'
 import { createJellyfishAdapter } from '../adapters/jellyfish/index.ts'
+import { createKasaAdapter } from '../adapters/kasa/index.ts'
 import { createLutronAdapter } from '../adapters/lutron/index.ts'
 import { createSonosAdapter } from '../adapters/sonos/index.ts'
 import { createSamsungTvAdapter } from '../adapters/samsung-tv/index.ts'
@@ -50,6 +51,7 @@ function createConfig() {
 	process.env.ISLAND_ROUTER_API_BASE_URL = 'https://my.islandrouter.com/'
 	process.env.ISLAND_ROUTER_API_REQUEST_TIMEOUT_MS = '5000'
 	process.env.ACCESS_NETWORKS_UNLEASHED_SCAN_CIDRS = '192.168.10.88/32'
+	process.env.KASA_SCAN_CIDRS = '192.168.10.99/32'
 	return loadHomeConnectorConfig()
 }
 
@@ -387,6 +389,74 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 		storage,
 	})
 	const venstar = createVenstarAdapter({ config, state, storage })
+	let kasaRelayState = 1
+	const kasa = createKasaAdapter({
+		config,
+		state,
+		storage,
+		scanPlugs: async () => ({
+			plugs: [
+				{
+					plugId: 'kasa-plug-1',
+					alias: 'Water recirculating pump',
+					host: '192.168.10.99',
+					port: 80,
+					model: 'EP25',
+					mac: 'aabbccddeeff',
+					deviceId: 'kasa-plug-1',
+					relayState: 'off',
+					rawSysinfo: {
+						alias: 'Water recirculating pump',
+						model: 'EP25',
+						device_id: 'kasa-plug-1',
+						relay_state: 0,
+					},
+					rawDiscovery: { server: 'SHIP 2.0' },
+					lastSeenAt: '2026-06-24T17:52:00.000Z',
+				},
+			],
+			diagnostics: {
+				protocol: 'klap',
+				discoveryUrl: '192.168.10.99/32',
+				scannedAt: '2026-06-24T17:52:00.000Z',
+				udpPorts: [9999, 20002],
+				probes: [
+					{
+						host: '192.168.10.99',
+						port: 80,
+						source: 'subnet',
+						matched: true,
+						alias: 'Water recirculating pump',
+						plugId: 'kasa-plug-1',
+						status: 200,
+						server: 'SHIP 2.0',
+						error: null,
+					},
+				],
+				subnetProbe: {
+					cidrs: ['192.168.10.99/32'],
+					hostsProbed: 1,
+					shipMatches: 1,
+					authenticatedMatches: 1,
+				},
+				credentialStatus: 'present',
+			},
+		}),
+		clientFactory: () => ({
+			async getSysInfo() {
+				return {
+					alias: 'Water recirculating pump',
+					model: 'EP25',
+					device_id: 'kasa-plug-1',
+					relay_state: kasaRelayState,
+				}
+			},
+			async setRelayState(state) {
+				kasaRelayState = state ? 1 : 0
+				return { system: { set_relay_state: { err_code: 0 } } }
+			},
+		}),
+	})
 	const { accessNetworksUnleashed, fakeClient: fakeAccessNetworksUnleashed } =
 		createAccessNetworksUnleashedFixture({
 			config,
@@ -431,6 +501,7 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 		jellyfish,
 		venstar,
 		accessNetworksUnleashed,
+		kasa,
 	})
 
 	try {
@@ -508,6 +579,65 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 		expect(
 			accessNetworksCredentialProperties?.password?.['x-kody-secret'],
 		).toBe(true)
+		const kasaCredentialsTool = tools.find(
+			(tool) => tool.name === 'kasa_set_credentials',
+		)
+		if (!kasaCredentialsTool) {
+			throw new Error('Expected kasa_set_credentials tool to be defined')
+		}
+		const kasaCredentialProperties = (
+			kasaCredentialsTool.inputSchema as {
+				properties?: Record<string, Record<string, unknown>>
+			}
+		).properties
+		expect(kasaCredentialProperties?.username?.['x-kody-secret']).toBe(true)
+		expect(kasaCredentialProperties?.password?.['x-kody-secret']).toBe(true)
+		const kasaCredentials = await mcp.callTool('kasa_set_credentials', {
+			username: 'kent@example.com',
+			password: 'kasa-password',
+		})
+		expect(kasaCredentials.structuredContent).toMatchObject({
+			status: {
+				configured: true,
+				hasStoredCredentials: true,
+			},
+		})
+		const kasaScan = await mcp.callTool('kasa_scan_plugs')
+		expect(kasaScan.structuredContent).toMatchObject({
+			plugs: [
+				expect.objectContaining({
+					alias: 'Water recirculating pump',
+					adopted: false,
+				}),
+			],
+			diagnostics: expect.anything(),
+		})
+		const kasaAdopt = await mcp.callTool('kasa_adopt_plug', {
+			alias: 'Water recirculating pump',
+		})
+		expect(kasaAdopt.structuredContent).toMatchObject({
+			plug: {
+				plugId: 'kasa-plug-1',
+				adopted: true,
+			},
+		})
+		const kasaStatus = await mcp.callTool('kasa_get_plug_status', {
+			plugId: 'kasa-plug-1',
+		})
+		expect(kasaStatus.structuredContent).toMatchObject({
+			relayState: 'on',
+			plug: {
+				plugId: 'kasa-plug-1',
+			},
+		})
+		const kasaOffTool = tools.find((tool) => tool.name === 'kasa_turn_plug_off')
+		expect(kasaOffTool?.annotations?.['destructiveHint']).toBe(true)
+		const kasaTurnOff = await mcp.callTool('kasa_turn_plug_off', {
+			plugId: 'kasa-plug-1',
+		})
+		expect(kasaTurnOff.structuredContent).toMatchObject({
+			requestedRelayState: 'off',
+		})
 		const islandRouterApiPinTool = tools.find(
 			(tool) => tool.name === 'island_router_api_set_pin',
 		)
@@ -821,6 +951,28 @@ test('mcp server exposes island router write tools when host verification is con
 		storage,
 	})
 	const venstar = createVenstarAdapter({ config, state, storage })
+	const kasa = createKasaAdapter({
+		config,
+		state,
+		storage,
+		scanPlugs: async () => ({
+			plugs: [],
+			diagnostics: {
+				protocol: 'klap',
+				discoveryUrl: '192.168.10.99/32',
+				scannedAt: '2026-06-24T17:52:00.000Z',
+				udpPorts: [9999, 20002],
+				probes: [],
+				subnetProbe: {
+					cidrs: ['192.168.10.99/32'],
+					hostsProbed: 0,
+					shipMatches: 0,
+					authenticatedMatches: 0,
+				},
+				credentialStatus: 'missing',
+			},
+		}),
+	})
 	const { accessNetworksUnleashed } = createAccessNetworksUnleashedFixture({
 		config,
 		state,
@@ -843,6 +995,7 @@ test('mcp server exposes island router write tools when host verification is con
 		jellyfish,
 		venstar,
 		accessNetworksUnleashed,
+		kasa,
 	})
 
 	try {

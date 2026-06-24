@@ -16,6 +16,15 @@ export type HomeConnectorConfig = {
 	accessNetworksUnleashedScanCidrs: Array<string>
 	accessNetworksUnleashedAllowInsecureTls: boolean
 	accessNetworksUnleashedRequestTimeoutMs: number
+	/**
+	 * Kasa KLAP plug discovery probes UDP discovery ports and these CIDRs over
+	 * HTTP. When unset, the connector derives private `/24` networks from local
+	 * IPv4 interfaces. `KASA_SCAN_CIDRS` can override the derived list.
+	 */
+	kasaScanCidrs: Array<string>
+	kasaRequestTimeoutMs: number
+	kasaUsername: string | null
+	kasaPassword: string | null
 	islandRouterHost: string | null
 	islandRouterPort: number
 	islandRouterUsername: string | null
@@ -296,6 +305,12 @@ export function deriveAccessNetworksUnleashedAutoscanCidrsFromInterfaces(
 	return derivePrivateAutoscanCidrsFromInterfaces(interfaces)
 }
 
+export function deriveKasaAutoscanCidrsFromInterfaces(
+	interfaces: ReturnType<typeof networkInterfaces>,
+) {
+	return derivePrivateAutoscanCidrsFromInterfaces(interfaces)
+}
+
 function deriveVenstarAutoscanCidrs() {
 	return deriveVenstarAutoscanCidrsFromInterfaces(networkInterfaces())
 }
@@ -304,6 +319,10 @@ function deriveAccessNetworksUnleashedAutoscanCidrs() {
 	return deriveAccessNetworksUnleashedAutoscanCidrsFromInterfaces(
 		networkInterfaces(),
 	)
+}
+
+function deriveKasaAutoscanCidrs() {
+	return deriveKasaAutoscanCidrsFromInterfaces(networkInterfaces())
 }
 
 function deriveJellyfishAutoscanCidrs() {
@@ -319,6 +338,10 @@ export function loadHomeConnectorConfig(): HomeConnectorConfig {
 	)
 	const accessNetworksUnleashedRequestTimeoutMs = Number.parseInt(
 		process.env.ACCESS_NETWORKS_UNLEASHED_REQUEST_TIMEOUT_MS ?? '8000',
+		10,
+	)
+	const kasaRequestTimeoutMs = Number.parseInt(
+		process.env.KASA_REQUEST_TIMEOUT_MS ?? '8000',
 		10,
 	)
 	const islandRouterApiRequestTimeoutMs = Number.parseInt(
@@ -343,6 +366,9 @@ export function loadHomeConnectorConfig(): HomeConnectorConfig {
 		explicitAccessNetworksUnleashedCidrs.length > 0
 			? explicitAccessNetworksUnleashedCidrs
 			: deriveAccessNetworksUnleashedAutoscanCidrs()
+	const explicitKasaCidrs = resolveScanCidrsFromEnv('KASA_SCAN_CIDRS')
+	const kasaScanCidrs =
+		explicitKasaCidrs.length > 0 ? explicitKasaCidrs : deriveKasaAutoscanCidrs()
 	const explicitVenstarCidrs = resolveScanCidrsFromEnv('VENSTAR_SCAN_CIDRS')
 	const venstarScanCidrs =
 		explicitVenstarCidrs.length > 0
@@ -371,6 +397,13 @@ export function loadHomeConnectorConfig(): HomeConnectorConfig {
 			accessNetworksUnleashedRequestTimeoutMs >= 1000
 				? accessNetworksUnleashedRequestTimeoutMs
 				: 8000,
+		kasaScanCidrs,
+		kasaRequestTimeoutMs:
+			Number.isFinite(kasaRequestTimeoutMs) && kasaRequestTimeoutMs >= 1000
+				? kasaRequestTimeoutMs
+				: 8000,
+		kasaUsername: process.env.KASA_USERNAME?.trim() || null,
+		kasaPassword: process.env.KASA_PASSWORD?.trim() || null,
 		islandRouterHost: process.env.ISLAND_ROUTER_HOST?.trim() || null,
 		islandRouterPort:
 			islandRouterPort != null &&

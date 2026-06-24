@@ -113,6 +113,7 @@ async function main() {
 		connector.islandRouterApi,
 		connector.jellyfish,
 		connector.venstar,
+		connector.kasa,
 	)
 
 	const server = http.createServer(

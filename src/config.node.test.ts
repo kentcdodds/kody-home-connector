@@ -1,6 +1,7 @@
 import { expect, test } from 'vitest'
 import {
 	deriveAccessNetworksUnleashedAutoscanCidrsFromInterfaces,
+	deriveKasaAutoscanCidrsFromInterfaces,
 	deriveVenstarAutoscanCidrsFromInterfaces,
 	loadHomeConnectorConfig,
 } from './config.ts'
@@ -134,6 +135,7 @@ test('scan CIDR env vars override derived autoscan CIDRs', () => {
 		...requiredConfigEnv,
 		MOCKS: 'false',
 		ACCESS_NETWORKS_UNLEASHED_SCAN_CIDRS: '192.168.9.0/24, 10.0.0.9/32',
+		KASA_SCAN_CIDRS: '192.168.3.0/24, 10.0.0.7/32',
 		VENSTAR_SCAN_CIDRS: '192.168.1.0/24, 10.0.0.5/32',
 		JELLYFISH_SCAN_CIDRS: '192.168.2.0/24, 10.0.0.6/32',
 	})
@@ -143,6 +145,7 @@ test('scan CIDR env vars override derived autoscan CIDRs', () => {
 		'192.168.9.0/24',
 		'10.0.0.9/32',
 	])
+	expect(config.kasaScanCidrs).toEqual(['192.168.3.0/24', '10.0.0.7/32'])
 	expect(config.venstarScanCidrs).toEqual(['192.168.1.0/24', '10.0.0.5/32'])
 	expect(config.jellyfishScanCidrs).toEqual(['192.168.2.0/24', '10.0.0.6/32'])
 })
@@ -204,6 +207,23 @@ test('derived autoscan CIDRs skip container bridge interfaces', () => {
 test('derived Venstar autoscan CIDRs split a /23 into /24 scan blocks', () => {
 	expect(
 		deriveVenstarAutoscanCidrsFromInterfaces({
+			en0: [
+				{
+					address: '192.168.0.151',
+					netmask: '255.255.254.0',
+					family: 'IPv4',
+					mac: '00:00:00:00:00:00',
+					internal: false,
+					cidr: '192.168.0.151/23',
+				},
+			],
+		}),
+	).toEqual(['192.168.0.0/24', '192.168.1.0/24'])
+})
+
+test('derived Kasa autoscan CIDRs split a /23 into /24 scan blocks', () => {
+	expect(
+		deriveKasaAutoscanCidrsFromInterfaces({
 			en0: [
 				{
 					address: '192.168.0.151',
@@ -339,6 +359,52 @@ test('Access Networks Unleashed TLS and timeout env vars honor safe defaults and
 			accessNetworksUnleashedAllowInsecureTls: true,
 			accessNetworksUnleashedRequestTimeoutMs: 12000,
 		})
+	}
+})
+
+test('Kasa env vars are loaded with safe defaults and explicit overrides', () => {
+	{
+		using _env = createTemporaryEnv({
+			...requiredConfigEnv,
+			KASA_SCAN_CIDRS: '192.168.1.0/24',
+			KASA_REQUEST_TIMEOUT_MS: undefined,
+			KASA_USERNAME: undefined,
+			KASA_PASSWORD: undefined,
+		})
+
+		expect(loadHomeConnectorConfig()).toMatchObject({
+			kasaScanCidrs: ['192.168.1.0/24'],
+			kasaRequestTimeoutMs: 8000,
+			kasaUsername: null,
+			kasaPassword: null,
+		})
+	}
+
+	{
+		using _env = createTemporaryEnv({
+			...requiredConfigEnv,
+			KASA_SCAN_CIDRS: '192.168.50.0/24,10.0.0.8/32',
+			KASA_REQUEST_TIMEOUT_MS: '12000',
+			KASA_USERNAME: ' kent@example.com ',
+			KASA_PASSWORD: ' secret ',
+		})
+
+		expect(loadHomeConnectorConfig()).toMatchObject({
+			kasaScanCidrs: ['192.168.50.0/24', '10.0.0.8/32'],
+			kasaRequestTimeoutMs: 12000,
+			kasaUsername: 'kent@example.com',
+			kasaPassword: 'secret',
+		})
+	}
+
+	{
+		using _env = createTemporaryEnv({
+			...requiredConfigEnv,
+			KASA_SCAN_CIDRS: '192.168.1.0/24',
+			KASA_REQUEST_TIMEOUT_MS: '500',
+		})
+
+		expect(loadHomeConnectorConfig().kasaRequestTimeoutMs).toBe(8000)
 	}
 })
 

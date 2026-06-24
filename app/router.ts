@@ -31,6 +31,10 @@ import {
 	createJellyfishStatusHandler,
 } from './jellyfish-handlers.ts'
 import {
+	createKasaSetupHandler,
+	createKasaStatusHandler,
+} from './kasa-handlers.ts'
+import {
 	createSonosSetupHandler,
 	createSonosStatusHandler,
 } from './sonos-handlers.ts'
@@ -43,6 +47,7 @@ import { type createAccessNetworksUnleashedAdapter } from '../src/adapters/acces
 import { type createLutronAdapter } from '../src/adapters/lutron/index.ts'
 import { type createBondAdapter } from '../src/adapters/bond/index.ts'
 import { type createJellyfishAdapter } from '../src/adapters/jellyfish/index.ts'
+import { type createKasaAdapter } from '../src/adapters/kasa/index.ts'
 import { type createSonosAdapter } from '../src/adapters/sonos/index.ts'
 import { type createSamsungTvAdapter } from '../src/adapters/samsung-tv/index.ts'
 import { type createVenstarAdapter } from '../src/adapters/venstar/index.ts'
@@ -65,6 +70,7 @@ export function createHomeConnectorRouter(
 	islandRouterApi: ReturnType<typeof createIslandRouterApiAdapter>,
 	jellyfish: ReturnType<typeof createJellyfishAdapter>,
 	venstar: ReturnType<typeof createVenstarAdapter>,
+	kasa: ReturnType<typeof createKasaAdapter>,
 ) {
 	const router = createRouter({
 		middleware: [],
@@ -84,6 +90,7 @@ export function createHomeConnectorRouter(
 				islandRouterApi,
 				jellyfish,
 				venstar,
+				kasa,
 			}),
 			systemStatus: createSystemStatusHandler({
 				state,
@@ -97,6 +104,7 @@ export function createHomeConnectorRouter(
 				islandRouterApi,
 				jellyfish,
 				venstar,
+				kasa,
 			}),
 			diagnostics: createDiagnosticsHandler({
 				state,
@@ -110,6 +118,7 @@ export function createHomeConnectorRouter(
 				islandRouterApi,
 				jellyfish,
 				venstar,
+				kasa,
 			}),
 			islandRouterStatus: createIslandRouterStatusHandler({
 				state,
@@ -123,6 +132,7 @@ export function createHomeConnectorRouter(
 				islandRouterApi,
 				jellyfish,
 				venstar,
+				kasa,
 			}),
 			health: createHealthHandler(state),
 			islandRouterApiStatus: createIslandRouterApiStatusHandler(
@@ -155,6 +165,8 @@ export function createHomeConnectorRouter(
 			jellyfishSetup: createJellyfishSetupHandler(state, config, jellyfish),
 			venstarStatus: createVenstarStatusHandler(state, config, venstar),
 			venstarSetup: createVenstarSetupHandler(state, config, venstar),
+			kasaStatus: createKasaStatusHandler(state, kasa),
+			kasaSetup: createKasaSetupHandler(state, kasa),
 		},
 	})
 

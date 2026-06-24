@@ -20,6 +20,8 @@ export const routes = route({
 	bondSetup: '/bond/setup',
 	accessNetworksUnleashedStatus: '/access-networks-unleashed/status',
 	accessNetworksUnleashedSetup: '/access-networks-unleashed/setup',
+	kasaStatus: '/kasa/status',
+	kasaSetup: '/kasa/setup',
 	jellyfishStatus: '/jellyfish/status',
 	jellyfishSetup: '/jellyfish/setup',
 	venstarStatus: '/venstar/status',
