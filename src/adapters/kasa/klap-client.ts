@@ -450,15 +450,25 @@ function parseRawHttpResponse(raw: Buffer) {
 	return { status, headers, body }
 }
 
+function truncateBodyToContentLength(body: Buffer, headers: Headers) {
+	const contentLengthHeader = headers.get('content-length')
+	if (!contentLengthHeader) return body
+	const contentLength = Number.parseInt(contentLengthHeader, 10)
+	if (!Number.isFinite(contentLength) || contentLength < 0) return body
+	if (body.length > contentLength) return body.subarray(0, contentLength)
+	return body
+}
+
 function createKlapPostResponse(
 	body: Buffer,
 	input: { status: number; headers: Headers },
 ) {
+	const normalizedBody = truncateBodyToContentLength(body, input.headers)
 	return {
 		status: input.status,
 		headers: input.headers,
 		arrayBuffer: async () => {
-			const copy = Buffer.from(body)
+			const copy = Buffer.from(normalizedBody)
 			return copy.buffer.slice(
 				copy.byteOffset,
 				copy.byteOffset + copy.byteLength,
