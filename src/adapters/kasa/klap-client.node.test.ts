@@ -253,6 +253,86 @@ test('KLAP client authenticates and sends encrypted requests to a fake server', 
 	])
 })
 
+test('KLAP client retries handshake1 when the first payload is not 48 bytes', async () => {
+	const credentials = {
+		username: 'kent@example.com',
+		password: 'secret-password',
+	}
+	const localSeed = Buffer.from('00112233445566778899aabbccddeeff', 'hex')
+	const remoteSeed = Buffer.from('ffeeddccbbaa99887766554433221100', 'hex')
+	const authHash = generateKlapAuthHash(credentials)
+	let handshake1Count = 0
+
+	const server = http.createServer(async (request, response) => {
+		const url = new URL(request.url ?? '/', 'http://127.0.0.1')
+		const body = await readRequestBody(request)
+
+		if (url.pathname === '/app/handshake1') {
+			handshake1Count += 1
+			expect(body).toEqual(localSeed)
+			response.setHeader('set-cookie', [
+				'TP_SESSIONID=session-123; Path=/app',
+				'TIMEOUT=86400; Path=/app',
+			])
+			if (handshake1Count === 1) {
+				response.end(Buffer.alloc(0))
+				return
+			}
+			response.end(
+				Buffer.concat([
+					remoteSeed,
+					generateKlapHandshake1Hash({
+						localSeed,
+						remoteSeed,
+						authHash,
+					}),
+				]),
+			)
+			return
+		}
+
+		if (url.pathname === '/app/handshake2') {
+			response.end()
+			return
+		}
+
+		if (url.pathname === '/app/request') {
+			const sequence = Number(url.searchParams.get('seq'))
+			const payload = decryptKlapRequest(body, {
+				localSeed,
+				remoteSeed,
+				authHash,
+				sequence,
+			})
+			respondToKlapSysinfoRequest(response, {
+				localSeed,
+				remoteSeed,
+				authHash,
+				sequence,
+				payload,
+			})
+			return
+		}
+
+		response.statusCode = 404
+		response.end()
+	})
+
+	const port = await listen(server)
+	const client = createKasaKlapClient({
+		host: '127.0.0.1',
+		port,
+		credentials,
+		localSeedFactory: () => localSeed,
+	})
+
+	await expect(client.getSysInfo()).resolves.toMatchObject({
+		alias: 'Water recirculating pump',
+		model: 'EP25',
+	})
+	expect(handshake1Count).toBe(2)
+})
+
 test('KLAP client resets the session after failed encrypted requests', async () => {
 	const credentials = {
 		username: 'kent@example.com',
