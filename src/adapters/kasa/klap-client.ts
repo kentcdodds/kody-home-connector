@@ -1,4 +1,5 @@
 import http from 'node:http'
+import net from 'node:net'
 import {
 	createCipheriv,
 	createDecipheriv,
@@ -397,6 +398,145 @@ function headersFromNodeResponse(headers: http.IncomingHttpHeaders): Headers {
 	return result
 }
 
+const klapHttpAgent = new http.Agent({ keepAlive: false, family: 4 })
+
+function headersFromRawHttpHeaderLines(lines: Array<string>) {
+	const entries = new Map<string, Array<string>>()
+	for (const line of lines) {
+		const separatorIndex = line.indexOf(':')
+		if (separatorIndex === -1) continue
+		const name = line.slice(0, separatorIndex).trim()
+		const value = line.slice(separatorIndex + 1).trim()
+		const existing = entries.get(name) ?? []
+		existing.push(value)
+		entries.set(name, existing)
+	}
+	const result = new Headers()
+	for (const [name, values] of entries) {
+		if (name.toLowerCase() === 'set-cookie') {
+			for (const value of values) {
+				result.append('set-cookie', value)
+			}
+			continue
+		}
+		result.set(name, values.join(', '))
+	}
+	return result
+}
+
+function parseRawHttpResponse(raw: Buffer) {
+	const headerEnd = raw.indexOf('\r\n\r\n')
+	if (headerEnd === -1) {
+		throw new Error('Kasa KLAP response ended before HTTP headers completed.')
+	}
+	const headerText = raw.subarray(0, headerEnd).toString('utf8')
+	const lines = headerText.split('\r\n')
+	const statusLine = lines[0] ?? ''
+	const statusMatch = /^HTTP\/\d\.\d (\d+)/.exec(statusLine)
+	const status = statusMatch ? Number.parseInt(statusMatch[1] ?? '0', 10) : 0
+	const headers = headersFromRawHttpHeaderLines(lines.slice(1))
+	let body = raw.subarray(headerEnd + 4)
+	const contentLengthHeader = headers.get('content-length')
+	if (contentLengthHeader) {
+		const contentLength = Number.parseInt(contentLengthHeader, 10)
+		if (
+			Number.isFinite(contentLength) &&
+			contentLength > 0 &&
+			body.length >= contentLength
+		) {
+			body = body.subarray(0, contentLength)
+		}
+	}
+	return { status, headers, body }
+}
+
+function createKlapPostResponse(
+	body: Buffer,
+	input: { status: number; headers: Headers },
+) {
+	return {
+		status: input.status,
+		headers: input.headers,
+		arrayBuffer: async () => {
+			const copy = Buffer.from(body)
+			return copy.buffer.slice(
+				copy.byteOffset,
+				copy.byteOffset + copy.byteLength,
+			)
+		},
+	}
+}
+
+function postWithRawSocket(
+	url: URL,
+	input: {
+		body: Buffer
+		cookie?: string
+		timeoutMs: number
+	},
+): Promise<KlapPostResponse> {
+	return new Promise((resolve, reject) => {
+		const chunks: Array<Buffer> = []
+		const port = url.port ? Number(url.port) : 80
+		const path = `${url.pathname}${url.search}`
+		const requestHeaders = [
+			`POST ${path} HTTP/1.1`,
+			`Host: ${url.hostname}`,
+			'Content-Type: application/octet-stream',
+			`Content-Length: ${String(input.body.length)}`,
+			...(input.cookie ? [`Cookie: TP_SESSIONID=${input.cookie}`] : []),
+			'Connection: close',
+			'',
+			'',
+		].join('\r\n')
+		const socket = net.connect({
+			host: url.hostname,
+			port,
+			family: 4,
+			timeout: input.timeoutMs,
+		})
+		const fail = (error: Error) => {
+			socket.destroy()
+			reject(error)
+		}
+		socket.on('connect', () => {
+			socket.setNoDelay(true)
+			socket.end(
+				Buffer.concat([Buffer.from(requestHeaders, 'utf8'), input.body]),
+			)
+		})
+		socket.on('data', (chunk) => {
+			chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+		})
+		socket.on('error', fail)
+		socket.on('timeout', () => {
+			fail(new Error(`Kasa KLAP request timed out for ${url.hostname}.`))
+		})
+		socket.on('end', () => {
+			try {
+				const raw = Buffer.concat(chunks)
+				if (raw.length === 0) {
+					resolve(
+						createKlapPostResponse(Buffer.alloc(0), {
+							status: 0,
+							headers: new Headers(),
+						}),
+					)
+					return
+				}
+				const parsed = parseRawHttpResponse(raw)
+				resolve(createKlapPostResponse(parsed.body, parsed))
+			} catch (error) {
+				reject(
+					error instanceof Error
+						? error
+						: new Error(`Kasa KLAP response parse failed for ${url.hostname}.`),
+				)
+			}
+		})
+	})
+}
+
 function postWithNodeHttp(
 	url: URL,
 	input: {
@@ -412,6 +552,8 @@ function postWithNodeHttp(
 				port: url.port ? Number(url.port) : 80,
 				path: `${url.pathname}${url.search}`,
 				method: 'POST',
+				agent: klapHttpAgent,
+				family: 4,
 				headers: {
 					'Content-Type': 'application/octet-stream',
 					'Content-Length': input.body.length,
@@ -428,15 +570,12 @@ function postWithNodeHttp(
 				response.on('error', reject)
 				response.on('end', () => {
 					const body = Buffer.concat(chunks)
-					resolve({
-						status: response.statusCode ?? 0,
-						headers: headersFromNodeResponse(response.headers),
-						arrayBuffer: async () =>
-							body.buffer.slice(
-								body.byteOffset,
-								body.byteOffset + body.byteLength,
-							),
-					})
+					resolve(
+						createKlapPostResponse(body, {
+							status: response.statusCode ?? 0,
+							headers: headersFromNodeResponse(response.headers),
+						}),
+					)
 				})
 			},
 		)
@@ -448,6 +587,14 @@ function postWithNodeHttp(
 		request.on('error', reject)
 		request.end(input.body)
 	})
+}
+
+function createKlapPostImpl(input?: KlapClientInput['postImpl']) {
+	if (input) return input
+	if (process.env.KASA_KLAP_USE_RAW_SOCKET === 'true') {
+		return postWithRawSocket
+	}
+	return postWithNodeHttp
 }
 
 export class KasaKlapClient implements KasaClient {
@@ -467,7 +614,7 @@ export class KasaKlapClient implements KasaClient {
 		this.#port = input.port ?? 80
 		this.#credentials = input.credentials
 		this.#timeoutMs = input.timeoutMs ?? 8_000
-		this.#postImpl = input.postImpl ?? postWithNodeHttp
+		this.#postImpl = createKlapPostImpl(input.postImpl)
 		this.#localSeedFactory = input.localSeedFactory ?? (() => randomBytes(16))
 		this.#now = input.now ?? (() => Date.now())
 		this.#hashVersion = input.hashVersion ?? 1
@@ -526,16 +673,20 @@ export class KasaKlapClient implements KasaClient {
 
 	async #performHandshake() {
 		const localSeed = normalizeLocalSeed(this.#localSeedFactory())
-		const handshake1 = await this.#post('handshake1', localSeed)
+		let handshake1 = await this.#post('handshake1', localSeed)
+		let handshake1Payload = Buffer.from(await handshake1.arrayBuffer())
+		if (handshake1Payload.length !== 48) {
+			handshake1 = await this.#post('handshake1', localSeed)
+			handshake1Payload = Buffer.from(await handshake1.arrayBuffer())
+		}
 		if (handshake1.status !== 200) {
 			throw new Error(
 				`Kasa plug ${this.#host} responded with ${handshake1.status} to KLAP handshake1.`,
 			)
 		}
-		const handshake1Payload = Buffer.from(await handshake1.arrayBuffer())
 		if (handshake1Payload.length !== 48) {
 			throw new Error(
-				`Kasa plug ${this.#host} returned an unexpected KLAP handshake1 payload.`,
+				`Kasa plug ${this.#host} returned an unexpected KLAP handshake1 payload (${String(handshake1Payload.length)} bytes, expected 48).`,
 			)
 		}
 		const sessionCookie = getCookieValue(handshake1.headers, 'TP_SESSIONID')
