@@ -165,6 +165,15 @@ test('Kasa adapter scans, adopts, reads status, and controls adopted plugs', asy
 			}),
 		])
 		expect(fake.calls).toContainEqual({ command: 'setRelayState', state: 1 })
+
+		await expect(kasa.getPlugStatus('   ')).resolves.toMatchObject({
+			plug: {
+				alias: 'Office Lamp',
+				relayState: 1,
+				lastError: null,
+			},
+			online: true,
+		})
 	} finally {
 		storage.close()
 	}

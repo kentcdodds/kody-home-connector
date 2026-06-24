@@ -59,7 +59,8 @@ export function createKasaAdapter(input: {
 
 	function resolvePlug(identifier?: string) {
 		const plugs = listKasaPlugs(storage, connectorId)
-		if (!identifier) {
+		const trimmedIdentifier = identifier?.trim()
+		if (!trimmedIdentifier) {
 			const adopted = plugs.filter((plug) => plug.adopted)
 			if (adopted.length === 1) return adopted[0]!
 			if (adopted.length > 1) {
@@ -78,7 +79,7 @@ export function createKasaAdapter(input: {
 			)
 		}
 
-		const normalized = normalizeIdentifier(identifier)
+		const normalized = normalizeIdentifier(trimmedIdentifier)
 		const exact =
 			plugs.find((plug) => normalizeIdentifier(plug.plugId) === normalized) ??
 			plugs.find((plug) => normalizeIdentifier(plug.alias) === normalized)
@@ -90,10 +91,10 @@ export function createKasaAdapter(input: {
 		if (partial.length === 1) return partial[0]!
 		if (partial.length > 1) {
 			throw new Error(
-				`Multiple Kasa plugs matched "${identifier}": ${partial.map(plugLabel).join('; ')}. Provide plugId.`,
+				`Multiple Kasa plugs matched "${trimmedIdentifier}": ${partial.map(plugLabel).join('; ')}. Provide plugId.`,
 			)
 		}
-		throw new Error(`Kasa plug "${identifier}" was not found.`)
+		throw new Error(`Kasa plug "${trimmedIdentifier}" was not found.`)
 	}
 
 	function requireAdoptedPlug(identifier?: string) {
