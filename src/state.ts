@@ -14,6 +14,10 @@ import {
 	type VenstarDiscoveredThermostat,
 	type VenstarDiscoveryDiagnostics,
 } from './adapters/venstar/types.ts'
+import {
+	type KasaDiscoveredPlug,
+	type KasaDiscoveryDiagnostics,
+} from './adapters/kasa/types.ts'
 import { type AccessNetworksUnleashedDiscoveryDiagnostics } from './adapters/access-networks-unleashed/types.ts'
 
 export type HomeConnectorConnectionState = {
@@ -50,6 +54,8 @@ export type HomeConnectorState = {
 	jellyfishDiscoveredControllers: Array<JellyfishDiscoveredController>
 	venstarDiscoveryDiagnostics: VenstarDiscoveryDiagnostics | null
 	venstarDiscoveredThermostats: Array<VenstarDiscoveredThermostat>
+	kasaDiscoveryDiagnostics: KasaDiscoveryDiagnostics | null
+	kasaDiscoveredPlugs: Array<KasaDiscoveredPlug>
 	accessNetworksUnleashedDiscoveryDiagnostics: AccessNetworksUnleashedDiscoveryDiagnostics | null
 }
 
@@ -79,6 +85,8 @@ const initialState: HomeConnectorState = {
 	jellyfishDiscoveredControllers: [],
 	venstarDiscoveryDiagnostics: null,
 	venstarDiscoveredThermostats: [],
+	kasaDiscoveryDiagnostics: null,
+	kasaDiscoveredPlugs: [],
 	accessNetworksUnleashedDiscoveryDiagnostics: null,
 }
 
@@ -175,6 +183,22 @@ export function setVenstarDiscoveredThermostats(
 ) {
 	state.venstarDiscoveredThermostats = [...thermostats]
 	return state.venstarDiscoveredThermostats
+}
+
+export function setKasaDiscoveryDiagnostics(
+	state: HomeConnectorState,
+	diagnostics: KasaDiscoveryDiagnostics | null,
+) {
+	state.kasaDiscoveryDiagnostics = diagnostics
+	return state.kasaDiscoveryDiagnostics
+}
+
+export function setKasaDiscoveredPlugs(
+	state: HomeConnectorState,
+	plugs: Array<KasaDiscoveredPlug>,
+) {
+	state.kasaDiscoveredPlugs = [...plugs]
+	return state.kasaDiscoveredPlugs
 }
 
 export function setAccessNetworksUnleashedDiscoveryDiagnostics(

@@ -3,6 +3,7 @@ import { createBondAdapter } from './adapters/bond/index.ts'
 import { createIslandRouterApiAdapter } from './adapters/island-router-api/index.ts'
 import { createIslandRouterAdapter } from './adapters/island-router/index.ts'
 import { createJellyfishAdapter } from './adapters/jellyfish/index.ts'
+import { createKasaAdapter } from './adapters/kasa/index.ts'
 import { createLutronAdapter } from './adapters/lutron/index.ts'
 import { createSamsungTvAdapter } from './adapters/samsung-tv/index.ts'
 import { createSonosAdapter } from './adapters/sonos/index.ts'
@@ -60,6 +61,11 @@ export function createHomeConnectorApp() {
 		state,
 		storage,
 	})
+	const kasa = createKasaAdapter({
+		config,
+		state,
+		storage,
+	})
 	const venstar = createVenstarAdapter({ config, state, storage })
 	const accessNetworksUnleashed = createAccessNetworksUnleashedAdapter({
 		config,
@@ -77,6 +83,7 @@ export function createHomeConnectorApp() {
 		islandRouter,
 		islandRouterApi,
 		jellyfish,
+		kasa,
 		venstar,
 		accessNetworksUnleashed,
 	})
@@ -99,6 +106,7 @@ export function createHomeConnectorApp() {
 		islandRouter,
 		islandRouterApi,
 		jellyfish,
+		kasa,
 		venstar,
 		accessNetworksUnleashed,
 		mcp,

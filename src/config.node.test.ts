@@ -1,6 +1,7 @@
 import { expect, test } from 'vitest'
 import {
 	deriveAccessNetworksUnleashedAutoscanCidrsFromInterfaces,
+	deriveKasaAutoscanCidrsFromInterfaces,
 	deriveVenstarAutoscanCidrsFromInterfaces,
 	loadHomeConnectorConfig,
 } from './config.ts'
@@ -47,6 +48,7 @@ test('live connector applies discovery defaults when env overrides are absent', 
 		BOND_DISCOVERY_URL: undefined,
 		LUTRON_DISCOVERY_URL: undefined,
 		JELLYFISH_DISCOVERY_URL: undefined,
+		KASA_SCAN_CIDRS: undefined,
 	})
 
 	const config = loadHomeConnectorConfig()
@@ -59,6 +61,7 @@ test('live connector applies discovery defaults when env overrides are absent', 
 		bondDiscoveryUrl: 'mdns://_bond._tcp.local',
 		lutronDiscoveryUrl: 'mdns://_lutron._tcp.local',
 		jellyfishDiscoveryUrl: null,
+		kasaRequestTimeoutMs: 5000,
 	})
 })
 
@@ -135,6 +138,7 @@ test('scan CIDR env vars override derived autoscan CIDRs', () => {
 		MOCKS: 'false',
 		ACCESS_NETWORKS_UNLEASHED_SCAN_CIDRS: '192.168.9.0/24, 10.0.0.9/32',
 		VENSTAR_SCAN_CIDRS: '192.168.1.0/24, 10.0.0.5/32',
+		KASA_SCAN_CIDRS: '192.168.3.0/24, 10.0.0.7/32',
 		JELLYFISH_SCAN_CIDRS: '192.168.2.0/24, 10.0.0.6/32',
 	})
 
@@ -144,6 +148,7 @@ test('scan CIDR env vars override derived autoscan CIDRs', () => {
 		'10.0.0.9/32',
 	])
 	expect(config.venstarScanCidrs).toEqual(['192.168.1.0/24', '10.0.0.5/32'])
+	expect(config.kasaScanCidrs).toEqual(['192.168.3.0/24', '10.0.0.7/32'])
 	expect(config.jellyfishScanCidrs).toEqual(['192.168.2.0/24', '10.0.0.6/32'])
 })
 
@@ -216,6 +221,23 @@ test('derived Venstar autoscan CIDRs split a /23 into /24 scan blocks', () => {
 			],
 		}),
 	).toEqual(['192.168.0.0/24', '192.168.1.0/24'])
+})
+
+test('derived Kasa autoscan CIDRs split a /23 into /24 scan blocks', () => {
+	expect(
+		deriveKasaAutoscanCidrsFromInterfaces({
+			en0: [
+				{
+					address: '192.168.8.151',
+					netmask: '255.255.254.0',
+					family: 'IPv4',
+					mac: '00:00:00:00:00:00',
+					internal: false,
+					cidr: '192.168.8.151/23',
+				},
+			],
+		}),
+	).toEqual(['192.168.8.0/24', '192.168.9.0/24'])
 })
 
 test('derived Venstar autoscan CIDRs collapse narrower private ranges to one /24', () => {
@@ -339,6 +361,44 @@ test('Access Networks Unleashed TLS and timeout env vars honor safe defaults and
 			accessNetworksUnleashedAllowInsecureTls: true,
 			accessNetworksUnleashedRequestTimeoutMs: 12000,
 		})
+	}
+})
+
+test('Kasa timeout env var honors safe defaults and explicit overrides', () => {
+	{
+		using _env = createTemporaryEnv({
+			...requiredConfigEnv,
+			KASA_SCAN_CIDRS: '192.168.1.0/24',
+			KASA_REQUEST_TIMEOUT_MS: undefined,
+		})
+
+		expect(loadHomeConnectorConfig()).toMatchObject({
+			kasaScanCidrs: ['192.168.1.0/24'],
+			kasaRequestTimeoutMs: 5000,
+		})
+	}
+
+	{
+		using _env = createTemporaryEnv({
+			...requiredConfigEnv,
+			KASA_SCAN_CIDRS: '192.168.50.0/24,10.0.0.8/32',
+			KASA_REQUEST_TIMEOUT_MS: '12000',
+		})
+
+		expect(loadHomeConnectorConfig()).toMatchObject({
+			kasaScanCidrs: ['192.168.50.0/24', '10.0.0.8/32'],
+			kasaRequestTimeoutMs: 12000,
+		})
+	}
+
+	{
+		using _env = createTemporaryEnv({
+			...requiredConfigEnv,
+			KASA_SCAN_CIDRS: '192.168.1.0/24',
+			KASA_REQUEST_TIMEOUT_MS: '500',
+		})
+
+		expect(loadHomeConnectorConfig().kasaRequestTimeoutMs).toBe(5000)
 	}
 })
 

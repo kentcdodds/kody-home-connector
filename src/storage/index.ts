@@ -252,6 +252,29 @@ function initializeSchema(db: SqliteDatabase) {
 			PRIMARY KEY (connector_id, ip)
 		);
 
+		CREATE TABLE IF NOT EXISTS kasa_plugs (
+			connector_id TEXT NOT NULL,
+			plug_id TEXT NOT NULL,
+			alias TEXT NOT NULL,
+			host TEXT NOT NULL,
+			port INTEGER NOT NULL DEFAULT 9999,
+			model TEXT,
+			mac_address TEXT,
+			device_id TEXT,
+			hw_id TEXT,
+			sw_ver TEXT,
+			relay_state INTEGER,
+			led_off INTEGER,
+			on_time INTEGER,
+			raw_sysinfo_json TEXT NOT NULL,
+			adopted INTEGER NOT NULL DEFAULT 0,
+			last_seen_at TEXT NOT NULL,
+			last_connected_at TEXT,
+			last_error TEXT,
+			updated_at TEXT NOT NULL,
+			PRIMARY KEY (connector_id, plug_id)
+		);
+
 		CREATE TABLE IF NOT EXISTS home_connector_logs (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			connector_id TEXT NOT NULL,

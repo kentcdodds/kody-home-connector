@@ -8,6 +8,7 @@ import { renderIslandRouterCommand } from '../adapters/island-router/command-cat
 import { type IslandRouterCommandRequest } from '../adapters/island-router/types.ts'
 import { createIslandRouterAdapter } from '../adapters/island-router/index.ts'
 import { createJellyfishAdapter } from '../adapters/jellyfish/index.ts'
+import { createKasaAdapter } from '../adapters/kasa/index.ts'
 import { createLutronAdapter } from '../adapters/lutron/index.ts'
 import { createSonosAdapter } from '../adapters/sonos/index.ts'
 import { createSamsungTvAdapter } from '../adapters/samsung-tv/index.ts'
@@ -39,6 +40,7 @@ function createConfig() {
 	process.env.BOND_DISCOVERY_URL = 'http://bond.mock.local/discovery'
 	process.env.JELLYFISH_DISCOVERY_URL = 'http://jellyfish.mock.local/discovery'
 	process.env.VENSTAR_SCAN_CIDRS = '192.168.10.40/32,192.168.10.41/32'
+	process.env.KASA_SCAN_CIDRS = '192.168.10.70/32'
 	process.env.HOME_CONNECTOR_DB_PATH = ':memory:'
 	process.env.ISLAND_ROUTER_HOST = 'router.local'
 	process.env.ISLAND_ROUTER_PORT = '22'
@@ -337,6 +339,88 @@ function createAccessNetworksUnleashedFixture(input: {
 	}
 }
 
+function createKasaFixture(input: {
+	config: ReturnType<typeof loadHomeConnectorConfig>
+	state: ReturnType<typeof createAppState>
+	storage: ReturnType<typeof createHomeConnectorStorage>
+}) {
+	let relayState = 1
+	const calls: Array<{ command: string; state?: number }> = []
+	const sysInfo = () => ({
+		err_code: 0,
+		alias: 'Office Lamp',
+		model: 'HS103(US)',
+		deviceId: '800612345678',
+		mac: 'AA-BB-CC-DD-EE-FF',
+		hwId: 'hardware-id',
+		sw_ver: '1.1.0',
+		relay_state: relayState,
+		led_off: 0,
+		on_time: relayState === 1 ? 42 : 0,
+	})
+	const kasa = createKasaAdapter({
+		config: input.config,
+		state: input.state,
+		storage: input.storage,
+		client: {
+			async getSysInfo() {
+				calls.push({ command: 'getSysInfo' })
+				return sysInfo()
+			},
+			async setRelayState(request) {
+				calls.push({ command: 'setRelayState', state: request.state })
+				relayState = request.state
+				return { err_code: 0 }
+			},
+		},
+		scanPlugs: async () => ({
+			plugs: [
+				{
+					plugId: 'kasa-plug-800612345678',
+					alias: 'Office Lamp',
+					host: '192.168.10.70',
+					port: 9999,
+					model: 'HS103(US)',
+					macAddress: 'aa:bb:cc:dd:ee:ff',
+					deviceId: '800612345678',
+					hwId: 'hardware-id',
+					swVer: '1.1.0',
+					relayState: relayState === 1 ? 1 : 0,
+					ledOff: 0,
+					onTime: relayState === 1 ? 42 : 0,
+					lastSeenAt: '2026-06-24T14:00:00.000Z',
+					rawSysInfo: sysInfo(),
+				},
+			],
+			diagnostics: {
+				protocol: 'subnet',
+				discoveryUrl: '192.168.10.70/32',
+				scannedAt: '2026-06-24T14:00:00.000Z',
+				probes: [
+					{
+						host: '192.168.10.70',
+						port: 9999,
+						matched: true,
+						plugId: 'kasa-plug-800612345678',
+						alias: 'Office Lamp',
+						model: 'HS103(US)',
+						error: null,
+					},
+				],
+				subnetProbe: {
+					cidrs: ['192.168.10.70/32'],
+					hostsProbed: 1,
+					plugMatches: 1,
+				},
+			},
+		}),
+	})
+	return {
+		kasa,
+		calls,
+	}
+}
+
 installHomeConnectorMockServer()
 
 test('mcp server exposes Samsung tools and executes samsung_list_devices', async () => {
@@ -386,6 +470,11 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 		state,
 		storage,
 	})
+	const { kasa, calls: kasaCalls } = createKasaFixture({
+		config,
+		state,
+		storage,
+	})
 	const venstar = createVenstarAdapter({ config, state, storage })
 	const { accessNetworksUnleashed, fakeClient: fakeAccessNetworksUnleashed } =
 		createAccessNetworksUnleashedFixture({
@@ -429,6 +518,7 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 		islandRouter,
 		islandRouterApi,
 		jellyfish,
+		kasa,
 		venstar,
 		accessNetworksUnleashed,
 	})
@@ -596,6 +686,49 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 				zoneName: ['Zone'],
 			},
 		})
+
+		const kasaScan = await mcp.callTool('kasa_scan_plugs')
+		expect(kasaScan.structuredContent).toMatchObject({
+			plugs: [
+				expect.objectContaining({
+					plugId: 'kasa-plug-800612345678',
+					alias: 'Office Lamp',
+					adopted: false,
+				}),
+			],
+			diagnostics: expect.anything(),
+		})
+		const kasaListTool = tools.find((tool) => tool.name === 'kasa_list_plugs')
+		expect(kasaListTool?.annotations?.['readOnlyHint']).toBe(true)
+		const kasaOffTool = tools.find((tool) => tool.name === 'kasa_turn_plug_off')
+		expect(kasaOffTool?.annotations?.['destructiveHint']).toBe(true)
+		const adoptedKasa = await mcp.callTool('kasa_adopt_plug', {
+			plugId: 'kasa-plug-800612345678',
+		})
+		expect(adoptedKasa.structuredContent).toMatchObject({
+			plug: {
+				adopted: true,
+			},
+		})
+		const kasaStatus = await mcp.callTool('kasa_get_plug_status', {
+			plug: 'Office Lamp',
+		})
+		expect(kasaStatus.structuredContent).toMatchObject({
+			plug: {
+				relayState: 1,
+			},
+			online: true,
+		})
+		const kasaOff = await mcp.callTool('kasa_turn_plug_off', {
+			plug: 'Office Lamp',
+		})
+		expect(kasaOff.structuredContent).toMatchObject({
+			requestedState: 0,
+			plug: {
+				relayState: 0,
+			},
+		})
+		expect(kasaCalls).toContainEqual({ command: 'setRelayState', state: 0 })
 
 		const venstarThermostats = await mcp.callTool('venstar_list_thermostats')
 		expect(venstarThermostats.structuredContent).toMatchObject({
@@ -820,6 +953,11 @@ test('mcp server exposes island router write tools when host verification is con
 		state,
 		storage,
 	})
+	const { kasa } = createKasaFixture({
+		config,
+		state,
+		storage,
+	})
 	const venstar = createVenstarAdapter({ config, state, storage })
 	const { accessNetworksUnleashed } = createAccessNetworksUnleashedFixture({
 		config,
@@ -841,6 +979,7 @@ test('mcp server exposes island router write tools when host verification is con
 		islandRouter,
 		islandRouterApi,
 		jellyfish,
+		kasa,
 		venstar,
 		accessNetworksUnleashed,
 	})

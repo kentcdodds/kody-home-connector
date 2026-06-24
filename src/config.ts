@@ -33,6 +33,13 @@ export type HomeConnectorConfig = {
 	bondDiscoveryUrl: string
 	bondRequestPaceMs: number
 	bondCircuitBreakerCooldownMs: number
+	/**
+	 * TP-Link Kasa legacy local protocol discovery probes TCP/9999 across these
+	 * CIDRs. When unset, the connector derives private `/24` networks from local
+	 * IPv4 interfaces. `KASA_SCAN_CIDRS` can override the derived list.
+	 */
+	kasaScanCidrs: Array<string>
+	kasaRequestTimeoutMs: number
 	jellyfishDiscoveryUrl: string | null
 	/**
 	 * Venstar discovery uses direct HTTP probes to `/query/info` across these
@@ -296,6 +303,12 @@ export function deriveAccessNetworksUnleashedAutoscanCidrsFromInterfaces(
 	return derivePrivateAutoscanCidrsFromInterfaces(interfaces)
 }
 
+export function deriveKasaAutoscanCidrsFromInterfaces(
+	interfaces: ReturnType<typeof networkInterfaces>,
+) {
+	return derivePrivateAutoscanCidrsFromInterfaces(interfaces)
+}
+
 function deriveVenstarAutoscanCidrs() {
 	return deriveVenstarAutoscanCidrsFromInterfaces(networkInterfaces())
 }
@@ -304,6 +317,10 @@ function deriveAccessNetworksUnleashedAutoscanCidrs() {
 	return deriveAccessNetworksUnleashedAutoscanCidrsFromInterfaces(
 		networkInterfaces(),
 	)
+}
+
+function deriveKasaAutoscanCidrs() {
+	return deriveKasaAutoscanCidrsFromInterfaces(networkInterfaces())
 }
 
 function deriveJellyfishAutoscanCidrs() {
@@ -319,6 +336,10 @@ export function loadHomeConnectorConfig(): HomeConnectorConfig {
 	)
 	const accessNetworksUnleashedRequestTimeoutMs = Number.parseInt(
 		process.env.ACCESS_NETWORKS_UNLEASHED_REQUEST_TIMEOUT_MS ?? '8000',
+		10,
+	)
+	const kasaRequestTimeoutMs = Number.parseInt(
+		process.env.KASA_REQUEST_TIMEOUT_MS ?? '5000',
 		10,
 	)
 	const islandRouterApiRequestTimeoutMs = Number.parseInt(
@@ -348,6 +369,9 @@ export function loadHomeConnectorConfig(): HomeConnectorConfig {
 		explicitVenstarCidrs.length > 0
 			? explicitVenstarCidrs
 			: deriveVenstarAutoscanCidrs()
+	const explicitKasaCidrs = resolveScanCidrsFromEnv('KASA_SCAN_CIDRS')
+	const kasaScanCidrs =
+		explicitKasaCidrs.length > 0 ? explicitKasaCidrs : deriveKasaAutoscanCidrs()
 	const explicitJellyfishCidrs = resolveScanCidrsFromEnv('JELLYFISH_SCAN_CIDRS')
 	const jellyfishScanCidrs =
 		explicitJellyfishCidrs.length > 0
@@ -421,6 +445,11 @@ export function loadHomeConnectorConfig(): HomeConnectorConfig {
 			'BOND_CIRCUIT_BREAKER_COOLDOWN_MS',
 			60_000,
 		),
+		kasaScanCidrs,
+		kasaRequestTimeoutMs:
+			Number.isFinite(kasaRequestTimeoutMs) && kasaRequestTimeoutMs >= 1000
+				? kasaRequestTimeoutMs
+				: 5000,
 		jellyfishDiscoveryUrl: process.env.JELLYFISH_DISCOVERY_URL?.trim() || null,
 		venstarScanCidrs,
 		jellyfishScanCidrs,

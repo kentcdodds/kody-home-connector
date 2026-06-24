@@ -43,6 +43,8 @@ The connector exposes these local-device families:
 - Samsung TV / Frame discovery and control over mDNS, REST, and local WebSocket
   channels
 - Venstar WiFi thermostat status and control over the local REST API
+- TP-Link Kasa smart plug discovery, status, and explicit on/off control over
+  the legacy local TCP protocol
 - Island router diagnostics and guarded writes over SSH using one typed command
   catalog
 - Access Networks Unleashed / RUCKUS Unleashed WiFi controller reads and typed
@@ -154,6 +156,60 @@ Discovery is subnet-scan-only. The connector probes `/query/info` across
 `/24` networks from local IPv4 interfaces. This avoids the SSDP multicast
 fragility that showed up on NAS and Docker bridge deployments while keeping the
 user flow aligned with the other managed device integrations.
+
+## TP-Link Kasa smart plug integration
+
+The Kasa adapter lives under `src/adapters/kasa/` and supports TP-Link/Kasa
+smart plugs that still expose the legacy local "Smart Home" protocol on
+TCP/9999. It does not use TP-Link cloud credentials and does not store plug
+passwords or tokens.
+
+The MCP surface is intentionally small:
+
+- `kasa_scan_plugs` probes configured private scan CIDRs with
+  `system.get_sysinfo`, persists discovered plugs locally, and returns discovery
+  diagnostics
+- `kasa_list_plugs` lists known plugs with stable `plugId`, alias, host/port,
+  adoption state, and latest cached relay state
+- `kasa_adopt_plug` marks a discovered plug as adopted before control
+- `kasa_forget_plug` removes a plug from local connector storage
+- `kasa_get_plug_status` reads live sysinfo/status by `plugId` or alias
+- `kasa_turn_plug_on` and `kasa_turn_plug_off` explicitly set relay state for an
+  adopted plug only; they never accept arbitrary IP addresses
+
+Discovery is subnet-scan-only. The connector probes TCP/9999 across
+`KASA_SCAN_CIDRS` when that env var is set; otherwise it derives private `/24`
+networks from local IPv4 interfaces. `KASA_REQUEST_TIMEOUT_MS` controls live
+status/control timeouts and defaults to 5000ms with a minimum of 1000ms. Scan
+probes cap per-host timeout to 1000ms so a missing plug does not stall
+discovery.
+
+Limitations:
+
+- Newer Kasa/Tapo hardware or firmware that requires KLAP/cloud credentials will
+  not respond to this legacy local protocol.
+- Live discovery/control must run from the production home connector host on the
+  same LAN/VLAN as the plugs, with TCP/9999 reachable.
+- Plug aliases come from the device sysinfo. If aliases are ambiguous, agents
+  should use the stable `plugId` returned by `kasa_list_plugs`.
+
+Manual production validation steps:
+
+1. Deploy the connector with `KASA_SCAN_CIDRS` set to the plug subnet if
+   automatic private interface discovery does not include it.
+2. Call `home_default_kasa_scan_plugs({})` and confirm each expected plug
+   appears with the correct alias/model and `matched: true` diagnostics.
+3. Call `home_default_kasa_adopt_plug({ plugId })` for one non-critical test
+   plug.
+4. Call `home_default_kasa_get_plug_status({ plug: plugId })` and confirm the
+   returned `relayState` matches the physical/app state.
+5. With a safe load connected, call
+   `home_default_kasa_turn_plug_off({ plug: plugId })`, verify the load turns
+   off, then call `home_default_kasa_turn_plug_on({ plug: plugId })` and verify
+   it turns back on.
+6. If scan finds no plugs, verify the connector host can reach the plug IP on
+   TCP/9999 from inside the container/host network and confirm the device model
+   still supports TP-Link's legacy local protocol.
 
 ## Island router diagnostics integration
 
@@ -328,6 +384,7 @@ The connector stores a local SQLite database containing:
 - discovered Bond bridges and tokens
 - discovered Sonos players
 - managed Venstar thermostats
+- discovered/adopted Kasa smart plugs and latest cached sysinfo/status
 
 By default the database is stored at
 `~/.kody/home-connector/home-connector.sqlite`. Operators can override the base
