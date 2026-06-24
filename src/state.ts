@@ -15,6 +15,7 @@ import {
 	type VenstarDiscoveryDiagnostics,
 } from './adapters/venstar/types.ts'
 import { type AccessNetworksUnleashedDiscoveryDiagnostics } from './adapters/access-networks-unleashed/types.ts'
+import { type KasaDiscoveryDiagnostics } from './adapters/kasa/types.ts'
 
 export type HomeConnectorConnectionState = {
 	workerUrl: string
@@ -51,6 +52,7 @@ export type HomeConnectorState = {
 	venstarDiscoveryDiagnostics: VenstarDiscoveryDiagnostics | null
 	venstarDiscoveredThermostats: Array<VenstarDiscoveredThermostat>
 	accessNetworksUnleashedDiscoveryDiagnostics: AccessNetworksUnleashedDiscoveryDiagnostics | null
+	kasaDiscoveryDiagnostics: KasaDiscoveryDiagnostics | null
 }
 
 const initialState: HomeConnectorState = {
@@ -80,6 +82,7 @@ const initialState: HomeConnectorState = {
 	venstarDiscoveryDiagnostics: null,
 	venstarDiscoveredThermostats: [],
 	accessNetworksUnleashedDiscoveryDiagnostics: null,
+	kasaDiscoveryDiagnostics: null,
 }
 
 export function createAppState(): HomeConnectorState {
@@ -183,6 +186,14 @@ export function setAccessNetworksUnleashedDiscoveryDiagnostics(
 ) {
 	state.accessNetworksUnleashedDiscoveryDiagnostics = diagnostics
 	return state.accessNetworksUnleashedDiscoveryDiagnostics
+}
+
+export function setKasaDiscoveryDiagnostics(
+	state: HomeConnectorState,
+	diagnostics: KasaDiscoveryDiagnostics | null,
+) {
+	state.kasaDiscoveryDiagnostics = diagnostics
+	return state.kasaDiscoveryDiagnostics
 }
 
 export function getDiscoveredRokuDevices(state: HomeConnectorState) {

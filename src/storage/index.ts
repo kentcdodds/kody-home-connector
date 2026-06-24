@@ -214,6 +214,36 @@ function initializeSchema(db: SqliteDatabase) {
 				ON DELETE CASCADE
 		);
 
+		CREATE TABLE IF NOT EXISTS kasa_plugs (
+			connector_id TEXT NOT NULL,
+			plug_id TEXT NOT NULL,
+			alias TEXT NOT NULL,
+			host TEXT NOT NULL,
+			port INTEGER NOT NULL DEFAULT 80,
+			model TEXT,
+			mac TEXT,
+			device_id TEXT,
+			relay_state TEXT,
+			adopted INTEGER NOT NULL DEFAULT 0,
+			raw_sysinfo_json TEXT,
+			raw_discovery_json TEXT,
+			last_seen_at TEXT,
+			updated_at TEXT NOT NULL,
+			PRIMARY KEY (connector_id, plug_id)
+		);
+
+		CREATE INDEX IF NOT EXISTS idx_kasa_plugs_alias
+			ON kasa_plugs(connector_id, alias COLLATE NOCASE);
+
+		CREATE TABLE IF NOT EXISTS kasa_credentials (
+			connector_id TEXT NOT NULL PRIMARY KEY,
+			username TEXT NOT NULL,
+			password TEXT NOT NULL,
+			last_authenticated_at TEXT,
+			last_auth_error TEXT,
+			updated_at TEXT NOT NULL
+		);
+
 		CREATE TABLE IF NOT EXISTS island_router_api_credentials (
 			connector_id TEXT NOT NULL PRIMARY KEY,
 			pin TEXT NOT NULL,

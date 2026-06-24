@@ -7,6 +7,7 @@ import { type createLutronAdapter } from '../src/adapters/lutron/index.ts'
 import { type LutronDiscoveryDiagnostics } from '../src/adapters/lutron/types.ts'
 import { type createBondAdapter } from '../src/adapters/bond/index.ts'
 import { type createJellyfishAdapter } from '../src/adapters/jellyfish/index.ts'
+import { type createKasaAdapter } from '../src/adapters/kasa/index.ts'
 import { type createSonosAdapter } from '../src/adapters/sonos/index.ts'
 import { type createSamsungTvAdapter } from '../src/adapters/samsung-tv/index.ts'
 import { type createVenstarAdapter } from '../src/adapters/venstar/index.ts'
@@ -29,6 +30,8 @@ function renderQuickLinks(
 		<li><a href="/roku/setup">Roku setup</a></li>
 		<li><a href="/lutron/status">Lutron status</a></li>
 		<li><a href="/lutron/setup">Lutron setup</a></li>
+		<li><a href="/kasa/status">Kasa status</a></li>
+		<li><a href="/kasa/setup">Kasa setup</a></li>
 		<li><a href="/sonos/status">Sonos status</a></li>
 		<li><a href="/sonos/setup">Sonos setup</a></li>
 		<li><a href="/samsung-tv/status">Samsung TV status</a></li>
@@ -61,6 +64,7 @@ export function createHomeDashboardHandler(
 	bond: ReturnType<typeof createBondAdapter>,
 	jellyfish: ReturnType<typeof createJellyfishAdapter>,
 	venstar: ReturnType<typeof createVenstarAdapter>,
+	kasa: ReturnType<typeof createKasaAdapter>,
 ) {
 	return {
 		middleware: [],
@@ -76,6 +80,7 @@ export function createHomeDashboardHandler(
 			const sonosStatus = sonos.getStatus()
 			const bondStatus = bond.getStatus()
 			const jellyfishStatus = jellyfish.getStatus()
+			const kasaStatus = kasa.getStatus()
 			const venstarStatus = await venstar.listThermostatsWithStatus()
 			const onlineVenstarCount = venstarStatus.filter(
 				(thermostat) => thermostat.info != null,
@@ -144,6 +149,20 @@ export function createHomeDashboardHandler(
 									{
 										label: 'Lutron credentials',
 										value: String(lutronStatus.configuredCredentialsCount),
+									},
+									{
+										label: 'Kasa plugs',
+										value: String(kasaStatus.plugs.length),
+									},
+									{
+										label: 'Kasa adopted',
+										value: String(kasaStatus.adopted.length),
+									},
+									{
+										label: 'Kasa credentials',
+										value: kasaStatus.config.configured
+											? 'configured'
+											: 'missing',
 									},
 									{
 										label: 'Samsung adopted',

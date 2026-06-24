@@ -25,6 +25,7 @@ import { type createIslandRouterApiAdapter } from '../src/adapters/island-router
 import { type IslandRouterApiStatus } from '../src/adapters/island-router-api/types.ts'
 import { type createIslandRouterAdapter } from '../src/adapters/island-router/index.ts'
 import { type createJellyfishAdapter } from '../src/adapters/jellyfish/index.ts'
+import { type createKasaAdapter } from '../src/adapters/kasa/index.ts'
 import { type createLutronAdapter } from '../src/adapters/lutron/index.ts'
 import { type createSamsungTvAdapter } from '../src/adapters/samsung-tv/index.ts'
 import { type createSonosAdapter } from '../src/adapters/sonos/index.ts'
@@ -50,6 +51,7 @@ type DashboardDependencies = {
 	islandRouterApi: ReturnType<typeof createIslandRouterApiAdapter>
 	jellyfish: ReturnType<typeof createJellyfishAdapter>
 	venstar: ReturnType<typeof createVenstarAdapter>
+	kasa: ReturnType<typeof createKasaAdapter>
 }
 
 type DashboardSnapshot = {
@@ -69,6 +71,12 @@ type DashboardSnapshot = {
 	}
 	accessNetworksUnleashed: {
 		controllers: number
+		adopted: number
+		withCredentials: number
+		diagnosticsCaptured: boolean
+	}
+	kasa: {
+		plugs: number
 		adopted: number
 		withCredentials: number
 		diagnosticsCaptured: boolean
@@ -217,6 +225,7 @@ function countDiagnosticSources(state: HomeConnectorState) {
 		state.rokuDiscoveryDiagnostics,
 		state.lutronDiscoveryDiagnostics,
 		state.accessNetworksUnleashedDiscoveryDiagnostics,
+		state.kasaDiscoveryDiagnostics,
 		state.sonosDiscoveryDiagnostics,
 		state.samsungTvDiscoveryDiagnostics,
 		state.bondDiscoveryDiagnostics,
@@ -274,6 +283,7 @@ async function loadDashboardSnapshot(
 		deps.accessNetworksUnleashed.listControllers()
 	const accessNetworksUnleashedAdoptedController =
 		deps.accessNetworksUnleashed.getAdoptedController()
+	const kasaStatus = deps.kasa.getStatus()
 	const [venstarStatus, loadedIslandRouterStatus] = await Promise.all([
 		deps.venstar.listThermostatsWithStatus(),
 		input.islandRouterStatus
@@ -316,6 +326,14 @@ async function loadDashboardSnapshot(
 			).length,
 			diagnosticsCaptured:
 				deps.state.accessNetworksUnleashedDiscoveryDiagnostics != null,
+		},
+		kasa: {
+			plugs: kasaStatus.plugs.length,
+			adopted: kasaStatus.adopted.length,
+			withCredentials: kasaStatus.config.configured
+				? kasaStatus.plugs.length
+				: 0,
+			diagnosticsCaptured: deps.state.kasaDiscoveryDiagnostics != null,
 		},
 		sonos: {
 			adopted: sonosStatus.adopted.length,
@@ -374,6 +392,7 @@ async function loadDashboardSnapshot(
 				rokuAdopted.length +
 				lutronStatus.processors.length +
 				(accessNetworksUnleashedAdoptedController ? 1 : 0) +
+				kasaStatus.adopted.length +
 				sonosStatus.adopted.length +
 				samsungStatus.adopted.length +
 				bondStatus.adopted.length +
@@ -386,6 +405,7 @@ async function loadDashboardSnapshot(
 						(accessNetworksUnleashedAdoptedController ? 1 : 0),
 					0,
 				) +
+				kasaStatus.discovered.length +
 				sonosStatus.discovered.length +
 				samsungStatus.discovered.length +
 				bondStatus.discovered.length +
@@ -534,6 +554,40 @@ function renderIntegrationSummaryCards(snapshot: DashboardSnapshot) {
 			secondaryLink: {
 				href: routes.lutronSetup.pattern,
 				label: 'Lutron setup',
+			},
+		})}
+		${renderSummaryCard({
+			title: 'Kasa',
+			description: 'KLAP smart plug discovery, adoption, and credentials.',
+			status:
+				snapshot.kasa.plugs > 0
+					? `${snapshot.kasa.adopted}/${snapshot.kasa.plugs} adopted`
+					: snapshot.kasa.diagnosticsCaptured
+						? 'Scanned recently'
+						: 'No recent data',
+			tone:
+				snapshot.kasa.plugs > 0 && snapshot.kasa.withCredentials === 0
+					? 'warn'
+					: getIntegrationTone({
+							managedCount: snapshot.kasa.adopted,
+							discoveredCount: snapshot.kasa.plugs - snapshot.kasa.adopted,
+							diagnosticsCaptured: snapshot.kasa.diagnosticsCaptured,
+						}),
+			metrics: [
+				{ label: 'Known plugs', value: snapshot.kasa.plugs },
+				{ label: 'Adopted', value: snapshot.kasa.adopted },
+				{
+					label: 'Credentials',
+					value: snapshot.kasa.withCredentials > 0 ? 'configured' : 'missing',
+				},
+			],
+			primaryLink: {
+				href: routes.kasaStatus.pattern,
+				label: 'Kasa status',
+			},
+			secondaryLink: {
+				href: routes.kasaSetup.pattern,
+				label: 'Kasa setup',
 			},
 		})}
 		${renderSummaryCard({
@@ -736,6 +790,26 @@ function renderDrillDownActions(snapshot: DashboardSnapshot) {
 				tone: snapshot.islandRouterApi.tone,
 			},
 		})}
+		${renderActionCard({
+			href: routes.kasaStatus.pattern,
+			title: 'Kasa smart plugs',
+			description:
+				'Review Kasa credential readiness, discovered KLAP plugs, and discovery diagnostics.',
+			badge: {
+				label:
+					snapshot.kasa.plugs > 0
+						? `${snapshot.kasa.plugs} plug(s)`
+						: snapshot.kasa.diagnosticsCaptured
+							? 'Scanned'
+							: 'No data',
+				tone:
+					snapshot.kasa.plugs > 0 && snapshot.kasa.withCredentials === 0
+						? 'warn'
+						: snapshot.kasa.plugs > 0
+							? 'good'
+							: 'neutral',
+			},
+		})}
 	</div>`
 }
 
@@ -791,6 +865,14 @@ function renderDiagnosticsHighlights(snapshot: DashboardSnapshot) {
 			detail: `${snapshot.samsungTv.adopted - snapshot.samsungTv.paired} adopted TV(s) are not paired yet.`,
 		})
 	}
+	if (snapshot.kasa.plugs > 0 && snapshot.kasa.withCredentials === 0) {
+		highlights.push({
+			label: 'Kasa credentials',
+			tone: 'warn',
+			detail:
+				'Kasa plugs are known, but TP-Link/Kasa account credentials are not configured.',
+		})
+	}
 	if (snapshot.venstar.offline > 0) {
 		highlights.push({
 			label: 'Venstar reachability',
@@ -844,6 +926,10 @@ export function createDashboardHandler(deps: DashboardDependencies) {
 								{
 									href: routes.islandRouterApiSetup.pattern,
 									label: 'Island API PIN',
+								},
+								{
+									href: routes.kasaSetup.pattern,
+									label: 'Kasa credentials',
 								},
 							],
 						})}
@@ -1116,6 +1202,12 @@ export function createSystemStatusHandler(deps: DashboardDependencies) {
 											'none'}</code
 										>`,
 									},
+									{
+										label: 'Kasa scan CIDRs',
+										value: html`<code
+											>${deps.config.kasaScanCidrs.join(', ') || 'none'}</code
+										>`,
+									},
 								])}
 							</section>
 						</section>
@@ -1155,6 +1247,12 @@ export function createSystemStatusHandler(deps: DashboardDependencies) {
 										value: deps.config.jellyfishDiscoveryUrl
 											? html`<code>${deps.config.jellyfishDiscoveryUrl}</code>`
 											: 'none',
+									},
+									{
+										label: 'Kasa scan CIDRs',
+										value: html`<code
+											>${deps.config.kasaScanCidrs.join(', ') || 'none'}</code
+										>`,
 									},
 								])}
 							</section>
@@ -1312,6 +1410,25 @@ export function createDiagnosticsHandler(deps: DashboardDependencies) {
 					links: [
 						{ href: routes.lutronStatus.pattern, label: 'Lutron status' },
 						{ href: routes.lutronSetup.pattern, label: 'Lutron setup' },
+					],
+				},
+				{
+					name: 'Kasa discovery',
+					status: snapshot.kasa.diagnosticsCaptured
+						? 'Captured'
+						: 'No captures',
+					tone:
+						snapshot.kasa.plugs > 0 && snapshot.kasa.withCredentials === 0
+							? 'warn'
+							: snapshot.kasa.diagnosticsCaptured
+								? 'good'
+								: 'neutral',
+					details: deps.state.kasaDiscoveryDiagnostics
+						? `Last scan ${deps.state.kasaDiscoveryDiagnostics.scannedAt} with ${deps.state.kasaDiscoveryDiagnostics.subnetProbe.shipMatches} SHIP match(es).`
+						: 'No Kasa scan diagnostics captured yet.',
+					links: [
+						{ href: routes.kasaStatus.pattern, label: 'Kasa status' },
+						{ href: routes.kasaSetup.pattern, label: 'Kasa setup' },
 					],
 				},
 				{
@@ -1493,6 +1610,12 @@ export function createDiagnosticsHandler(deps: DashboardDependencies) {
 									{
 										label: 'Venstar',
 										value: deps.state.venstarDiscoveryDiagnostics
+											? 'captured'
+											: 'none',
+									},
+									{
+										label: 'Kasa',
+										value: deps.state.kasaDiscoveryDiagnostics
 											? 'captured'
 											: 'none',
 									},

@@ -70,6 +70,12 @@ const navigationSections: Array<{
 				matchPaths: [routes.accessNetworksUnleashedSetup.pattern],
 			},
 			{
+				href: routes.kasaStatus.pattern,
+				label: 'Kasa',
+				description: 'KLAP smart plugs and TP-Link credentials',
+				matchPaths: [routes.kasaSetup.pattern],
+			},
+			{
 				href: routes.sonosStatus.pattern,
 				label: 'Sonos',
 				description: 'Players and groups',

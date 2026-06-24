@@ -43,6 +43,7 @@ The connector exposes these local-device families:
 - Samsung TV / Frame discovery and control over mDNS, REST, and local WebSocket
   channels
 - Venstar WiFi thermostat status and control over the local REST API
+- TP-Link Kasa KLAP/SHIP 2.0 smart plug discovery and on/off control
 - Island router diagnostics and guarded writes over SSH using one typed command
   catalog
 - Access Networks Unleashed / RUCKUS Unleashed WiFi controller reads and typed
@@ -154,6 +155,71 @@ Discovery is subnet-scan-only. The connector probes `/query/info` across
 `/24` networks from local IPv4 interfaces. This avoids the SSDP multicast
 fragility that showed up on NAS and Docker bridge deployments while keeping the
 user flow aligned with the other managed device integrations.
+
+## TP-Link Kasa smart plug integration
+
+The Kasa adapter lives under `src/adapters/kasa/` and targets modern TP-Link
+Kasa plugs that advertise `Server: SHIP 2.0` and use the KLAP protocol over HTTP
+port 80. It is intended for EP25-style plugs that no longer respond to the
+legacy TCP/9999 XOR transport.
+
+Discovery combines:
+
+- KLAP/Kasa UDP discovery probes on ports `9999` and `20002`
+- HTTP subnet probes across `KASA_SCAN_CIDRS`, or private `/24` ranges derived
+  from local IPv4 interfaces when the env var is unset
+- credential-aware KLAP `system.get_sysinfo` reads so aliases, model, MAC,
+  device id, and relay state can be persisted
+
+KLAP authentication and requests are implemented in TypeScript. The client uses
+the TP-Link account credential hash (`md5(md5(username) + md5(password))`), the
+two-step `/app/handshake1` and `/app/handshake2` flow with `TP_SESSIONID`, and
+AES-CBC request framing derived from the local seed, remote seed, and auth hash.
+It also checks the python-kasa fallback credential candidates and blank
+credentials during handshake matching.
+
+Credential setup options:
+
+- local admin UI: open `/kasa/setup`, enter the TP-Link/Kasa app email and
+  password, and submit **Save credentials**
+- MCP: call `kasa_set_credentials`
+- environment fallback: set `KASA_USERNAME` and `KASA_PASSWORD`
+
+Credentials saved through `/kasa/setup` and `kasa_set_credentials` use the same
+adapter code path and are persisted locally in SQLite, encrypted with
+`HOME_CONNECTOR_SHARED_SECRET`. The setup page shows whether credentials are
+configured and the saved username/email, but never renders the saved password
+back to the browser.
+
+The local UI flow is:
+
+1. `/kasa/setup` - store or replace TP-Link/Kasa account credentials.
+2. `/kasa/status` - scan plugs, review known/adopted plugs, credential
+   readiness, and discovery diagnostics.
+3. Use MCP adoption/control tools once the desired plug is known.
+
+The MCP surface is:
+
+- `kasa_scan_plugs`
+- `kasa_list_plugs`
+- `kasa_adopt_plug`
+- `kasa_forget_plug`
+- `kasa_set_credentials`
+- `kasa_get_plug_status`
+- `kasa_turn_plug_on`
+- `kasa_turn_plug_off`
+
+Control tools require an adopted plug and resolve targets only by stable
+`plugId` or exact unique alias; arbitrary IP control is intentionally not
+accepted. `kasa_turn_plug_off` is marked destructive because it may power down
+connected equipment.
+
+Configuration:
+
+- `KASA_SCAN_CIDRS` overrides derived private `/24` scan ranges. Entries must be
+  `a.b.c.0/24` or `a.b.c.d/32`.
+- `KASA_REQUEST_TIMEOUT_MS` defaults to `8000` and must be at least `1000`.
+- `KASA_USERNAME` and `KASA_PASSWORD` provide optional env fallback credentials.
 
 ## Island router diagnostics integration
 
@@ -325,6 +391,11 @@ The connector stores a local SQLite database containing:
 - Access Networks Unleashed credentials encrypted locally with
   `HOME_CONNECTOR_SHARED_SECRET`
 - last Access Networks Unleashed authentication success/error details
+- discovered Kasa smart plug metadata
+- which Kasa smart plugs are adopted
+- Kasa TP-Link account credentials encrypted locally with
+  `HOME_CONNECTOR_SHARED_SECRET`
+- last Kasa authentication success/error details
 - discovered Bond bridges and tokens
 - discovered Sonos players
 - managed Venstar thermostats
