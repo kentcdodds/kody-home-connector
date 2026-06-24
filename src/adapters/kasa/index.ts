@@ -156,21 +156,20 @@ export function createKasaAdapter(input: {
 				online: true,
 			}
 		} catch (error) {
-			const updated =
-				updateKasaPlugConnection({
-					storage,
-					connectorId,
-					plugId: plug.plugId,
-					host: plug.host,
-					port: plug.port,
-					relayState: plug.relayState,
-					ledOff: plug.ledOff,
-					onTime: plug.onTime,
-					rawSysInfo: plug.rawSysInfo,
-					lastSeenAt: plug.lastSeenAt,
-					lastConnectedAt: plug.lastConnectedAt,
-					lastError: getErrorMessage(error),
-				}) ?? plug
+			updateKasaPlugConnection({
+				storage,
+				connectorId,
+				plugId: plug.plugId,
+				host: plug.host,
+				port: plug.port,
+				relayState: plug.relayState,
+				ledOff: plug.ledOff,
+				onTime: plug.onTime,
+				rawSysInfo: plug.rawSysInfo,
+				lastSeenAt: plug.lastSeenAt,
+				lastConnectedAt: plug.lastConnectedAt,
+				lastError: getErrorMessage(error),
+			})
 			throw new Error(
 				`Kasa plug "${plug.plugId}" could not be reached at ${plug.host}:${String(plug.port)}. ${getErrorMessage(error)}`,
 			)
