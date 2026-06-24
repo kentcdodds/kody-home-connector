@@ -27,6 +27,10 @@ function getAllowedFormOrigins(request: Request) {
 	if (host) {
 		try {
 			origins.add(`${requestUrl.protocol}//${host}`)
+			if (requestUrl.port && !host.includes(':')) {
+				const hostname = host.split(':')[0] ?? host
+				origins.add(`${requestUrl.protocol}//${hostname}:${requestUrl.port}`)
+			}
 		} catch {
 			// Ignore malformed Host headers; the request URL origin remains valid.
 		}
