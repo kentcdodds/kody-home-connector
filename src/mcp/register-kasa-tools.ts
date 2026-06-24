@@ -223,7 +223,9 @@ export function registerKasaHomeConnectorTools(input: {
 					content: [
 						{
 							type: 'text' as const,
-							text: `Turned Kasa plug ${result.plug.alias} ${tool.state}.`,
+							text: result.confirmed
+								? `Turned Kasa plug ${result.plug.alias} ${tool.state}.`
+								: `Requested Kasa plug ${result.plug.alias} ${tool.state}; the plug accepted the relay command but follow-up status read failed.`,
 						},
 					],
 					structuredContent: result,

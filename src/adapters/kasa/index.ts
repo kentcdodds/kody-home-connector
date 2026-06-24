@@ -176,6 +176,43 @@ export function createKasaAdapter(input: {
 		}
 	}
 
+	function recordUnconfirmedRelayState(inputRecord: {
+		plug: KasaPersistedPlug
+		state: KasaRelayState
+		statusReadError: string
+	}) {
+		const now = new Date().toISOString()
+		return (
+			updateKasaPlugConnection({
+				storage,
+				connectorId,
+				plugId: inputRecord.plug.plugId,
+				host: inputRecord.plug.host,
+				port: inputRecord.plug.port,
+				relayState: inputRecord.state,
+				ledOff: inputRecord.plug.ledOff,
+				onTime: inputRecord.plug.onTime,
+				rawSysInfo: {
+					...inputRecord.plug.rawSysInfo,
+					relay_state: inputRecord.state,
+				},
+				lastSeenAt: now,
+				lastConnectedAt: now,
+				lastError: `Relay state write succeeded, but follow-up status read failed: ${inputRecord.statusReadError}`,
+			}) ?? {
+				...inputRecord.plug,
+				relayState: inputRecord.state,
+				lastSeenAt: now,
+				lastConnectedAt: now,
+				lastError: inputRecord.statusReadError,
+				rawSysInfo: {
+					...inputRecord.plug.rawSysInfo,
+					relay_state: inputRecord.state,
+				},
+			}
+		)
+	}
+
 	async function setPlugRelayState(inputSet: {
 		identifier?: string
 		state: KasaRelayState
@@ -187,12 +224,31 @@ export function createKasaAdapter(input: {
 			state: inputSet.state,
 			timeoutMs: config.kasaRequestTimeoutMs,
 		})
-		const status = await readPlugStatus(plug)
-		return {
-			plug: status.plug,
-			requestedState: inputSet.state,
-			response,
-			status,
+		try {
+			const status = await readPlugStatus(plug)
+			return {
+				plug: status.plug,
+				requestedState: inputSet.state,
+				response,
+				status,
+				confirmed: true,
+				statusReadError: null,
+			}
+		} catch (error) {
+			const statusReadError = getErrorMessage(error)
+			const updated = recordUnconfirmedRelayState({
+				plug,
+				state: inputSet.state,
+				statusReadError,
+			})
+			return {
+				plug: updated,
+				requestedState: inputSet.state,
+				response,
+				status: null,
+				confirmed: false,
+				statusReadError,
+			}
 		}
 	}
 

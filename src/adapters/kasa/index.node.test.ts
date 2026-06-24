@@ -20,6 +20,7 @@ function createConfig() {
 
 function createFakeKasaClient() {
 	let relayState: KasaRelayState = 1
+	let failNextStatusRead = false
 	const calls: Array<{ command: string; state?: KasaRelayState }> = []
 	const sysInfo = (): KasaSysInfo => ({
 		err_code: 0,
@@ -36,6 +37,10 @@ function createFakeKasaClient() {
 	const client: KasaClient = {
 		async getSysInfo() {
 			calls.push({ command: 'getSysInfo' })
+			if (failNextStatusRead) {
+				failNextStatusRead = false
+				throw new Error('simulated status read failure')
+			}
 			return sysInfo()
 		},
 		async setRelayState(input) {
@@ -44,7 +49,14 @@ function createFakeKasaClient() {
 			return { err_code: 0 }
 		},
 	}
-	return { client, calls, sysInfo }
+	return {
+		client,
+		calls,
+		sysInfo,
+		failNextStatusRead() {
+			failNextStatusRead = true
+		},
+	}
 }
 
 test('Kasa adapter scans, adopts, reads status, and controls adopted plugs', async () => {
@@ -130,8 +142,29 @@ test('Kasa adapter scans, adopts, reads status, and controls adopted plugs', asy
 			plug: {
 				relayState: 0,
 			},
+			confirmed: true,
 		})
 		expect(fake.calls).toContainEqual({ command: 'setRelayState', state: 0 })
+
+		fake.failNextStatusRead()
+		await expect(kasa.turnPlugOn('Office Lamp')).resolves.toMatchObject({
+			requestedState: 1,
+			plug: {
+				relayState: 1,
+				lastError: expect.stringContaining('follow-up status read failed'),
+			},
+			status: null,
+			confirmed: false,
+			statusReadError: expect.stringContaining('simulated status read failure'),
+		})
+		expect(kasa.listPlugs()).toMatchObject([
+			expect.objectContaining({
+				plugId: 'kasa-plug-800612345678',
+				relayState: 1,
+				lastError: expect.stringContaining('follow-up status read failed'),
+			}),
+		])
+		expect(fake.calls).toContainEqual({ command: 'setRelayState', state: 1 })
 	} finally {
 		storage.close()
 	}
