@@ -134,7 +134,7 @@ test('Kasa adapter scans, adopts, reads status, and controls adopted plugs', asy
 			'must be adopted',
 		)
 
-		expect(kasa.adoptPlug('kasa-plug-800612345678')).toMatchObject({
+		expect(kasa.adoptPlug('KASA-PLUG-800612345678')).toMatchObject({
 			plugId: 'kasa-plug-800612345678',
 			adopted: true,
 		})

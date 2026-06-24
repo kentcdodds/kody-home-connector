@@ -5,7 +5,6 @@ import { createKasaLegacyClient } from './client.ts'
 import { scanKasaPlugs, summarizeKasaSysInfo } from './discovery.ts'
 import {
 	adoptKasaPlug,
-	getKasaPlug,
 	listKasaPlugs,
 	removeKasaPlug,
 	toKasaPublicPlug,
@@ -50,7 +49,10 @@ export function createKasaAdapter(input: {
 	}
 
 	function requirePlug(plugId: string) {
-		const plug = getKasaPlug(storage, connectorId, plugId)
+		const normalizedPlugId = normalizeIdentifier(plugId)
+		const plug = listKasaPlugs(storage, connectorId).find(
+			(entry) => normalizeIdentifier(entry.plugId) === normalizedPlugId,
+		)
 		if (!plug) {
 			throw new Error(`Kasa plug "${plugId}" was not found.`)
 		}
@@ -304,8 +306,12 @@ export function createKasaAdapter(input: {
 			return getPublicPlugs()
 		},
 		adoptPlug(plugId: string) {
-			requirePlug(plugId)
-			const plug = adoptKasaPlug({ storage, connectorId, plugId })
+			const resolvedPlug = requirePlug(plugId)
+			const plug = adoptKasaPlug({
+				storage,
+				connectorId,
+				plugId: resolvedPlug.plugId,
+			})
 			if (!plug) {
 				throw new Error(`Kasa plug "${plugId}" could not be adopted.`)
 			}
@@ -313,7 +319,7 @@ export function createKasaAdapter(input: {
 		},
 		forgetPlug(plugId: string) {
 			const plug = requirePlug(plugId)
-			removeKasaPlug({ storage, connectorId, plugId })
+			removeKasaPlug({ storage, connectorId, plugId: plug.plugId })
 			return toKasaPublicPlug(plug)
 		},
 		async getPlugStatus(identifier?: string) {

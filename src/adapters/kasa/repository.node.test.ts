@@ -3,15 +3,39 @@ import { loadHomeConnectorConfig } from '../../config.ts'
 import { createHomeConnectorStorage } from '../../storage/index.ts'
 import { getKasaPlug } from './repository.ts'
 
-function createConfig() {
-	process.env.HOME_CONNECTOR_ID = 'default'
-	process.env.WORKER_BASE_URL = 'http://localhost:3742'
-	process.env.HOME_CONNECTOR_DB_PATH = ':memory:'
-	return loadHomeConnectorConfig()
+function createTemporaryEnv(values: Record<string, string | undefined>) {
+	const previousValues = Object.fromEntries(
+		Object.keys(values).map((key) => [key, process.env[key]]),
+	)
+
+	for (const [key, value] of Object.entries(values)) {
+		if (typeof value === 'undefined') {
+			delete process.env[key]
+			continue
+		}
+		process.env[key] = value
+	}
+
+	return {
+		[Symbol.dispose]: () => {
+			for (const [key, value] of Object.entries(previousValues)) {
+				if (typeof value === 'undefined') {
+					delete process.env[key]
+					continue
+				}
+				process.env[key] = value
+			}
+		},
+	}
 }
 
 test('Kasa repository tolerates malformed persisted sysinfo JSON', () => {
-	const config = createConfig()
+	using _env = createTemporaryEnv({
+		HOME_CONNECTOR_ID: 'default',
+		WORKER_BASE_URL: 'http://localhost:3742',
+		HOME_CONNECTOR_DB_PATH: ':memory:',
+	})
+	const config = loadHomeConnectorConfig()
 	const storage = createHomeConnectorStorage(config)
 	try {
 		storage.db
