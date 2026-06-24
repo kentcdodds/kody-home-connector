@@ -626,10 +626,10 @@ function postWithNodeHttp(
 
 function createKlapPostImpl(input?: KlapClientInput['postImpl']) {
 	if (input) return input
-	if (process.env.KASA_KLAP_USE_NODE_HTTP === 'true') {
-		return postWithNodeHttp
+	if (process.env.KASA_KLAP_USE_RAW_SOCKET === 'true') {
+		return postWithRawSocket
 	}
-	return postWithRawSocket
+	return postWithNodeHttp
 }
 
 export class KasaKlapClient implements KasaClient {
