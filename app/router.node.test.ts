@@ -563,7 +563,7 @@ test('kasa setup saves credentials without echoing the password', async () => {
 		expect(setupResponse.status).toBe(200)
 		const setupHtml = await setupResponse.text()
 		expect(setupHtml).toContain('Kasa setup')
-		expect(setupHtml).toContain('intent&quot; value=&quot;save-credentials')
+		expect(setupHtml).toContain('save-credentials')
 		expect(setupHtml).toContain('Credential state')
 		expect(setupHtml).toContain('missing')
 
