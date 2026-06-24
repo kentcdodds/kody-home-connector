@@ -677,6 +677,64 @@ test('kasa setup accepts LAN host origin when request URL is localhost', async (
 	}
 })
 
+test('kasa setup accepts LAN origin with explicit port when Host omits port', async () => {
+	const config = createConfig()
+	const {
+		state,
+		storage,
+		lutron,
+		sonos,
+		samsungTv,
+		bond,
+		accessNetworksUnleashed,
+		islandRouter,
+		islandRouterApi,
+		jellyfish,
+		venstar,
+		kasa,
+	} = createAdapters(config)
+	try {
+		const router = createHomeConnectorRouter(
+			state,
+			config,
+			lutron,
+			samsungTv,
+			sonos,
+			bond,
+			accessNetworksUnleashed,
+			islandRouter,
+			islandRouterApi,
+			jellyfish,
+			venstar,
+			kasa,
+		)
+
+		const saveResponse = await router.fetch(
+			'http://localhost:4040/kasa/setup',
+			{
+				method: 'POST',
+				headers: {
+					'content-type': 'application/x-www-form-urlencoded',
+					host: '192.168.1.234',
+					origin: 'http://192.168.1.234:4040',
+				},
+				body: new URLSearchParams({
+					intent: 'save-credentials',
+					username: 'kent@example.com',
+					password: 'super-secret-kasa-password',
+				}).toString(),
+			},
+		)
+
+		expect(saveResponse.status).toBe(200)
+		const saveHtml = await saveResponse.text()
+		expect(saveHtml).toContain('Saved Kasa credentials.')
+		expect(saveHtml).not.toContain('Rejected cross-origin')
+	} finally {
+		storage.close()
+	}
+})
+
 test('kasa status reflects credential state and known plugs', async () => {
 	const config = createConfig()
 	const {

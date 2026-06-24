@@ -315,13 +315,36 @@ function getSmartErrorCode(response: Record<string, unknown>) {
 }
 
 function decodeMaybeBase64Alias(value: string) {
+	const trimmed = value.trim()
+	if (!/^[A-Za-z0-9+/]+={0,2}$/.test(trimmed) || trimmed.length % 4 !== 0) {
+		return trimmed
+	}
 	try {
-		const decoded = Buffer.from(value, 'base64').toString('utf8').trim()
-		if (decoded.length > 0 && !decoded.includes('\u0000')) return decoded
+		const decoded = Buffer.from(trimmed, 'base64').toString('utf8').trim()
+		if (decoded.length === 0 || decoded.includes('\u0000')) return trimmed
+		const normalizeBase64 = (input: string) => input.replace(/=+$/, '')
+		if (
+			normalizeBase64(Buffer.from(decoded, 'utf8').toString('base64')) !==
+			normalizeBase64(trimmed)
+		) {
+			return trimmed
+		}
+		return decoded
 	} catch {
 		// Keep the raw nickname when it is not base64-encoded.
 	}
-	return value.trim()
+	return trimmed
+}
+
+function hasSmartDeviceFields(info: Record<string, unknown>) {
+	return (
+		(typeof info.nickname === 'string' && info.nickname.length > 0) ||
+		(typeof info.alias === 'string' && info.alias.length > 0) ||
+		typeof info.device_id === 'string' ||
+		typeof info.model === 'string' ||
+		typeof info.device_on === 'boolean' ||
+		info.relay_state !== undefined
+	)
 }
 
 function getNestedRecord(
@@ -349,7 +372,9 @@ function normalizeSmartDeviceInfo(info: Record<string, unknown>): KasaSysInfo {
 		...info,
 		alias:
 			nickname ??
-			(typeof info.alias === 'string' ? decodeMaybeBase64Alias(info.alias) : undefined),
+			(typeof info.alias === 'string'
+				? decodeMaybeBase64Alias(info.alias)
+				: undefined),
 		relay_state:
 			typeof info.device_on === 'boolean' ? info.device_on : info.relay_state,
 	}
@@ -359,9 +384,7 @@ export function kasaRelayStateFromSysinfo(sysinfo: KasaSysInfo) {
 	return getRelayStateFromSysinfo(sysinfo)
 }
 
-function headersFromNodeResponse(
-	headers: http.IncomingHttpHeaders,
-): Headers {
+function headersFromNodeResponse(headers: http.IncomingHttpHeaders): Headers {
 	const result = new Headers()
 	for (const [name, value] of Object.entries(headers)) {
 		if (value == null) continue
@@ -389,9 +412,7 @@ function postWithNodeHttp(
 					'Content-Type': 'application/octet-stream',
 					'Content-Length': input.body.length,
 					Connection: 'close',
-					...(input.cookie
-						? { Cookie: `TP_SESSIONID=${input.cookie}` }
-						: {}),
+					...(input.cookie ? { Cookie: `TP_SESSIONID=${input.cookie}` } : {}),
 				},
 				timeout: input.timeoutMs,
 			},
@@ -656,10 +677,7 @@ export class KasaKlapClient implements KasaClient {
 		return JSON.parse(decrypted) as T
 	}
 
-	async #smartRequest(
-		method: string,
-		params?: Record<string, unknown>,
-	) {
+	async #smartRequest(method: string, params?: Record<string, unknown>) {
 		const payload: Record<string, unknown> = {
 			method,
 			request_time_milis: this.#now(),
@@ -682,7 +700,12 @@ export class KasaKlapClient implements KasaClient {
 		try {
 			const smartResponse = await this.#smartRequest('get_device_info')
 			const smartInfo = smartResponse.result
-			if (smartInfo && typeof smartInfo === 'object' && !Array.isArray(smartInfo)) {
+			if (
+				smartInfo &&
+				typeof smartInfo === 'object' &&
+				!Array.isArray(smartInfo) &&
+				hasSmartDeviceFields(smartInfo as Record<string, unknown>)
+			) {
 				return normalizeSmartDeviceInfo(smartInfo as Record<string, unknown>)
 			}
 		} catch {
