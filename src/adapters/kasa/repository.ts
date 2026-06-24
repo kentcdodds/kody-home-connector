@@ -157,6 +157,10 @@ function getUpsertPlugStatement(storage: HomeConnectorStorage) {
 			mac = excluded.mac,
 			device_id = excluded.device_id,
 			relay_state = excluded.relay_state,
+			adopted = CASE
+				WHEN excluded.adopted = 1 THEN 1
+				ELSE adopted
+			END,
 			raw_sysinfo_json = excluded.raw_sysinfo_json,
 			raw_discovery_json = excluded.raw_discovery_json,
 			last_seen_at = excluded.last_seen_at,

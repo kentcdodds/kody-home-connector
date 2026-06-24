@@ -227,6 +227,80 @@ test('upsert migrates adopted host fallback rows to stable plug ids', () => {
 	}
 })
 
+test('upsert promotes existing stable plug adoption from host fallback rows', () => {
+	const directory = mkdtempSync(
+		path.join(tmpdir(), 'kody-home-connector-kasa-'),
+	)
+	const dbPath = path.join(directory, 'home-connector.sqlite')
+	const storage = createHomeConnectorStorage(createConfig(dbPath))
+
+	try {
+		upsertDiscoveredKasaPlugs(storage, 'default', [
+			{
+				plugId: 'stable-device-id',
+				alias: 'Water recirculating pump',
+				host: '192.168.1.145',
+				port: 80,
+				model: 'EP25',
+				mac: 'aabbccddeeff',
+				deviceId: 'stable-device-id',
+				relayState: 'off',
+				rawSysinfo: null,
+				rawDiscovery: { server: 'SHIP 2.0' },
+				lastSeenAt: '2026-06-24T17:52:00.000Z',
+			},
+			{
+				plugId: 'host:192.168.1.145',
+				alias: 'Kasa plug 192.168.1.145',
+				host: '192.168.1.145',
+				port: 80,
+				model: null,
+				mac: null,
+				deviceId: null,
+				relayState: 'unknown',
+				rawSysinfo: null,
+				rawDiscovery: { server: 'SHIP 2.0' },
+				lastSeenAt: '2026-06-24T17:52:30.000Z',
+			},
+		])
+		adoptKasaPlug(storage, 'default', 'host:192.168.1.145')
+
+		upsertDiscoveredKasaPlugs(storage, 'default', [
+			{
+				plugId: 'stable-device-id',
+				alias: 'Water recirculating pump',
+				host: '192.168.1.145',
+				port: 80,
+				model: 'EP25',
+				mac: 'aabbccddeeff',
+				deviceId: 'stable-device-id',
+				relayState: 'on',
+				rawSysinfo: {
+					alias: 'Water recirculating pump',
+					device_id: 'stable-device-id',
+					relay_state: 1,
+				},
+				rawDiscovery: { server: 'SHIP 2.0' },
+				lastSeenAt: '2026-06-24T17:53:00.000Z',
+			},
+		])
+
+		expect(listKasaPlugs(storage, 'default')).toEqual([
+			expect.objectContaining({
+				plugId: 'stable-device-id',
+				adopted: true,
+				relayState: 'on',
+			}),
+		])
+	} finally {
+		storage.close()
+		rmSync(directory, {
+			force: true,
+			recursive: true,
+		})
+	}
+})
+
 test('empty Kasa scan does not prune existing unadopted plugs', () => {
 	const directory = mkdtempSync(
 		path.join(tmpdir(), 'kody-home-connector-kasa-'),
