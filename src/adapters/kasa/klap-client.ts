@@ -322,6 +322,7 @@ function decodeMaybeBase64Alias(value: string) {
 	try {
 		const decoded = Buffer.from(trimmed, 'base64').toString('utf8').trim()
 		if (decoded.length === 0 || decoded.includes('\u0000')) return trimmed
+		if (!/^[\t\n\r\x20-\u007E\u00A0-\uFFFF]*$/u.test(decoded)) return trimmed
 		const normalizeBase64 = (input: string) => input.replace(/=+$/, '')
 		if (
 			normalizeBase64(Buffer.from(decoded, 'utf8').toString('base64')) !==
@@ -337,13 +338,16 @@ function decodeMaybeBase64Alias(value: string) {
 }
 
 function hasSmartDeviceFields(info: Record<string, unknown>) {
-	return (
+	const hasLabel =
 		(typeof info.nickname === 'string' && info.nickname.length > 0) ||
-		(typeof info.alias === 'string' && info.alias.length > 0) ||
-		typeof info.device_id === 'string' ||
-		typeof info.model === 'string' ||
+		(typeof info.alias === 'string' && info.alias.length > 0)
+	if (!hasLabel) return false
+
+	return (
 		typeof info.device_on === 'boolean' ||
-		info.relay_state !== undefined
+		info.relay_state !== undefined ||
+		(typeof info.device_id === 'string' && info.device_id.length > 0) ||
+		(typeof info.model === 'string' && info.model.length > 0)
 	)
 }
 
@@ -421,6 +425,7 @@ function postWithNodeHttp(
 				response.on('data', (chunk) => {
 					chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
 				})
+				response.on('error', reject)
 				response.on('end', () => {
 					const body = Buffer.concat(chunks)
 					resolve({
