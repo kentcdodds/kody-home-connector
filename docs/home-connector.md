@@ -180,9 +180,8 @@ The MCP surface is intentionally small:
 Discovery is subnet-scan-only. The connector probes TCP/9999 across
 `KASA_SCAN_CIDRS` when that env var is set; otherwise it derives private `/24`
 networks from local IPv4 interfaces. `KASA_REQUEST_TIMEOUT_MS` controls live
-status/control timeouts and defaults to 5000ms with a minimum of 1000ms. Scan
-probes cap per-host timeout to 1000ms so a missing plug does not stall
-discovery.
+status, control, and scan-probe timeouts and defaults to 5000ms with a minimum
+of 1000ms.
 
 Limitations:
 

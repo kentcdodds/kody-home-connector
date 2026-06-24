@@ -7,6 +7,7 @@ import {
 
 const defaultKasaPort = 9999
 const initialXorKey = 171
+const maxKasaFramePayloadBytes = 1024 * 1024
 
 export function encryptKasaPayload(payload: string) {
 	let key = initialXorKey
@@ -130,6 +131,14 @@ async function sendKasaTcpCommand(input: {
 			const frame = Buffer.concat(chunks)
 			if (expectedLength == null && frame.length >= 4) {
 				expectedLength = frame.readUInt32BE(0)
+				if (expectedLength > maxKasaFramePayloadBytes) {
+					settleError(
+						new Error(
+							`Kasa response frame is too large (${String(expectedLength)} bytes).`,
+						),
+					)
+					return
+				}
 			}
 			if (expectedLength != null && frame.length >= 4 + expectedLength) {
 				try {

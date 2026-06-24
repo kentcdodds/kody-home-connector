@@ -22,6 +22,10 @@ afterEach(async () => {
 
 async function createFakeKasaServer(
 	handler: (request: Record<string, unknown>) => Record<string, unknown>,
+	options: {
+		fragmentResponse?: boolean
+		oversizedFrameLength?: number
+	} = {},
 ) {
 	const server = net.createServer((socket) => {
 		const chunks: Array<Buffer> = []
@@ -32,7 +36,21 @@ async function createFakeKasaServer(
 			const length = frame.readUInt32BE(0)
 			if (frame.length < 4 + length) return
 			const request = decodeKasaTcpResponse(frame)
-			socket.end(encodeKasaTcpRequest(handler(request)))
+			if (options.oversizedFrameLength) {
+				const oversizedFrame = Buffer.alloc(4)
+				oversizedFrame.writeUInt32BE(options.oversizedFrameLength, 0)
+				socket.end(oversizedFrame)
+				return
+			}
+			const response = encodeKasaTcpRequest(handler(request))
+			if (options.fragmentResponse) {
+				socket.write(response.subarray(0, 4))
+				setImmediate(() => {
+					socket.end(response.subarray(4))
+				})
+				return
+			}
+			socket.end(response)
 		})
 	})
 	servers.push(server)
@@ -109,4 +127,43 @@ test('legacy client reads sysinfo and sets relay state', async () => {
 			},
 		},
 	])
+})
+
+test('legacy client buffers fragmented TCP responses', async () => {
+	const endpoint = await createFakeKasaServer(
+		() => ({
+			system: {
+				get_sysinfo: {
+					err_code: 0,
+					alias: 'Fragmented Lamp',
+					relay_state: 1,
+				},
+			},
+		}),
+		{ fragmentResponse: true },
+	)
+	const client = createKasaLegacyClient()
+
+	await expect(client.getSysInfo(endpoint)).resolves.toMatchObject({
+		alias: 'Fragmented Lamp',
+		relay_state: 1,
+	})
+})
+
+test('legacy client rejects oversized TCP response frames', async () => {
+	const endpoint = await createFakeKasaServer(
+		() => ({
+			system: {
+				get_sysinfo: {
+					err_code: 0,
+				},
+			},
+		}),
+		{ oversizedFrameLength: 1024 * 1024 + 1 },
+	)
+	const client = createKasaLegacyClient()
+
+	await expect(client.getSysInfo(endpoint)).rejects.toThrow(
+		'Kasa response frame is too large',
+	)
 })

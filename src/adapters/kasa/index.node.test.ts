@@ -21,6 +21,7 @@ function createConfig() {
 function createFakeKasaClient() {
 	let relayState: KasaRelayState = 1
 	let failNextStatusRead = false
+	let failNextRelayWrite = false
 	const calls: Array<{ command: string; state?: KasaRelayState }> = []
 	const sysInfo = (): KasaSysInfo => ({
 		err_code: 0,
@@ -45,6 +46,10 @@ function createFakeKasaClient() {
 		},
 		async setRelayState(input) {
 			calls.push({ command: 'setRelayState', state: input.state })
+			if (failNextRelayWrite) {
+				failNextRelayWrite = false
+				throw new Error('simulated relay write failure')
+			}
 			relayState = input.state
 			return { err_code: 0 }
 		},
@@ -55,6 +60,9 @@ function createFakeKasaClient() {
 		sysInfo,
 		failNextStatusRead() {
 			failNextStatusRead = true
+		},
+		failNextRelayWrite() {
+			failNextRelayWrite = true
 		},
 	}
 }
@@ -174,6 +182,18 @@ test('Kasa adapter scans, adopts, reads status, and controls adopted plugs', asy
 			},
 			online: true,
 		})
+
+		fake.failNextRelayWrite()
+		await expect(kasa.turnPlugOff('Office Lamp')).rejects.toThrow(
+			'simulated relay write failure',
+		)
+		expect(kasa.listPlugs()).toMatchObject([
+			expect.objectContaining({
+				plugId: 'kasa-plug-800612345678',
+				relayState: 1,
+				lastError: 'simulated relay write failure',
+			}),
+		])
 	} finally {
 		storage.close()
 	}

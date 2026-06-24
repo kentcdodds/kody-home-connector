@@ -219,12 +219,33 @@ export function createKasaAdapter(input: {
 		state: KasaRelayState
 	}) {
 		const plug = requireAdoptedPlug(inputSet.identifier)
-		const response = await client.setRelayState({
-			host: plug.host,
-			port: plug.port,
-			state: inputSet.state,
-			timeoutMs: config.kasaRequestTimeoutMs,
-		})
+		let response: Record<string, unknown>
+		try {
+			response = await client.setRelayState({
+				host: plug.host,
+				port: plug.port,
+				state: inputSet.state,
+				timeoutMs: config.kasaRequestTimeoutMs,
+			})
+		} catch (error) {
+			updateKasaPlugConnection({
+				storage,
+				connectorId,
+				plugId: plug.plugId,
+				host: plug.host,
+				port: plug.port,
+				relayState: plug.relayState,
+				ledOff: plug.ledOff,
+				onTime: plug.onTime,
+				rawSysInfo: plug.rawSysInfo,
+				lastSeenAt: plug.lastSeenAt,
+				lastConnectedAt: plug.lastConnectedAt,
+				lastError: getErrorMessage(error),
+			})
+			throw new Error(
+				`Kasa plug "${plug.plugId}" failed to set relay state at ${plug.host}:${String(plug.port)}. ${getErrorMessage(error)}`,
+			)
+		}
 		try {
 			const status = await readPlugStatus(plug)
 			return {

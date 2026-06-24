@@ -222,7 +222,7 @@ export async function discoverKasaPlugs(input: {
 	const probe = await probeKasaSubnets({
 		cidrs: input.config.kasaScanCidrs,
 		client,
-		timeoutMs: Math.min(input.config.kasaRequestTimeoutMs, 1_000),
+		timeoutMs: input.config.kasaRequestTimeoutMs,
 	})
 	return {
 		plugs: probe.plugs,

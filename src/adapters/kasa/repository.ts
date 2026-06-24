@@ -29,7 +29,14 @@ type KasaPlugRow = {
 }
 
 function parseJson(value: string): KasaSysInfo {
-	return JSON.parse(value) as KasaSysInfo
+	try {
+		const parsed = JSON.parse(value) as unknown
+		return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+			? (parsed as KasaSysInfo)
+			: {}
+	} catch {
+		return {}
+	}
 }
 
 function mapKasaPlugRow(row: KasaPlugRow): KasaPersistedPlug {
@@ -88,6 +95,42 @@ function selectKasaPlugRows(
 		ORDER BY alias COLLATE NOCASE, plug_id
 	`)
 	return statement.all(connectorId) as Array<KasaPlugRow>
+}
+
+function selectKasaPlugRowById(input: {
+	storage: HomeConnectorStorage
+	connectorId: string
+	plugId: string
+}) {
+	const statement = input.storage.db.query(`
+		SELECT
+			connector_id,
+			plug_id,
+			alias,
+			host,
+			port,
+			model,
+			mac_address,
+			device_id,
+			hw_id,
+			sw_ver,
+			relay_state,
+			led_off,
+			on_time,
+			raw_sysinfo_json,
+			adopted,
+			last_seen_at,
+			last_connected_at,
+			last_error
+		FROM kasa_plugs
+		WHERE connector_id = ? AND plug_id = ?
+		LIMIT 1
+	`)
+	return (
+		(statement.get(input.connectorId, input.plugId) as
+			| KasaPlugRow
+			| undefined) ?? null
+	)
 }
 
 function getUpsertKasaPlugStatement(storage: HomeConnectorStorage) {
@@ -179,11 +222,8 @@ export function getKasaPlug(
 	connectorId: string,
 	plugId: string,
 ) {
-	return (
-		listKasaPlugs(storage, connectorId).find(
-			(plug) => plug.plugId === plugId,
-		) ?? null
-	)
+	const row = selectKasaPlugRowById({ storage, connectorId, plugId })
+	return row ? mapKasaPlugRow(row) : null
 }
 
 export function upsertDiscoveredKasaPlugs(input: {
