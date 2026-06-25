@@ -674,10 +674,10 @@ function postWithNodeHttpAndRawHandshakeFallback(
 		) {
 			return response
 		}
-		if (
-			response.status === 200 &&
-			process.env.KASA_KLAP_RAW_HANDSHAKE_FALLBACK === 'true'
-		) {
+		// Synology/Docker sometimes returns HTTP 200 from node:http without a
+		// parseable Set-Cookie even though the plug sent one on the wire.
+		// Only retry with a raw socket for that case — never on status 0/timeouts.
+		if (response.status === 200) {
 			return postWithRawSocket(url, input)
 		}
 		return response
@@ -692,19 +692,15 @@ function createKlapPostImpl(
 	if (process.env.KASA_KLAP_USE_RAW_SOCKET === 'true') {
 		return postWithRawSocket
 	}
-	const nodeHttp = (
-		url: URL,
-		requestInput: {
-			body: Buffer
-			cookie?: string
-			timeoutMs: number
-		},
-	) => postWithNodeHttp(url, requestInput, httpAgent)
-	if (
-		process.env.KASA_KLAP_USE_NODE_HTTP === 'true' ||
-		process.env.KASA_KLAP_RAW_HANDSHAKE_FALLBACK !== 'true'
-	) {
-		return nodeHttp
+	if (process.env.KASA_KLAP_USE_NODE_HTTP === 'true') {
+		return (
+			url: URL,
+			requestInput: {
+				body: Buffer
+				cookie?: string
+				timeoutMs: number
+			},
+		) => postWithNodeHttp(url, requestInput, httpAgent)
 	}
 	return (
 		url: URL,
