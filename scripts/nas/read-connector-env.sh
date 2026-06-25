@@ -42,5 +42,19 @@ load_connector_env() {
 		export DATA_PATH
 	fi
 
+	if [[ -z "${KASA_KLAP_USE_SUBPROCESS:-}" && -f "${start_script}" ]]; then
+		KASA_KLAP_USE_SUBPROCESS="$(
+			sed -n 's/^[[:space:]]*-e "KASA_KLAP_USE_SUBPROCESS=\([^"]*\)".*/\1/p' "${start_script}" | head -1
+		)"
+		export KASA_KLAP_USE_SUBPROCESS
+	fi
+
+	if [[ -z "${HOME_CONNECTOR_DB_PATH:-}" && -f "${start_script}" ]]; then
+		HOME_CONNECTOR_DB_PATH="$(
+			sed -n 's/^[[:space:]]*-e "HOME_CONNECTOR_DB_PATH=\([^"]*\)".*/\1/p' "${start_script}" | head -1
+		)"
+		export HOME_CONNECTOR_DB_PATH
+	fi
+
 	return 0
 }

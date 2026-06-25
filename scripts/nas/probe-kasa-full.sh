@@ -33,14 +33,23 @@ fi
 
 echo "=== KLAP diagnostics via ${IMAGE} to ${HOST} (network host) ==="
 
+DOCKER_ENV=(
+	-e "HOST=${HOST}"
+	-e "HOME_CONNECTOR_ID=${HOME_CONNECTOR_ID}"
+	-e "HOME_CONNECTOR_SHARED_SECRET=${HOME_CONNECTOR_SHARED_SECRET}"
+	-e "HOME_CONNECTOR_DATA_PATH=/data/home-connector"
+)
+if [[ -n "${KASA_KLAP_USE_SUBPROCESS:-}" ]]; then
+	DOCKER_ENV+=(-e "KASA_KLAP_USE_SUBPROCESS=${KASA_KLAP_USE_SUBPROCESS}")
+fi
+if [[ -n "${HOME_CONNECTOR_DB_PATH:-}" ]]; then
+	DOCKER_ENV+=(-e "HOME_CONNECTOR_DB_PATH=${HOME_CONNECTOR_DB_PATH}")
+fi
+
 docker run --rm --network host \
 	"${ENV_ARGS[@]}" \
-	-e "HOST=${HOST}" \
-	-e "HOME_CONNECTOR_ID=${HOME_CONNECTOR_ID}" \
-	-e "HOME_CONNECTOR_SHARED_SECRET=${HOME_CONNECTOR_SHARED_SECRET}" \
+	"${DOCKER_ENV[@]}" \
 	-v "${DATA_PATH}:/data/home-connector:ro" \
-	-e "HOME_CONNECTOR_DATA_PATH=/data/home-connector" \
-	-e "KASA_KLAP_USE_SUBPROCESS=${KASA_KLAP_USE_SUBPROCESS:-true}" \
 	-v "${PROBE_SCRIPT}:/probe.mjs:ro" \
 	"${IMAGE}" \
 	node --experimental-strip-types /probe.mjs
