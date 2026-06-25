@@ -47,6 +47,14 @@ function runKlapWorker(input: {
 	state?: boolean
 }): Promise<KlapWorkerResult> {
 	return new Promise((resolve, reject) => {
+		let settled = false
+		const settle = (callback: () => void) => {
+			if (settled) return
+			settled = true
+			clearTimeout(timeout)
+			callback()
+		}
+
 		const child = spawn(
 			process.execPath,
 			['--import', './src/sentry-init.ts', workerPath],
@@ -72,40 +80,46 @@ function runKlapWorker(input: {
 		const workerTimeoutMs = input.timeoutMs + 5_000
 		const timeout = setTimeout(() => {
 			child.kill('SIGKILL')
-			reject(
-				new Error(
-					`Kasa KLAP subprocess timed out for ${input.host} after ${String(workerTimeoutMs)}ms.`,
-				),
-			)
+			setTimeout(() => {
+				settle(() => {
+					reject(
+						new Error(
+							`Kasa KLAP subprocess timed out for ${input.host} after ${String(workerTimeoutMs)}ms.`,
+						),
+					)
+				})
+			}, 500)
 		}, workerTimeoutMs)
 
 		child.on('error', (error) => {
-			clearTimeout(timeout)
-			reject(error)
+			settle(() => {
+				reject(error)
+			})
 		})
 
 		child.on('close', (code) => {
-			clearTimeout(timeout)
-			const stdout = Buffer.concat(stdoutChunks).toString('utf8').trim()
-			const stderr = Buffer.concat(stderrChunks).toString('utf8').trim()
-			if (!stdout) {
-				reject(
-					new Error(
-						`Kasa KLAP subprocess for ${input.host} produced no output${stderr ? `: ${stderr}` : code != null ? ` (exit ${String(code)})` : ''}.`,
-					),
-				)
-				return
-			}
-			try {
-				const parsed = JSON.parse(stdout) as KlapWorkerResult
-				resolve(parsed)
-			} catch (error) {
-				reject(
-					new Error(
-						`Kasa KLAP subprocess for ${input.host} returned invalid JSON${stderr ? `: ${stderr}` : ''}: ${error instanceof Error ? error.message : String(error)}`,
-					),
-				)
-			}
+			settle(() => {
+				const stdout = Buffer.concat(stdoutChunks).toString('utf8').trim()
+				const stderr = Buffer.concat(stderrChunks).toString('utf8').trim()
+				if (!stdout) {
+					reject(
+						new Error(
+							`Kasa KLAP subprocess for ${input.host} produced no output${stderr ? `: ${stderr}` : code != null ? ` (exit ${String(code)})` : ''}.`,
+						),
+					)
+					return
+				}
+				try {
+					const parsed = JSON.parse(stdout) as KlapWorkerResult
+					resolve(parsed)
+				} catch (error) {
+					reject(
+						new Error(
+							`Kasa KLAP subprocess for ${input.host} returned invalid JSON${stderr ? `: ${stderr}` : ''}: ${error instanceof Error ? error.message : String(error)}`,
+						),
+					)
+				}
+			})
 		})
 
 		child.stdin.end(
