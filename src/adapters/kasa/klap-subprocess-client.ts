@@ -55,18 +55,14 @@ function runKlapWorker(input: {
 			callback()
 		}
 
-		const child = spawn(
-			process.execPath,
-			['--import', './src/sentry-init.ts', workerPath],
-			{
-				cwd: process.cwd(),
-				env: {
-					...process.env,
-					SENTRY_DSN: '',
-				},
-				stdio: ['pipe', 'pipe', 'pipe'],
+		const child = spawn(process.execPath, [workerPath], {
+			cwd: process.cwd(),
+			env: {
+				...process.env,
+				SENTRY_DSN: '',
 			},
-		)
+			stdio: ['pipe', 'pipe', 'pipe'],
+		})
 
 		const stdoutChunks: Array<Buffer> = []
 		const stderrChunks: Array<Buffer> = []
