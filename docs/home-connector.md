@@ -220,6 +220,17 @@ Configuration:
   `a.b.c.0/24` or `a.b.c.d/32`.
 - `KASA_REQUEST_TIMEOUT_MS` defaults to `8000` and must be at least `1000`.
 - `KASA_USERNAME` and `KASA_PASSWORD` provide optional env fallback credentials.
+- `KASA_KLAP_USE_SUBPROCESS` defaults to enabled. Set to `false` or `0` to run
+  KLAP in-process instead of a short-lived worker subprocess.
+- `KASA_KLAP_USE_RAW_SOCKET` defaults to disabled. Set to `true` or `1` only
+  when debugging transport issues; production Synology deployments should rely
+  on the default `node:http` path with raw-socket fallback for handshake1 cookie
+  loss.
+
+NAS troubleshooting scripts live under `scripts/nas/`. Copy them to the NAS
+docker folder next to the start script and run `probe-kasa-full.sh` or
+`probe-kasa-exec.sh` against a plug IP when KLAP fails from the connector but
+works from another host.
 
 ## Island router diagnostics integration
 
