@@ -16,6 +16,7 @@ import { type createSonosAdapter } from '../adapters/sonos/index.ts'
 import { type createSamsungTvAdapter } from '../adapters/samsung-tv/index.ts'
 import { type createVenstarAdapter } from '../adapters/venstar/index.ts'
 import { type HomeConnectorConfig } from '../config.ts'
+import { buildHomeConnectorRuntimeMetadata } from '../home-connector-metadata.ts'
 import {
 	homeConnectorLogRetentionDays,
 	type HomeConnectorLogger,
@@ -116,7 +117,7 @@ export function createHomeConnectorMcpServer(input: {
 		},
 		{
 			instructions:
-				"Home connector MCP server. Tools support Roku, Samsung TV, Lutron, Sonos, Bond (Olibra Bond Bridge / shades, groups, and RF devices), JellyFish Lighting, Venstar WiFi thermostat control, TP-Link Kasa KLAP smart plugs, Island router status plus a generic allowlisted Island CLI catalog executor, a generic Island Router HTTP API proxy, and a single generic Access Networks / RUCKUS Unleashed WiFi raw-request capability. Use 'home_connector_list_logs' to inspect the connector's sanitized local operational log history. Use 'kasa_set_credentials', 'kasa_scan_plugs', 'kasa_adopt_plug', then 'kasa_turn_plug_on' or 'kasa_turn_plug_off' for adopted Kasa plugs only. Use 'access_networks_unleashed_scan_controllers', 'access_networks_unleashed_adopt_controller', 'access_networks_unleashed_set_credentials', and 'access_networks_unleashed_authenticate_controller' to wire up a controller, then 'access_networks_unleashed_request' to issue authenticated AJAX requests. Use 'router_get_status' for Island SSH readiness and 'router_run_command' for catalog command ids; arbitrary CLI text is never accepted and write-risk entries require a reason plus exact confirmation. Use 'island_router_api_set_pin' before 'island_router_api_request' for the LAN-only Island Router HTTP API proxy; non-GET proxy requests require a reason plus exact confirmation. Island router and Access Networks Unleashed write operations are high risk and must be used only when highly certain. Bond local API tokens are configured only in the admin UI (/bond/setup); use bond_authentication_guide when you need a reminder.",
+				"Home connector MCP server. Tools support Roku, Samsung TV, Lutron, Sonos, Bond (Olibra Bond Bridge / shades, groups, and RF devices), JellyFish Lighting, Venstar WiFi thermostat control, TP-Link Kasa KLAP smart plugs, Island router status plus a generic allowlisted Island CLI catalog executor, a generic Island Router HTTP API proxy, and a single generic Access Networks / RUCKUS Unleashed WiFi raw-request capability. Use 'home_connector_get_metadata' to read runtime metadata such as APP_COMMIT_SHA, connector id, worker URL, and process uptime. Use 'home_connector_list_logs' to inspect the connector's sanitized local operational log history. Use 'kasa_set_credentials', 'kasa_scan_plugs', 'kasa_adopt_plug', then 'kasa_turn_plug_on' or 'kasa_turn_plug_off' for adopted Kasa plugs only. Use 'access_networks_unleashed_scan_controllers', 'access_networks_unleashed_adopt_controller', 'access_networks_unleashed_set_credentials', and 'access_networks_unleashed_authenticate_controller' to wire up a controller, then 'access_networks_unleashed_request' to issue authenticated AJAX requests. Use 'router_get_status' for Island SSH readiness and 'router_run_command' for catalog command ids; arbitrary CLI text is never accepted and write-risk entries require a reason plus exact confirmation. Use 'island_router_api_set_pin' before 'island_router_api_request' for the LAN-only Island Router HTTP API proxy; non-GET proxy requests require a reason plus exact confirmation. Island router and Access Networks Unleashed write operations are high risk and must be used only when highly certain. Bond local API tokens are configured only in the admin UI (/bond/setup); use bond_authentication_guide when you need a reminder.",
 		},
 	)
 
@@ -322,6 +323,30 @@ export function createHomeConnectorMcpServer(input: {
 		}
 		return new Date(value).toISOString()
 	}
+
+	registerTool(
+		{
+			name: 'home_connector_get_metadata',
+			title: 'Get Home Connector Metadata',
+			description:
+				'Read runtime metadata for this home connector, including APP_COMMIT_SHA, connector id, worker URL, Node version, uptime, and feature flags.',
+			inputSchema: {},
+			annotations: {
+				readOnlyHint: true,
+				idempotentHint: true,
+			},
+		},
+		async () => {
+			const metadata = buildHomeConnectorRuntimeMetadata({
+				config: input.config,
+				state: input.state,
+			})
+			return structuredTextResult(
+				`Home connector metadata for ${metadata.connectorId} (${metadata.appCommitSha ?? 'unknown commit'}).`,
+				metadata,
+			)
+		},
+	)
 
 	if (input.logger) {
 		registerTool(

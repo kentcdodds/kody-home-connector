@@ -134,7 +134,7 @@ export function createHomeConnectorRouter(
 				venstar,
 				kasa,
 			}),
-			health: createHealthHandler(state),
+			health: createHealthHandler(state, config),
 			islandRouterApiStatus: createIslandRouterApiStatusHandler(
 				state,
 				islandRouterApi,
