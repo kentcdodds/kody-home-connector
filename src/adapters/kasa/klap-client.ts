@@ -392,6 +392,27 @@ function normalizeSmartDeviceInfo(info: Record<string, unknown>): KasaSysInfo {
 	}
 }
 
+function extractSysinfoFromKlapResponse(
+	response: Record<string, unknown>,
+): KasaSysInfo | null {
+	const legacy =
+		getNestedRecord(response, ['system', 'get_sysinfo']) ??
+		getNestedRecord(response, ['result', 'system', 'get_sysinfo'])
+	if (legacy) return legacy as KasaSysInfo
+
+	const smartResult = response.result
+	if (
+		smartResult &&
+		typeof smartResult === 'object' &&
+		!Array.isArray(smartResult) &&
+		hasSmartDeviceFields(smartResult as Record<string, unknown>)
+	) {
+		return normalizeSmartDeviceInfo(smartResult as Record<string, unknown>)
+	}
+
+	return null
+}
+
 export function kasaRelayStateFromSysinfo(sysinfo: KasaSysInfo) {
 	return getRelayStateFromSysinfo(sysinfo)
 }
@@ -542,6 +563,7 @@ function postWithRawSocket(
 ): Promise<KlapPostResponse> {
 	return new Promise((resolve, reject) => {
 		const chunks: Array<Buffer> = []
+		let settled = false
 		const port = url.port ? Number(url.port) : 80
 		const path = `${url.pathname}${url.search}`
 		const requestHeaders = [
@@ -577,7 +599,9 @@ function postWithRawSocket(
 		socket.on('timeout', () => {
 			fail(new Error(`Kasa KLAP request timed out for ${url.hostname}.`))
 		})
-		socket.on('end', () => {
+		socket.on('close', () => {
+			if (settled) return
+			settled = true
 			try {
 				const raw = Buffer.concat(chunks)
 				if (raw.length === 0) {
@@ -748,12 +772,17 @@ export class KasaKlapClient implements KasaClient {
 			`http://${this.#host}:${String(this.#port)}/app/${path}`,
 		)
 		if (seq != null) url.searchParams.set('seq', String(seq))
+		const requestInput = {
+			body,
+			cookie,
+			timeoutMs: this.#timeoutMs,
+		}
 		try {
-			return await this.#postImpl!(url, {
-				body,
-				cookie,
-				timeoutMs: this.#timeoutMs,
-			})
+			let response = await this.#postImpl!(url, requestInput)
+			if (response.status === 0) {
+				response = await this.#postImpl!(url, requestInput)
+			}
+			return response
 		} catch (error) {
 			if (error instanceof Error && /timed out/i.test(error.message)) {
 				throw new Error(`Kasa KLAP request timed out for ${this.#host}.`)
@@ -1002,17 +1031,13 @@ export class KasaKlapClient implements KasaClient {
 			// Fall back to legacy IOT sysinfo queries.
 		}
 
-		const response = await this.request<{
-			system?: { get_sysinfo?: KasaSysInfo }
-			result?: { system?: { get_sysinfo?: KasaSysInfo } }
-		}>({
+		const response = await this.request<Record<string, unknown>>({
 			system: {
 				get_sysinfo: {},
 			},
 		})
-		const sysinfo =
-			response.system?.get_sysinfo ?? response.result?.system?.get_sysinfo
-		if (!sysinfo || typeof sysinfo !== 'object') {
+		const sysinfo = extractSysinfoFromKlapResponse(response)
+		if (!sysinfo) {
 			throw new Error(
 				`Kasa plug ${this.#host} did not return device info from KLAP.`,
 			)
