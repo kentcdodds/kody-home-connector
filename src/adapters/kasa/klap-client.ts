@@ -674,7 +674,13 @@ function postWithNodeHttpAndRawHandshakeFallback(
 		) {
 			return response
 		}
-		return postWithRawSocket(url, input)
+		if (
+			response.status === 200 &&
+			process.env.KASA_KLAP_RAW_HANDSHAKE_FALLBACK === 'true'
+		) {
+			return postWithRawSocket(url, input)
+		}
+		return response
 	})
 }
 
@@ -694,7 +700,10 @@ function createKlapPostImpl(
 			timeoutMs: number
 		},
 	) => postWithNodeHttp(url, requestInput, httpAgent)
-	if (process.env.KASA_KLAP_USE_NODE_HTTP === 'true') {
+	if (
+		process.env.KASA_KLAP_USE_NODE_HTTP === 'true' ||
+		process.env.KASA_KLAP_RAW_HANDSHAKE_FALLBACK !== 'true'
+	) {
 		return nodeHttp
 	}
 	return (
@@ -791,6 +800,13 @@ export class KasaKlapClient implements KasaClient {
 			handshake1.headers,
 		)
 		if (handshake1Payload.length !== klapHandshake1PayloadLength) {
+			handshake1 = await this.#post('handshake1', localSeed)
+			handshake1Payload = normalizeKlapHandshake1Payload(
+				Buffer.from(await handshake1.arrayBuffer()),
+				handshake1.headers,
+			)
+		}
+		if (handshake1.status !== 200) {
 			handshake1 = await this.#post('handshake1', localSeed)
 			handshake1Payload = normalizeKlapHandshake1Payload(
 				Buffer.from(await handshake1.arrayBuffer()),
