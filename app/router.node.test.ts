@@ -936,6 +936,13 @@ test('health route returns ok json', async () => {
 			ok: true,
 			service: 'home-connector',
 			connectorId: '',
+			metadata: expect.objectContaining({
+				service: 'home-connector',
+				connectorId: config.homeConnectorId,
+				appCommitSha: null,
+				workerBaseUrl: config.workerBaseUrl,
+				mocksEnabled: false,
+			}),
 			connection: {
 				connected: false,
 				lastSyncAt: null,

@@ -506,6 +506,17 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 
 	try {
 		const tools = mcp.listTools()
+		const metadataTool = tools.find(
+			(tool) => tool.name === 'home_connector_get_metadata',
+		)
+		expect(metadataTool?.annotations?.['readOnlyHint']).toBe(true)
+		const metadataResult = await mcp.callTool('home_connector_get_metadata')
+		expect(metadataResult.content[0]?.type).toBe('text')
+		expect(metadataResult.structuredContent).toMatchObject({
+			service: 'home-connector',
+			connectorId: config.homeConnectorId,
+		})
+
 		const logsTool = tools.find(
 			(tool) => tool.name === 'home_connector_list_logs',
 		)

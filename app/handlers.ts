@@ -11,10 +11,11 @@ import { type createKasaAdapter } from '../src/adapters/kasa/index.ts'
 import { type createSonosAdapter } from '../src/adapters/sonos/index.ts'
 import { type createSamsungTvAdapter } from '../src/adapters/samsung-tv/index.ts'
 import { type createVenstarAdapter } from '../src/adapters/venstar/index.ts'
+import { type HomeConnectorConfig } from '../src/config.ts'
+import { buildHomeConnectorHealthPayload } from '../src/home-connector-metadata.ts'
 import { type HomeConnectorState } from '../src/state.ts'
 import { type RokuDiscoveryDiagnostics } from '../src/adapters/roku/types.ts'
 import { scanRokuDevices } from '../src/adapters/roku/index.ts'
-import { type HomeConnectorConfig } from '../src/config.ts'
 import { captureHomeConnectorException } from '../src/sentry.ts'
 import { renderInfoRows } from './handler-utils.ts'
 
@@ -632,36 +633,18 @@ function renderBanner(input: { tone: 'success' | 'error'; message: string }) {
 	</section>`
 }
 
-export function createHealthHandler(state: HomeConnectorState) {
+export function createHealthHandler(
+	state: HomeConnectorState,
+	config: HomeConnectorConfig,
+) {
 	return {
 		middleware: [],
 		async handler() {
-			return Response.json(
-				{
-					ok: true,
-					service: 'home-connector',
-					connectorId: state.connection.connectorId,
-					connection: {
-						connected: state.connection.connected,
-						lastSyncAt: state.connection.lastSyncAt,
-						lastError: state.connection.lastError,
-					},
-					toolInventory: {
-						status: state.connection.toolInventoryStatus,
-						reason: state.connection.toolInventoryStatusReason,
-						localToolCount: state.connection.localToolCount,
-						lastToolsChangedNotificationAt:
-							state.connection.lastToolsChangedNotificationAt,
-						lastToolsListRequestAt: state.connection.lastToolsListRequestAt,
-						recoveryCount: state.connection.toolInventoryRecoveryCount,
-					},
+			return Response.json(buildHomeConnectorHealthPayload({ config, state }), {
+				headers: {
+					'Cache-Control': 'no-store',
 				},
-				{
-					headers: {
-						'Cache-Control': 'no-store',
-					},
-				},
-			)
+			})
 		},
 	} satisfies BuildAction<
 		typeof routes.health.method,
