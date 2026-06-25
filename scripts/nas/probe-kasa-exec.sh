@@ -7,13 +7,10 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-# shellcheck source=read-connector-env.sh
-source "${SCRIPT_DIR}/read-connector-env.sh"
 
 PROBE_SCRIPT="${SCRIPT_DIR}/probe-kasa-full.mjs"
 CONTAINER="${CONTAINER:-kody-home-connector}"
 HOST="${1:-192.168.1.61}"
-START_SCRIPT="${START_SCRIPT:-${SCRIPT_DIR}/start-kody-home-connector.sh}"
 
 if [[ ! -f "${PROBE_SCRIPT}" ]]; then
 	echo "Missing ${PROBE_SCRIPT}" >&2
@@ -25,7 +22,24 @@ if [[ "$(docker inspect --format '{{.State.Running}}' "${CONTAINER}" 2>/dev/null
 	exit 1
 fi
 
-load_connector_env "${START_SCRIPT}"
+read_container_env() {
+	docker inspect "${CONTAINER}" --format '{{range .Config.Env}}{{println .}}{{end}}'
+}
+
+HOME_CONNECTOR_ID="$(
+	read_container_env | sed -n 's/^HOME_CONNECTOR_ID=//p' | head -1
+)"
+HOME_CONNECTOR_SHARED_SECRET="$(
+	read_container_env | sed -n 's/^HOME_CONNECTOR_SHARED_SECRET=//p' | head -1
+)"
+HOME_CONNECTOR_DATA_PATH="$(
+	read_container_env | sed -n 's/^HOME_CONNECTOR_DATA_PATH=//p' | head -1
+)"
+
+if [[ -z "${HOME_CONNECTOR_ID}" || -z "${HOME_CONNECTOR_SHARED_SECRET}" || -z "${HOME_CONNECTOR_DATA_PATH}" ]]; then
+	echo "Container ${CONTAINER} is missing HOME_CONNECTOR_ID, HOME_CONNECTOR_SHARED_SECRET, or HOME_CONNECTOR_DATA_PATH." >&2
+	exit 1
+fi
 
 APP_COMMIT_SHA="$(
 	docker inspect "${CONTAINER}" --format '{{range .Config.Env}}{{println .}}{{end}}' \
@@ -45,6 +59,6 @@ docker exec \
 	-e "APP_COMMIT_SHA=${APP_COMMIT_SHA}" \
 	-e "HOME_CONNECTOR_ID=${HOME_CONNECTOR_ID}" \
 	-e "HOME_CONNECTOR_SHARED_SECRET=${HOME_CONNECTOR_SHARED_SECRET}" \
-	-e "HOME_CONNECTOR_DATA_PATH=/data/home-connector" \
+	-e "HOME_CONNECTOR_DATA_PATH=${HOME_CONNECTOR_DATA_PATH}" \
 	"${CONTAINER}" \
 	node --experimental-strip-types /tmp/probe-kasa-full.mjs

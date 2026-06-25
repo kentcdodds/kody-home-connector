@@ -30,6 +30,13 @@ load_connector_env() {
 		return 1
 	fi
 
+	if [[ -z "${DATA_PATH:-}" && -f "${start_script}" ]]; then
+		DATA_PATH="$(
+			sed -n 's/^HOST_DATA_PATH="\(.*\)"$/\1/p' "${start_script}" | head -1
+		)"
+		export DATA_PATH
+	fi
+
 	if [[ -z "${DATA_PATH:-}" ]]; then
 		DATA_PATH="/volume1/docker/kody-home-connector"
 		export DATA_PATH
