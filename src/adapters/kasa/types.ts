@@ -86,6 +86,7 @@ export type KasaClientCredentials = {
 
 export type KasaClient = {
 	usedConfiguredCredentials?: boolean
+	reset?(): void
 	getSysInfo(): Promise<KasaSysInfo>
 	setRelayState(state: boolean): Promise<Record<string, unknown>>
 }

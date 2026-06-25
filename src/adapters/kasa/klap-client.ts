@@ -412,7 +412,27 @@ function headersFromNodeResponse(headers: http.IncomingHttpHeaders): Headers {
 	return result
 }
 
-const klapHttpAgent = new http.Agent({ keepAlive: false, family: 4 })
+function createKlapHttpAgent() {
+	return new http.Agent({ keepAlive: false, family: 4 })
+}
+
+const klapHostLocks = new Map<string, Promise<unknown>>()
+
+async function withKlapHostLock<T>(
+	host: string,
+	task: () => Promise<T>,
+): Promise<T> {
+	const prior = klapHostLocks.get(host) ?? Promise.resolve()
+	const next = prior.catch(() => {}).then(task)
+	klapHostLocks.set(host, next)
+	try {
+		return await next
+	} finally {
+		if (klapHostLocks.get(host) === next) {
+			klapHostLocks.delete(host)
+		}
+	}
+}
 
 function headersFromRawHttpHeaderLines(lines: Array<string>) {
 	const entries = new Map<string, Array<string>>()
@@ -589,6 +609,7 @@ function postWithNodeHttp(
 		cookie?: string
 		timeoutMs: number
 	},
+	httpAgent: http.Agent,
 ): Promise<KlapPostResponse> {
 	return new Promise((resolve, reject) => {
 		const request = http.request(
@@ -597,7 +618,7 @@ function postWithNodeHttp(
 				port: url.port ? Number(url.port) : 80,
 				path: `${url.pathname}${url.search}`,
 				method: 'POST',
-				agent: klapHttpAgent,
+				agent: httpAgent,
 				family: 4,
 				headers: {
 					'Content-Type': 'application/octet-stream',
@@ -641,11 +662,12 @@ function postWithNodeHttpAndRawHandshakeFallback(
 		cookie?: string
 		timeoutMs: number
 	},
+	httpAgent: http.Agent,
 ): Promise<KlapPostResponse> {
 	if (!url.pathname.endsWith('/handshake1')) {
-		return postWithNodeHttp(url, input)
+		return postWithNodeHttp(url, input, httpAgent)
 	}
-	return postWithNodeHttp(url, input).then((response) => {
+	return postWithNodeHttp(url, input, httpAgent).then((response) => {
 		if (
 			response.status === 200 &&
 			getCookieValue(response.headers, 'TP_SESSIONID')
@@ -656,15 +678,33 @@ function postWithNodeHttpAndRawHandshakeFallback(
 	})
 }
 
-function createKlapPostImpl(input?: KlapClientInput['postImpl']) {
+function createKlapPostImpl(
+	input: KlapClientInput['postImpl'],
+	httpAgent: http.Agent,
+) {
 	if (input) return input
 	if (process.env.KASA_KLAP_USE_RAW_SOCKET === 'true') {
 		return postWithRawSocket
 	}
+	const nodeHttp = (
+		url: URL,
+		requestInput: {
+			body: Buffer
+			cookie?: string
+			timeoutMs: number
+		},
+	) => postWithNodeHttp(url, requestInput, httpAgent)
 	if (process.env.KASA_KLAP_USE_NODE_HTTP === 'true') {
-		return postWithNodeHttp
+		return nodeHttp
 	}
-	return postWithNodeHttpAndRawHandshakeFallback
+	return (
+		url: URL,
+		requestInput: {
+			body: Buffer
+			cookie?: string
+			timeoutMs: number
+		},
+	) => postWithNodeHttpAndRawHandshakeFallback(url, requestInput, httpAgent)
 }
 
 export class KasaKlapClient implements KasaClient {
@@ -676,6 +716,7 @@ export class KasaKlapClient implements KasaClient {
 	#localSeedFactory: () => Buffer
 	#now: () => number
 	#hashVersion: KlapHashVersion
+	#httpAgent: http.Agent
 	#session: KlapSession | null = null
 	#terminalUuid: string
 
@@ -684,7 +725,8 @@ export class KasaKlapClient implements KasaClient {
 		this.#port = input.port ?? 80
 		this.#credentials = input.credentials
 		this.#timeoutMs = input.timeoutMs ?? 8_000
-		this.#postImpl = createKlapPostImpl(input.postImpl)
+		this.#httpAgent = createKlapHttpAgent()
+		this.#postImpl = createKlapPostImpl(input.postImpl, this.#httpAgent)
 		this.#localSeedFactory = input.localSeedFactory ?? (() => randomBytes(16))
 		this.#now = input.now ?? (() => Date.now())
 		this.#hashVersion = input.hashVersion ?? 1
@@ -863,53 +905,61 @@ export class KasaKlapClient implements KasaClient {
 	async request<T extends Record<string, unknown>>(
 		payload: Record<string, unknown>,
 	): Promise<T> {
-		const session = await this.#ensureSession()
-		const sequence = session.sequence + 1
-		const requestJson = JSON.stringify(payload)
-		const encrypted = encryptKlapPayload({
-			localSeed: session.localSeed,
-			remoteSeed: session.remoteSeed,
-			authHash: session.authHash,
-			sequence,
-			payload: requestJson,
-		})
-		let response: KlapPostResponse
-		try {
-			response = await this.#post(
-				'request',
-				encrypted,
-				session.sessionCookie,
+		return withKlapHostLock(this.#host, async () => {
+			const session = await this.#ensureSession()
+			const sequence = session.sequence + 1
+			const requestJson = JSON.stringify(payload)
+			const encrypted = encryptKlapPayload({
+				localSeed: session.localSeed,
+				remoteSeed: session.remoteSeed,
+				authHash: session.authHash,
 				sequence,
+				payload: requestJson,
+			})
+			let response: KlapPostResponse
+			try {
+				response = await this.#post(
+					'request',
+					encrypted,
+					session.sessionCookie,
+					sequence,
+				)
+			} catch (error) {
+				this.reset()
+				throw error
+			}
+			if (response.status === 403) {
+				this.reset()
+				throw new Error(
+					`Kasa plug ${this.#host} returned a KLAP security error; the session will be re-established on retry.`,
+				)
+			}
+			if (response.status !== 200) {
+				this.reset()
+				throw new Error(
+					`Kasa plug ${this.#host} responded with ${response.status} to KLAP request.`,
+				)
+			}
+			const encryptedResponse = normalizeKlapEncryptedPayload(
+				Buffer.from(await response.arrayBuffer()),
+				response.headers,
 			)
-		} catch (error) {
-			this.reset()
-			throw error
-		}
-		if (response.status === 403) {
-			this.reset()
-			throw new Error(
-				`Kasa plug ${this.#host} returned a KLAP security error; the session will be re-established on retry.`,
-			)
-		}
-		if (response.status !== 200) {
-			this.reset()
-			throw new Error(
-				`Kasa plug ${this.#host} responded with ${response.status} to KLAP request.`,
-			)
-		}
-		const encryptedResponse = normalizeKlapEncryptedPayload(
-			Buffer.from(await response.arrayBuffer()),
-			response.headers,
-		)
-		const decrypted = decryptKlapPayload({
-			localSeed: session.localSeed,
-			remoteSeed: session.remoteSeed,
-			authHash: session.authHash,
-			sequence,
-			payload: encryptedResponse,
+			let decrypted: string
+			try {
+				decrypted = decryptKlapPayload({
+					localSeed: session.localSeed,
+					remoteSeed: session.remoteSeed,
+					authHash: session.authHash,
+					sequence,
+					payload: encryptedResponse,
+				})
+			} catch (error) {
+				this.reset()
+				throw error
+			}
+			session.sequence = sequence
+			return JSON.parse(decrypted) as T
 		})
-		session.sequence = sequence
-		return JSON.parse(decrypted) as T
 	}
 
 	async #smartRequest(method: string, params?: Record<string, unknown>) {

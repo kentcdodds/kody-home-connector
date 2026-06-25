@@ -53,6 +53,20 @@ function isAuthFailure(error: unknown) {
 	)
 }
 
+function isRetriableKasaTransportError(error: unknown) {
+	const message = error instanceof Error ? error.message : String(error)
+	return /KLAP handshake1|signature did not match|timed out|security error|responded with 0/i.test(
+		message,
+	)
+}
+
+function discardCachedClient(
+	clients: Map<string, { key: string; client: KasaClient }>,
+	plugId: string,
+) {
+	clients.delete(plugId)
+}
+
 function getEnvCredentials(config: HomeConnectorConfig) {
 	if (!config.kasaUsername || !config.kasaPassword) return null
 	return {
@@ -233,67 +247,87 @@ export function createKasaAdapter(input: {
 
 	async function getLiveStatus(selector: KasaPlugSelector) {
 		const plug = resolvePlug(selector)
-		const client = createClient(plug)
-		try {
-			const sysinfo = await client.getSysInfo()
-			updateSuccessfulAuth(client)
-			const relayState = kasaRelayStateFromSysinfo(sysinfo)
-			const updated =
-				updateKasaPlugSysinfo({
-					storage,
-					connectorId,
-					plugId: plug.plugId,
-					relayState,
-					rawSysinfo: sysinfo,
-					lastSeenAt: new Date().toISOString(),
-				}) ?? plug
-			return mapStatusResult({ plug: updated, sysinfo })
-		} catch (error) {
-			updateFailedAuth(error)
-			throw error
+		let lastError: unknown
+		for (let attempt = 0; attempt < 2; attempt++) {
+			const client = createClient(plug)
+			try {
+				const sysinfo = await client.getSysInfo()
+				updateSuccessfulAuth(client)
+				const relayState = kasaRelayStateFromSysinfo(sysinfo)
+				const updated =
+					updateKasaPlugSysinfo({
+						storage,
+						connectorId,
+						plugId: plug.plugId,
+						relayState,
+						rawSysinfo: sysinfo,
+						lastSeenAt: new Date().toISOString(),
+					}) ?? plug
+				return mapStatusResult({ plug: updated, sysinfo })
+			} catch (error) {
+				discardCachedClient(clients, plug.plugId)
+				lastError = error
+				if (attempt === 0 && isRetriableKasaTransportError(error)) {
+					continue
+				}
+				updateFailedAuth(error)
+				throw error
+			}
 		}
+		updateFailedAuth(lastError)
+		throw lastError
 	}
 
 	async function setRelayState(selector: KasaPlugSelector, state: boolean) {
 		const plug = requireAdoptedPlug(selector)
-		const client = createClient(plug)
-		try {
-			const response = await client.setRelayState(state)
-			const errCode = getRelaySetErrorCode(response)
-			if (errCode != null && errCode !== 0) {
-				throw new Error(
-					`Kasa plug "${plug.alias}" rejected relay update with err_code ${String(errCode)}.`,
-				)
-			}
-			const sysinfo = await client.getSysInfo()
-			updateSuccessfulAuth(client)
-			const relayState = kasaRelayStateFromSysinfo(sysinfo)
-			const requestedRelayState = state ? 'on' : 'off'
-			if (relayState !== requestedRelayState) {
-				throw new Error(
-					`Kasa plug "${plug.alias}" did not report relay state ${requestedRelayState} after control; current state is ${relayState}.`,
-				)
-			}
-			const updated =
-				updateKasaPlugSysinfo({
-					storage,
-					connectorId,
-					plugId: plug.plugId,
+		let lastError: unknown
+		for (let attempt = 0; attempt < 2; attempt++) {
+			const client = createClient(plug)
+			try {
+				const response = await client.setRelayState(state)
+				const errCode = getRelaySetErrorCode(response)
+				if (errCode != null && errCode !== 0) {
+					throw new Error(
+						`Kasa plug "${plug.alias}" rejected relay update with err_code ${String(errCode)}.`,
+					)
+				}
+				const sysinfo = await client.getSysInfo()
+				updateSuccessfulAuth(client)
+				const relayState = kasaRelayStateFromSysinfo(sysinfo)
+				const requestedRelayState = state ? 'on' : 'off'
+				if (relayState !== requestedRelayState) {
+					throw new Error(
+						`Kasa plug "${plug.alias}" did not report relay state ${requestedRelayState} after control; current state is ${relayState}.`,
+					)
+				}
+				const updated =
+					updateKasaPlugSysinfo({
+						storage,
+						connectorId,
+						plugId: plug.plugId,
+						relayState,
+						rawSysinfo: sysinfo,
+						lastSeenAt: new Date().toISOString(),
+					}) ?? plug
+				return {
+					plug: updated,
+					requestedRelayState,
 					relayState,
-					rawSysinfo: sysinfo,
-					lastSeenAt: new Date().toISOString(),
-				}) ?? plug
-			return {
-				plug: updated,
-				requestedRelayState,
-				relayState,
-				response,
-				sysinfo,
+					response,
+					sysinfo,
+				}
+			} catch (error) {
+				discardCachedClient(clients, plug.plugId)
+				lastError = error
+				if (attempt === 0 && isRetriableKasaTransportError(error)) {
+					continue
+				}
+				updateFailedAuth(error)
+				throw error
 			}
-		} catch (error) {
-			updateFailedAuth(error)
-			throw error
 		}
+		updateFailedAuth(lastError)
+		throw lastError
 	}
 
 	return {
