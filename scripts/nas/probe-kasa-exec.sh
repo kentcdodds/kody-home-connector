@@ -35,6 +35,12 @@ HOME_CONNECTOR_SHARED_SECRET="$(
 HOME_CONNECTOR_DATA_PATH="$(
 	read_container_env | sed -n 's/^HOME_CONNECTOR_DATA_PATH=//p' | head -1
 )"
+HOME_CONNECTOR_DB_PATH="$(
+	read_container_env | sed -n 's/^HOME_CONNECTOR_DB_PATH=//p' | head -1
+)"
+KASA_KLAP_USE_SUBPROCESS="$(
+	read_container_env | sed -n 's/^KASA_KLAP_USE_SUBPROCESS=//p' | head -1
+)"
 
 if [[ -z "${HOME_CONNECTOR_ID}" || -z "${HOME_CONNECTOR_SHARED_SECRET}" || -z "${HOME_CONNECTOR_DATA_PATH}" ]]; then
 	echo "Container ${CONTAINER} is missing HOME_CONNECTOR_ID, HOME_CONNECTOR_SHARED_SECRET, or HOME_CONNECTOR_DATA_PATH." >&2
@@ -54,11 +60,21 @@ echo ""
 
 docker cp "${PROBE_SCRIPT}" "${CONTAINER}:/tmp/probe-kasa-full.mjs"
 
+EXEC_ENV=(
+	-e "HOST=${HOST}"
+	-e "APP_COMMIT_SHA=${APP_COMMIT_SHA}"
+	-e "HOME_CONNECTOR_ID=${HOME_CONNECTOR_ID}"
+	-e "HOME_CONNECTOR_SHARED_SECRET=${HOME_CONNECTOR_SHARED_SECRET}"
+	-e "HOME_CONNECTOR_DATA_PATH=${HOME_CONNECTOR_DATA_PATH}"
+)
+if [[ -n "${HOME_CONNECTOR_DB_PATH}" ]]; then
+	EXEC_ENV+=(-e "HOME_CONNECTOR_DB_PATH=${HOME_CONNECTOR_DB_PATH}")
+fi
+if [[ -n "${KASA_KLAP_USE_SUBPROCESS}" ]]; then
+	EXEC_ENV+=(-e "KASA_KLAP_USE_SUBPROCESS=${KASA_KLAP_USE_SUBPROCESS}")
+fi
+
 docker exec \
-	-e "HOST=${HOST}" \
-	-e "APP_COMMIT_SHA=${APP_COMMIT_SHA}" \
-	-e "HOME_CONNECTOR_ID=${HOME_CONNECTOR_ID}" \
-	-e "HOME_CONNECTOR_SHARED_SECRET=${HOME_CONNECTOR_SHARED_SECRET}" \
-	-e "HOME_CONNECTOR_DATA_PATH=${HOME_CONNECTOR_DATA_PATH}" \
+	"${EXEC_ENV[@]}" \
 	"${CONTAINER}" \
 	node --experimental-strip-types /tmp/probe-kasa-full.mjs

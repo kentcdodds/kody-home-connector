@@ -40,6 +40,7 @@ docker run --rm --network host \
 	-e "HOME_CONNECTOR_SHARED_SECRET=${HOME_CONNECTOR_SHARED_SECRET}" \
 	-v "${DATA_PATH}:/data/home-connector:ro" \
 	-e "HOME_CONNECTOR_DATA_PATH=/data/home-connector" \
+	-e "KASA_KLAP_USE_SUBPROCESS=${KASA_KLAP_USE_SUBPROCESS:-true}" \
 	-v "${PROBE_SCRIPT}:/probe.mjs:ro" \
 	"${IMAGE}" \
 	node --experimental-strip-types /probe.mjs

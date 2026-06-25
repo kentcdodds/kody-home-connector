@@ -238,9 +238,13 @@ async function loadStoredCredentials() {
 	const dataPath = process.env.HOME_CONNECTOR_DATA_PATH?.trim()
 	const sharedSecret = process.env.HOME_CONNECTOR_SHARED_SECRET?.trim()
 	const connectorId = process.env.HOME_CONNECTOR_ID?.trim() ?? 'default'
-	if (!dataPath || !sharedSecret) return null
+	if (!dataPath || !sharedSecret) {
+		return { status: 'missing-config' }
+	}
 
-	const dbPath = path.join(dataPath, 'home-connector.sqlite')
+	const dbPath =
+		process.env.HOME_CONNECTOR_DB_PATH?.trim() ||
+		path.join(dataPath, 'home-connector.sqlite')
 	const db = wrapReadonlySqliteDatabase(dbPath)
 	const storage = {
 		db,
@@ -254,7 +258,20 @@ async function loadStoredCredentials() {
 			pathToFileURL(path.join(process.cwd(), 'src/adapters/kasa/repository.ts'))
 				.href
 		)
-		return getKasaCredentials(storage, connectorId)
+		const credentials = getKasaCredentials(storage, connectorId)
+		if (!credentials) {
+			return {
+				status: 'missing-credentials',
+				dbPath,
+				connectorId,
+			}
+		}
+		return {
+			status: 'ok',
+			credentials,
+			dbPath,
+			connectorId,
+		}
 	} finally {
 		storage.close()
 	}
@@ -303,7 +320,7 @@ try {
 		}
 	}
 
-	const stored = await loadStoredCredentials().catch((error) => {
+	const storedResult = await loadStoredCredentials().catch((error) => {
 		report.credentialStoredMeta = {
 			source: 'connector-sqlite',
 			loaded: false,
@@ -315,26 +332,43 @@ try {
 		}
 		return null
 	})
-	if (stored) {
-		report.credentialStoredMeta = describeCredentialPair(
-			stored.username,
-			stored.password,
-			'connector-sqlite',
-		)
+	if (storedResult?.status === 'ok') {
+		const stored = storedResult.credentials
+		report.credentialStoredMeta = {
+			...describeCredentialPair(
+				stored.username,
+				stored.password,
+				'connector-sqlite',
+			),
+			dbPath: storedResult.dbPath,
+			connectorId: storedResult.connectorId,
+		}
 		report.tests.fullKlapStored = await testFullKlap(
 			{ username: stored.username, password: stored.password },
 			'connector-sqlite',
 		)
-	} else if (!report.credentialStoredMeta) {
+	} else if (storedResult?.status === 'missing-config') {
 		report.credentialStoredMeta = {
 			source: 'connector-sqlite',
 			loaded: false,
 			reason:
-				'No HOME_CONNECTOR_DATA_PATH/HOME_CONNECTOR_SHARED_SECRET, sqlite missing, or no stored row',
+				'HOME_CONNECTOR_DATA_PATH or HOME_CONNECTOR_SHARED_SECRET is missing',
 		}
 		report.tests.fullKlapStored = {
 			skipped: true,
 			reason: report.credentialStoredMeta.reason,
+		}
+	} else if (storedResult?.status === 'missing-credentials') {
+		report.credentialStoredMeta = {
+			source: 'connector-sqlite',
+			loaded: true,
+			credentialsPresent: false,
+			dbPath: storedResult.dbPath,
+			connectorId: storedResult.connectorId,
+		}
+		report.tests.fullKlapStored = {
+			skipped: true,
+			reason: `No stored Kasa credentials for connector id ${storedResult.connectorId}`,
 		}
 	}
 
