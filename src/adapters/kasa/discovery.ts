@@ -478,7 +478,7 @@ async function discoverKasaPlugs(input: {
 
 	const targets = input.config.kasaScanCidrs.flatMap(tryExpandKasaScanCidr)
 	let cursor = 0
-	const concurrency = Math.max(1, Math.min(targets.length, 64))
+	const concurrency = Math.max(1, Math.min(targets.length, 8))
 	async function worker() {
 		for (;;) {
 			const index = cursor++

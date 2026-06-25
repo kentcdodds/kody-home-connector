@@ -60,13 +60,6 @@ function isRetriableKasaTransportError(error: unknown) {
 	)
 }
 
-function discardCachedClient(
-	clients: Map<string, { key: string; client: KasaClient }>,
-	plugId: string,
-) {
-	clients.delete(plugId)
-}
-
 function getEnvCredentials(config: HomeConnectorConfig) {
 	if (!config.kasaUsername || !config.kasaPassword) return null
 	return {
@@ -121,7 +114,6 @@ export function createKasaAdapter(input: {
 }) {
 	const { config, state, storage } = input
 	const connectorId = config.homeConnectorId
-	const clients = new Map<string, { key: string; client: KasaClient }>()
 
 	function getCredentials() {
 		return getKasaCredentials(storage, connectorId) ?? getEnvCredentials(config)
@@ -198,16 +190,7 @@ export function createKasaAdapter(input: {
 
 	function createClient(plug: KasaPersistedPlug) {
 		const credentials = requireCredentials()
-		const key = JSON.stringify({
-			plugId: plug.plugId,
-			host: plug.host,
-			port: plug.port,
-			username: credentials.username,
-			password: credentials.password,
-		})
-		const cached = clients.get(plug.plugId)
-		if (cached?.key === key) return cached.client
-		const client =
+		return (
 			input.clientFactory?.({ plug, credentials }) ??
 			createKasaKlapClient({
 				host: plug.host,
@@ -215,8 +198,7 @@ export function createKasaAdapter(input: {
 				credentials,
 				timeoutMs: config.kasaRequestTimeoutMs,
 			})
-		clients.set(plug.plugId, { key, client })
-		return client
+		)
 	}
 
 	function updateSuccessfulAuth(client: KasaClient) {
@@ -265,7 +247,6 @@ export function createKasaAdapter(input: {
 					}) ?? plug
 				return mapStatusResult({ plug: updated, sysinfo })
 			} catch (error) {
-				discardCachedClient(clients, plug.plugId)
 				lastError = error
 				if (attempt === 0 && isRetriableKasaTransportError(error)) {
 					continue
@@ -317,7 +298,6 @@ export function createKasaAdapter(input: {
 					sysinfo,
 				}
 			} catch (error) {
-				discardCachedClient(clients, plug.plugId)
 				lastError = error
 				if (attempt === 0 && isRetriableKasaTransportError(error)) {
 					continue
@@ -376,7 +356,6 @@ export function createKasaAdapter(input: {
 		forgetPlug(selector: KasaPlugSelector) {
 			const plug = resolvePlug(selector)
 			removeKasaPlug({ storage, connectorId, plugId: plug.plugId })
-			clients.delete(plug.plugId)
 			return toKasaPublicPlug(plug, getCredentials())
 		},
 		setCredentials(username: string, password: string) {
@@ -386,7 +365,6 @@ export function createKasaAdapter(input: {
 				username: assertNonEmpty(username, 'username'),
 				password: assertNonEmpty(password, 'password'),
 			})
-			clients.clear()
 			return {
 				configured: Boolean(credentials),
 				hasStoredCredentials: Boolean(credentials),
