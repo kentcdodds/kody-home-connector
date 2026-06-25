@@ -714,19 +714,19 @@ function createKlapPostImpl(
 ) {
 	if (input) return input
 	if (
-		process.env.KASA_KLAP_USE_NODE_HTTP === 'true' ||
-		process.env.KASA_KLAP_USE_NODE_HTTP === '1'
+		process.env.KASA_KLAP_USE_RAW_SOCKET === 'true' ||
+		process.env.KASA_KLAP_USE_RAW_SOCKET === '1'
 	) {
-		return (
-			url: URL,
-			requestInput: {
-				body: Buffer
-				cookie?: string
-				timeoutMs: number
-			},
-		) => postWithNodeHttpAndRawHandshakeFallback(url, requestInput, httpAgent)
+		return postWithRawSocket
 	}
-	return postWithRawSocket
+	return (
+		url: URL,
+		requestInput: {
+			body: Buffer
+			cookie?: string
+			timeoutMs: number
+		},
+	) => postWithNodeHttpAndRawHandshakeFallback(url, requestInput, httpAgent)
 }
 
 export class KasaKlapClient implements KasaClient {
