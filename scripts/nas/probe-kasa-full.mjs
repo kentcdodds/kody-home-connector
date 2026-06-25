@@ -172,7 +172,7 @@ async function createProbeKlapClient(credentials) {
 		await import(
 			pathToFileURL(
 				path.join(process.cwd(), 'src/adapters/kasa/klap-subprocess-client.ts'),
-			).href,
+			).href
 		)
 	if (shouldUseKasaKlapSubprocessClient()) {
 		return {
