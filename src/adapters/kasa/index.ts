@@ -2,6 +2,10 @@ import { type HomeConnectorConfig } from '../../config.ts'
 import { type HomeConnectorState } from '../../state.ts'
 import { type HomeConnectorStorage } from '../../storage/index.ts'
 import { createKasaKlapClient } from './klap-client.ts'
+import {
+	createKasaKlapSubprocessClient,
+	shouldUseKasaKlapSubprocessClient,
+} from './klap-subprocess-client.ts'
 import { scanKasaPlugs } from './discovery.ts'
 import {
 	adoptKasaPlug,
@@ -55,7 +59,7 @@ function isAuthFailure(error: unknown) {
 
 function isRetriableKasaTransportError(error: unknown) {
 	const message = error instanceof Error ? error.message : String(error)
-	return /KLAP handshake1|signature did not match|timed out|security error|responded with 0/i.test(
+	return /KLAP handshake1|signature did not match|timed out|security error|responded with 0|did not return device info|subprocess timed out|subprocess produced no output/i.test(
 		message,
 	)
 }
@@ -190,15 +194,19 @@ export function createKasaAdapter(input: {
 
 	function createClient(plug: KasaPersistedPlug) {
 		const credentials = requireCredentials()
-		return (
-			input.clientFactory?.({ plug, credentials }) ??
-			createKasaKlapClient({
-				host: plug.host,
-				port: plug.port,
-				credentials,
-				timeoutMs: config.kasaRequestTimeoutMs,
-			})
-		)
+		if (input.clientFactory) {
+			return input.clientFactory({ plug, credentials })
+		}
+		const clientInput = {
+			host: plug.host,
+			port: plug.port,
+			credentials,
+			timeoutMs: config.kasaRequestTimeoutMs,
+		}
+		if (shouldUseKasaKlapSubprocessClient()) {
+			return createKasaKlapSubprocessClient(clientInput)
+		}
+		return createKasaKlapClient(clientInput)
 	}
 
 	function updateSuccessfulAuth(client: KasaClient) {
