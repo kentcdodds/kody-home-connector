@@ -746,24 +746,22 @@ export class KasaKlapClient implements KasaClient {
 	}
 
 	async #post(path: string, body: Buffer, cookie?: string, seq?: number) {
-		return withKlapHostLock(this.#host, async () => {
-			const url = new URL(
-				`http://${this.#host}:${String(this.#port)}/app/${path}`,
-			)
-			if (seq != null) url.searchParams.set('seq', String(seq))
-			try {
-				return await this.#postImpl!(url, {
-					body,
-					cookie,
-					timeoutMs: this.#timeoutMs,
-				})
-			} catch (error) {
-				if (error instanceof Error && /timed out/i.test(error.message)) {
-					throw new Error(`Kasa KLAP request timed out for ${this.#host}.`)
-				}
-				throw error
+		const url = new URL(
+			`http://${this.#host}:${String(this.#port)}/app/${path}`,
+		)
+		if (seq != null) url.searchParams.set('seq', String(seq))
+		try {
+			return await this.#postImpl!(url, {
+				body,
+				cookie,
+				timeoutMs: this.#timeoutMs,
+			})
+		} catch (error) {
+			if (error instanceof Error && /timed out/i.test(error.message)) {
+				throw new Error(`Kasa KLAP request timed out for ${this.#host}.`)
 			}
-		})
+			throw error
+		}
 	}
 
 	#getAuthCandidates(): Array<KlapCandidate> {
@@ -907,59 +905,61 @@ export class KasaKlapClient implements KasaClient {
 	async request<T extends Record<string, unknown>>(
 		payload: Record<string, unknown>,
 	): Promise<T> {
-		const session = await this.#ensureSession()
-		const sequence = session.sequence + 1
-		const requestJson = JSON.stringify(payload)
-		const encrypted = encryptKlapPayload({
-			localSeed: session.localSeed,
-			remoteSeed: session.remoteSeed,
-			authHash: session.authHash,
-			sequence,
-			payload: requestJson,
-		})
-		let response: KlapPostResponse
-		try {
-			response = await this.#post(
-				'request',
-				encrypted,
-				session.sessionCookie,
-				sequence,
-			)
-		} catch (error) {
-			this.reset()
-			throw error
-		}
-		if (response.status === 403) {
-			this.reset()
-			throw new Error(
-				`Kasa plug ${this.#host} returned a KLAP security error; the session will be re-established on retry.`,
-			)
-		}
-		if (response.status !== 200) {
-			this.reset()
-			throw new Error(
-				`Kasa plug ${this.#host} responded with ${response.status} to KLAP request.`,
-			)
-		}
-		const encryptedResponse = normalizeKlapEncryptedPayload(
-			Buffer.from(await response.arrayBuffer()),
-			response.headers,
-		)
-		let decrypted: string
-		try {
-			decrypted = decryptKlapPayload({
+		return withKlapHostLock(this.#host, async () => {
+			const session = await this.#ensureSession()
+			const sequence = session.sequence + 1
+			const requestJson = JSON.stringify(payload)
+			const encrypted = encryptKlapPayload({
 				localSeed: session.localSeed,
 				remoteSeed: session.remoteSeed,
 				authHash: session.authHash,
 				sequence,
-				payload: encryptedResponse,
+				payload: requestJson,
 			})
-		} catch (error) {
-			this.reset()
-			throw error
-		}
-		session.sequence = sequence
-		return JSON.parse(decrypted) as T
+			let response: KlapPostResponse
+			try {
+				response = await this.#post(
+					'request',
+					encrypted,
+					session.sessionCookie,
+					sequence,
+				)
+			} catch (error) {
+				this.reset()
+				throw error
+			}
+			if (response.status === 403) {
+				this.reset()
+				throw new Error(
+					`Kasa plug ${this.#host} returned a KLAP security error; the session will be re-established on retry.`,
+				)
+			}
+			if (response.status !== 200) {
+				this.reset()
+				throw new Error(
+					`Kasa plug ${this.#host} responded with ${response.status} to KLAP request.`,
+				)
+			}
+			const encryptedResponse = normalizeKlapEncryptedPayload(
+				Buffer.from(await response.arrayBuffer()),
+				response.headers,
+			)
+			let decrypted: string
+			try {
+				decrypted = decryptKlapPayload({
+					localSeed: session.localSeed,
+					remoteSeed: session.remoteSeed,
+					authHash: session.authHash,
+					sequence,
+					payload: encryptedResponse,
+				})
+			} catch (error) {
+				this.reset()
+				throw error
+			}
+			session.sequence = sequence
+			return JSON.parse(decrypted) as T
+		})
 	}
 
 	async #smartRequest(method: string, params?: Record<string, unknown>) {

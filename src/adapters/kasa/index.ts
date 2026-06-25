@@ -63,12 +63,8 @@ function isRetriableKasaTransportError(error: unknown) {
 function discardCachedClient(
 	clients: Map<string, { key: string; client: KasaClient }>,
 	plugId: string,
-	client?: KasaClient,
 ) {
 	clients.delete(plugId)
-	if (client && 'reset' in client && typeof client.reset === 'function') {
-		client.reset()
-	}
 }
 
 function getEnvCredentials(config: HomeConnectorConfig) {
@@ -269,7 +265,7 @@ export function createKasaAdapter(input: {
 					}) ?? plug
 				return mapStatusResult({ plug: updated, sysinfo })
 			} catch (error) {
-				discardCachedClient(clients, plug.plugId, client)
+				discardCachedClient(clients, plug.plugId)
 				lastError = error
 				if (attempt === 0 && isRetriableKasaTransportError(error)) {
 					continue
@@ -321,7 +317,7 @@ export function createKasaAdapter(input: {
 					sysinfo,
 				}
 			} catch (error) {
-				discardCachedClient(clients, plug.plugId, client)
+				discardCachedClient(clients, plug.plugId)
 				lastError = error
 				if (attempt === 0 && isRetriableKasaTransportError(error)) {
 					continue
