@@ -140,25 +140,60 @@ function nodeHandshake1() {
 			},
 		)
 		req.on('error', reject)
+		req.on('timeout', () => {
+			req.destroy(new Error('timeout'))
+		})
 		req.end(localSeed)
 	})
 }
 
-async function testFullKlap(credentials, label) {
+async function captureHandshakeTest(fn) {
+	try {
+		return await fn()
+	} catch (error) {
+		return {
+			ok: false,
+			error: error instanceof Error ? error.message : String(error),
+		}
+	}
+}
+
+async function createProbeKlapClient(credentials) {
+	const clientInput = {
+		host,
+		credentials,
+		timeoutMs: 8_000,
+	}
 	const { createKasaKlapClient } = await import(
 		pathToFileURL(path.join(process.cwd(), 'src/adapters/kasa/klap-client.ts'))
 			.href
 	)
+	const { createKasaKlapSubprocessClient, shouldUseKasaKlapSubprocessClient } =
+		await import(
+			pathToFileURL(
+				path.join(process.cwd(), 'src/adapters/kasa/klap-subprocess-client.ts'),
+			).href,
+		)
+	if (shouldUseKasaKlapSubprocessClient()) {
+		return {
+			client: createKasaKlapSubprocessClient(clientInput),
+			transport: 'subprocess',
+		}
+	}
+	return {
+		client: createKasaKlapClient(clientInput),
+		transport: 'in-process',
+	}
+}
+
+async function testFullKlap(credentials, label) {
 	try {
-		const client = createKasaKlapClient({
-			host,
-			credentials,
-			timeoutMs: 8_000,
-		})
+		const { client, transport } = await createProbeKlapClient(credentials)
 		const info = await client.getSysInfo()
 		return {
 			ok: true,
 			source: label,
+			transport,
 			alias: info.alias ?? info.nickname ?? null,
 			model: info.model ?? null,
 			authLabel: client.authLabel,
@@ -234,8 +269,8 @@ try {
 		'env-file',
 	)
 
-	report.tests.rawHandshake1 = await rawHandshake1()
-	report.tests.nodeHandshake1 = await nodeHandshake1()
+	report.tests.rawHandshake1 = await captureHandshakeTest(rawHandshake1)
+	report.tests.nodeHandshake1 = await captureHandshakeTest(nodeHandshake1)
 
 	if (rawEnvUsername?.trim() && rawEnvPassword?.trim()) {
 		report.tests.fullKlapEnv = await testFullKlap(

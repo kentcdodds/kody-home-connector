@@ -20,7 +20,7 @@ if [[ ! -f "${PROBE_SCRIPT}" ]]; then
 	exit 1
 fi
 
-if ! docker inspect "${CONTAINER}" >/dev/null 2>&1; then
+if [[ "$(docker inspect --format '{{.State.Running}}' "${CONTAINER}" 2>/dev/null || echo false)" != "true" ]]; then
 	echo "Container ${CONTAINER} is not running." >&2
 	exit 1
 fi

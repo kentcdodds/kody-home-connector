@@ -6,6 +6,13 @@
 load_connector_env() {
 	local start_script="${1:-}"
 
+	if [[ -z "${HOME_CONNECTOR_ID:-}" && -f "${start_script}" ]]; then
+		HOME_CONNECTOR_ID="$(
+			sed -n 's/^HOME_CONNECTOR_ID="\(.*\)"$/\1/p' "${start_script}" | head -1
+		)"
+		export HOME_CONNECTOR_ID
+	fi
+
 	if [[ -z "${HOME_CONNECTOR_ID:-}" ]]; then
 		HOME_CONNECTOR_ID="default"
 		export HOME_CONNECTOR_ID
