@@ -44,6 +44,27 @@ export type JellyfishPatternData = {
 	rawJsonData: string
 }
 
+export type JellyfishScheduleType = 'daily' | 'calendar'
+
+export type JellyfishScheduleActionType = 'RUN' | 'STOP'
+
+export type JellyfishScheduleActionStartFrom = 'sunrise' | 'sunset' | 'time'
+
+export type JellyfishScheduleAction = {
+	type: JellyfishScheduleActionType
+	startFrom: JellyfishScheduleActionStartFrom
+	hour: number
+	minute: number
+	patternFile: string
+	zones: Array<string>
+}
+
+export type JellyfishScheduleEvent = {
+	label?: string
+	days: Array<string>
+	actions: Array<JellyfishScheduleAction>
+}
+
 export type JellyfishProbeDiagnostic = {
 	host: string
 	port: number

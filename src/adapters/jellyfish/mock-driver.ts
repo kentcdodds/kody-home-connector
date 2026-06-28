@@ -1,5 +1,6 @@
 import {
 	type JellyfishDiscoveredController,
+	type JellyfishScheduleEvent,
 	jellyfishDefaultPort,
 } from './types.ts'
 
@@ -26,9 +27,43 @@ const mockPatternFileData = {
 }
 
 let mockLastRunPattern: Record<string, unknown> | null = null
+let mockDailySchedule: Array<JellyfishScheduleEvent> = []
+let mockCalendarSchedule: Array<JellyfishScheduleEvent> = []
 
 export function resetMockJellyfishState() {
 	mockLastRunPattern = null
+	mockDailySchedule = [
+		{
+			label: 'Daily Accent',
+			days: ['M', 'T', 'W', 'TH', 'F', 'SA', 'S'],
+			actions: [
+				{
+					type: 'RUN',
+					startFrom: 'sunset',
+					hour: 0,
+					minute: 0,
+					patternFile: 'Colors/Blue',
+					zones: ['Zone'],
+				},
+			],
+		},
+	]
+	mockCalendarSchedule = [
+		{
+			label: 'Brooke Birthday',
+			days: ['20260628'],
+			actions: [
+				{
+					type: 'RUN',
+					startFrom: 'time',
+					hour: 18,
+					minute: 0,
+					patternFile: 'Christmas/Christmas Tree',
+					zones: ['Zone'],
+				},
+			],
+		},
+	]
 }
 
 export function isMockJellyfishHost(host: string) {
@@ -114,6 +149,16 @@ function buildPatternFileDataResponse(folder: string, name: string) {
 	}
 }
 
+function buildScheduleResponse(
+	key: 'scheduleDaily' | 'scheduleCalendar',
+	events: Array<JellyfishScheduleEvent>,
+) {
+	return {
+		cmd: 'fromCtlr',
+		[key]: structuredClone(events),
+	}
+}
+
 export async function sendMockJellyfishCommand(
 	host: string,
 	command: Record<string, unknown>,
@@ -140,10 +185,31 @@ export async function sendMockJellyfishCommand(
 				const name = typeof request[2] === 'string' ? request[2] : 'Blue'
 				return buildPatternFileDataResponse(folder, name)
 			}
+			case 'scheduleDaily':
+				return buildScheduleResponse('scheduleDaily', mockDailySchedule)
+			case 'scheduleCalendar':
+				return buildScheduleResponse('scheduleCalendar', mockCalendarSchedule)
 			default:
 				throw new Error(
 					`Unsupported mock JellyFish get resource "${resource}".`,
 				)
+		}
+	}
+
+	if (command['cmd'] === 'toCtlrSet') {
+		const schedule = command['schedule']
+		const events = command['events']
+		if (schedule === 'daily' && Array.isArray(events)) {
+			mockDailySchedule = structuredClone(
+				events,
+			) as Array<JellyfishScheduleEvent>
+			return buildScheduleResponse('scheduleDaily', mockDailySchedule)
+		}
+		if (schedule === 'calendar' && Array.isArray(events)) {
+			mockCalendarSchedule = structuredClone(
+				events,
+			) as Array<JellyfishScheduleEvent>
+			return buildScheduleResponse('scheduleCalendar', mockCalendarSchedule)
 		}
 	}
 

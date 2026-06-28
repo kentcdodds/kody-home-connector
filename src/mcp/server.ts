@@ -117,7 +117,7 @@ export function createHomeConnectorMcpServer(input: {
 		},
 		{
 			instructions:
-				"Home connector MCP server. Tools support Roku, Samsung TV, Lutron, Sonos, Bond (Olibra Bond Bridge / shades, groups, and RF devices), JellyFish Lighting, Venstar WiFi thermostat control, TP-Link Kasa KLAP smart plugs, Island router status plus a generic allowlisted Island CLI catalog executor, a generic Island Router HTTP API proxy, and a single generic Access Networks / RUCKUS Unleashed WiFi raw-request capability. Use 'home_connector_get_metadata' to read runtime metadata such as APP_COMMIT_SHA, connector id, worker URL, and process uptime. Use 'home_connector_list_logs' to inspect the connector's sanitized local operational log history. Use 'kasa_set_credentials', 'kasa_scan_plugs', 'kasa_adopt_plug', then 'kasa_turn_plug_on' or 'kasa_turn_plug_off' for adopted Kasa plugs only. Use 'access_networks_unleashed_scan_controllers', 'access_networks_unleashed_adopt_controller', 'access_networks_unleashed_set_credentials', and 'access_networks_unleashed_authenticate_controller' to wire up a controller, then 'access_networks_unleashed_request' to issue authenticated AJAX requests. Use 'router_get_status' for Island SSH readiness and 'router_run_command' for catalog command ids; arbitrary CLI text is never accepted and write-risk entries require a reason plus exact confirmation. Use 'island_router_api_set_pin' before 'island_router_api_request' for the LAN-only Island Router HTTP API proxy; non-GET proxy requests require a reason plus exact confirmation. Island router and Access Networks Unleashed write operations are high risk and must be used only when highly certain. Bond local API tokens are configured only in the admin UI (/bond/setup); use bond_authentication_guide when you need a reminder.",
+				"Home connector MCP server. Tools support Roku, Samsung TV, Lutron, Sonos, Bond (Olibra Bond Bridge / shades, groups, and RF devices), JellyFish Lighting patterns/zones/daily schedules/calendar schedules, Venstar WiFi thermostat control, TP-Link Kasa KLAP smart plugs, Island router status plus a generic allowlisted Island CLI catalog executor, a generic Island Router HTTP API proxy, and a single generic Access Networks / RUCKUS Unleashed WiFi raw-request capability. Use 'home_connector_get_metadata' to read runtime metadata such as APP_COMMIT_SHA, connector id, worker URL, and process uptime. Use 'home_connector_list_logs' to inspect the connector's sanitized local operational log history. Use 'jellyfish_get_daily_schedule' before 'jellyfish_set_daily_schedule' because JellyFish schedule writes replace the full list. Use 'kasa_set_credentials', 'kasa_scan_plugs', 'kasa_adopt_plug', then 'kasa_turn_plug_on' or 'kasa_turn_plug_off' for adopted Kasa plugs only. Use 'access_networks_unleashed_scan_controllers', 'access_networks_unleashed_adopt_controller', 'access_networks_unleashed_set_credentials', and 'access_networks_unleashed_authenticate_controller' to wire up a controller, then 'access_networks_unleashed_request' to issue authenticated AJAX requests. Use 'router_get_status' for Island SSH readiness and 'router_run_command' for catalog command ids; arbitrary CLI text is never accepted and write-risk entries require a reason plus exact confirmation. Use 'island_router_api_set_pin' before 'island_router_api_request' for the LAN-only Island Router HTTP API proxy; non-GET proxy requests require a reason plus exact confirmation. Island router and Access Networks Unleashed write operations are high risk and must be used only when highly certain. Bond local API tokens are configured only in the admin UI (/bond/setup); use bond_authentication_guide when you need a reminder.",
 		},
 	)
 
@@ -469,6 +469,133 @@ export function createHomeConnectorMcpServer(input: {
 			),
 	)
 
+	const jellyfishScheduleActionSchema = z
+		.object({
+			type: z.enum(['RUN', 'STOP']).describe('JellyFish schedule action type.'),
+			startFrom: z
+				.enum(['sunrise', 'sunset', 'time'])
+				.describe('Timing anchor for this schedule action.'),
+			hour: z
+				.number()
+				.int()
+				.describe(
+					'For time actions, local hour 0-23. For sunrise/sunset actions, must be 0.',
+				),
+			minute: z
+				.number()
+				.int()
+				.describe(
+					'For time actions, minute 0-59. For sunrise/sunset actions, offset minutes -55..55 divisible by 5.',
+				),
+			patternFile: z
+				.string()
+				.describe(
+					'Saved JellyFish pattern file, usually "<folder>/<pattern name>". RUN actions require a non-empty value.',
+				),
+			zones: z
+				.array(z.string().min(1))
+				.describe(
+					'Zone names to target. Set schedule tools validate these against known controller zones.',
+				),
+		})
+		.superRefine((value, context) => {
+			if (value.type === 'RUN' && value.patternFile.trim().length === 0) {
+				context.addIssue({
+					code: 'custom',
+					path: ['patternFile'],
+					message: 'RUN actions require patternFile.',
+				})
+			}
+			if (value.startFrom === 'time') {
+				if (value.hour < 0 || value.hour > 23) {
+					context.addIssue({
+						code: 'custom',
+						path: ['hour'],
+						message: 'time actions require hour between 0 and 23.',
+					})
+				}
+				if (value.minute < 0 || value.minute > 59) {
+					context.addIssue({
+						code: 'custom',
+						path: ['minute'],
+						message: 'time actions require minute between 0 and 59.',
+					})
+				}
+				return
+			}
+			if (value.hour !== 0) {
+				context.addIssue({
+					code: 'custom',
+					path: ['hour'],
+					message: 'sunrise/sunset actions require hour to be 0.',
+				})
+			}
+			if (value.minute < -55 || value.minute > 55 || value.minute % 5 !== 0) {
+				context.addIssue({
+					code: 'custom',
+					path: ['minute'],
+					message:
+						'sunrise/sunset actions require minute offset -55..55 divisible by 5.',
+				})
+			}
+		})
+
+	const jellyfishScheduleTimeoutSchema = {
+		timeoutMs: z
+			.number()
+			.int()
+			.min(250)
+			.max(30_000)
+			.optional()
+			.describe('Optional command timeout in milliseconds.'),
+	}
+
+	const jellyfishDailyScheduleSchema = buildToolInputSchema({
+		...jellyfishScheduleTimeoutSchema,
+	})
+
+	const jellyfishSetDailyScheduleSchema = buildToolInputSchema({
+		events: z
+			.array(
+				z.object({
+					label: z.string().optional().describe('Optional event label.'),
+					days: z
+						.array(z.enum(['M', 'T', 'W', 'TH', 'F', 'SA', 'S']))
+						.describe(
+							'Daily schedule weekdays. Use M, T, W, TH, F, SA, and S.',
+						),
+					actions: z.array(jellyfishScheduleActionSchema),
+				}),
+			)
+			.describe(
+				'Complete replacement event list for the JellyFish Daily Schedule.',
+			),
+		...jellyfishScheduleTimeoutSchema,
+	})
+
+	const jellyfishCalendarScheduleSchema = buildToolInputSchema({
+		...jellyfishScheduleTimeoutSchema,
+	})
+
+	const jellyfishSetCalendarScheduleSchema = buildToolInputSchema({
+		events: z
+			.array(
+				z.object({
+					label: z.string().optional().describe('Optional event label.'),
+					days: z
+						.array(z.string().regex(/^\d{8}$/))
+						.describe(
+							'Calendar schedule dates in YYYYMMDD form. JellyFish public docs describe these as annual entries despite including a year.',
+						),
+					actions: z.array(jellyfishScheduleActionSchema),
+				}),
+			)
+			.describe(
+				'Complete replacement event list for the JellyFish Calendar Schedule.',
+			),
+		...jellyfishScheduleTimeoutSchema,
+	})
+
 	registerTool(
 		{
 			name: 'jellyfish_scan_controllers',
@@ -643,6 +770,106 @@ export function createHomeConnectorMcpServer(input: {
 			})
 			return structuredTextResult(
 				`Ran JellyFish pattern on ${result.zoneNames.length} zone(s).`,
+				result,
+			)
+		},
+	)
+
+	registerTool(
+		{
+			name: 'jellyfish_get_daily_schedule',
+			title: 'Get JellyFish Daily Schedule',
+			description:
+				'Read the JellyFish controller Daily Schedule events. Use this before changing a schedule so workflows can preserve events they want to keep, such as Daily Accent entries.',
+			inputSchema: jellyfishDailyScheduleSchema.inputSchema,
+			sdkInputSchema: jellyfishDailyScheduleSchema.sdkInputSchema,
+			annotations: {
+				readOnlyHint: true,
+				idempotentHint: true,
+			},
+		},
+		async (args) => {
+			const result = await jellyfish.getDailySchedule({
+				timeoutMs:
+					args['timeoutMs'] == null ? undefined : Number(args['timeoutMs']),
+			})
+			return structuredTextResult(
+				`Loaded ${result.events.length} JellyFish daily schedule event(s).`,
+				result,
+			)
+		},
+	)
+
+	registerTool(
+		{
+			name: 'jellyfish_set_daily_schedule',
+			title: 'Set JellyFish Daily Schedule',
+			description:
+				'Replace the entire JellyFish Daily Schedule event list. Read the current daily schedule first, preserve every event that should remain, then send the complete desired events array. Validates RUN/STOP actions, time/sunrise/sunset bounds, daily day codes, and known zone names.',
+			inputSchema: jellyfishSetDailyScheduleSchema.inputSchema,
+			sdkInputSchema: jellyfishSetDailyScheduleSchema.sdkInputSchema,
+			annotations: {
+				destructiveHint: true,
+			},
+		},
+		async (args) => {
+			const result = await jellyfish.setDailySchedule({
+				events: args['events'],
+				timeoutMs:
+					args['timeoutMs'] == null ? undefined : Number(args['timeoutMs']),
+			})
+			return structuredTextResult(
+				`Updated JellyFish daily schedule to ${result.events.length} event(s).`,
+				result,
+			)
+		},
+	)
+
+	registerTool(
+		{
+			name: 'jellyfish_get_calendar_schedule',
+			title: 'Get JellyFish Calendar Schedule',
+			description:
+				'Read the JellyFish controller Calendar Schedule events. Calendar days are YYYYMMDD strings, but JellyFish public docs describe them as annual entries, so verify behavior before using them for one-off restoration.',
+			inputSchema: jellyfishCalendarScheduleSchema.inputSchema,
+			sdkInputSchema: jellyfishCalendarScheduleSchema.sdkInputSchema,
+			annotations: {
+				readOnlyHint: true,
+				idempotentHint: true,
+			},
+		},
+		async (args) => {
+			const result = await jellyfish.getCalendarSchedule({
+				timeoutMs:
+					args['timeoutMs'] == null ? undefined : Number(args['timeoutMs']),
+			})
+			return structuredTextResult(
+				`Loaded ${result.events.length} JellyFish calendar schedule event(s).`,
+				result,
+			)
+		},
+	)
+
+	registerTool(
+		{
+			name: 'jellyfish_set_calendar_schedule',
+			title: 'Set JellyFish Calendar Schedule',
+			description:
+				'Replace the entire JellyFish Calendar Schedule event list. Read the current calendar schedule first and send the complete desired list. Calendar days must be YYYYMMDD strings; JellyFish public docs describe these entries as annual, so do not assume this is a one-off restore mechanism without verification.',
+			inputSchema: jellyfishSetCalendarScheduleSchema.inputSchema,
+			sdkInputSchema: jellyfishSetCalendarScheduleSchema.sdkInputSchema,
+			annotations: {
+				destructiveHint: true,
+			},
+		},
+		async (args) => {
+			const result = await jellyfish.setCalendarSchedule({
+				events: args['events'],
+				timeoutMs:
+					args['timeoutMs'] == null ? undefined : Number(args['timeoutMs']),
+			})
+			return structuredTextResult(
+				`Updated JellyFish calendar schedule to ${result.events.length} event(s).`,
 				result,
 			)
 		},

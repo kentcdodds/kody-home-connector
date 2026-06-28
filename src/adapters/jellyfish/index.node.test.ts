@@ -113,3 +113,204 @@ test('jellyfish runPattern defaults to all zones when zoneNames are omitted', as
 		storage.close()
 	}
 })
+
+test('jellyfish schedule methods read and replace daily and calendar schedules', async () => {
+	const config = createConfig()
+	const state = createAppState()
+	const storage = createHomeConnectorStorage(config)
+	const jellyfish = createJellyfishAdapter({
+		config,
+		state,
+		storage,
+	})
+
+	try {
+		const daily = await jellyfish.getDailySchedule()
+		expect(daily).toMatchObject({
+			scheduleType: 'daily',
+			controller: {
+				hostname: 'JellyFish-F348.local',
+			},
+			events: [
+				{
+					label: 'Daily Accent',
+					days: ['M', 'T', 'W', 'TH', 'F', 'SA', 'S'],
+				},
+			],
+		})
+
+		const updatedDaily = await jellyfish.setDailySchedule({
+			events: [
+				{
+					label: 'Birthday celebration',
+					days: ['S'],
+					actions: [
+						{
+							type: 'RUN',
+							startFrom: 'time',
+							hour: 18,
+							minute: 30,
+							patternFile: 'Colors/Blue',
+							zones: ['Zone'],
+						},
+					],
+				},
+			],
+		})
+		expect(updatedDaily).toMatchObject({
+			scheduleType: 'daily',
+			availableZones: [
+				{
+					name: 'Zone',
+				},
+			],
+			events: [
+				{
+					label: 'Birthday celebration',
+					days: ['S'],
+					actions: [
+						{
+							startFrom: 'time',
+							hour: 18,
+							minute: 30,
+						},
+					],
+				},
+			],
+		})
+
+		const updatedCalendar = await jellyfish.setCalendarSchedule({
+			events: [
+				{
+					label: 'Brooke birthday',
+					days: ['20260628'],
+					actions: [
+						{
+							type: 'RUN',
+							startFrom: 'sunset',
+							hour: 0,
+							minute: -5,
+							patternFile: 'Christmas/Christmas Tree',
+							zones: ['Zone'],
+						},
+					],
+				},
+			],
+		})
+		expect(updatedCalendar).toMatchObject({
+			scheduleType: 'calendar',
+			events: [
+				{
+					label: 'Brooke birthday',
+					days: ['20260628'],
+					actions: [
+						{
+							startFrom: 'sunset',
+							hour: 0,
+							minute: -5,
+						},
+					],
+				},
+			],
+		})
+	} finally {
+		storage.close()
+	}
+})
+
+test('jellyfish schedule writes validate timing, days, and known zones', async () => {
+	const config = createConfig()
+	const state = createAppState()
+	const storage = createHomeConnectorStorage(config)
+	const jellyfish = createJellyfishAdapter({
+		config,
+		state,
+		storage,
+	})
+
+	try {
+		await expect(
+			jellyfish.setDailySchedule({
+				events: [
+					{
+						days: ['MO'],
+						actions: [
+							{
+								type: 'RUN',
+								startFrom: 'time',
+								hour: 18,
+								minute: 0,
+								patternFile: 'Colors/Blue',
+								zones: ['Zone'],
+							},
+						],
+					},
+				],
+			}),
+		).rejects.toThrow('Invalid JellyFish daily schedule day')
+
+		await expect(
+			jellyfish.setDailySchedule({
+				events: [
+					{
+						days: ['S'],
+						actions: [
+							{
+								type: 'RUN',
+								startFrom: 'sunrise',
+								hour: 0,
+								minute: 7,
+								patternFile: 'Colors/Blue',
+								zones: ['Zone'],
+							},
+						],
+					},
+				],
+			}),
+		).rejects.toThrow(
+			'JellyFish schedule sunrise/sunset actions require minute offset',
+		)
+
+		await expect(
+			jellyfish.setDailySchedule({
+				events: [
+					{
+						days: ['S'],
+						actions: [
+							{
+								type: 'RUN',
+								startFrom: 'time',
+								hour: 18,
+								minute: 0,
+								patternFile: 'Colors/Blue',
+								zones: ['Unknown Zone'],
+							},
+						],
+					},
+				],
+			}),
+		).rejects.toThrow('Unknown JellyFish zone(s): Unknown Zone')
+
+		await expect(
+			jellyfish.setCalendarSchedule({
+				events: [
+					{
+						days: ['2026-06-28'],
+						actions: [
+							{
+								type: 'RUN',
+								startFrom: 'time',
+								hour: 18,
+								minute: 0,
+								patternFile: 'Colors/Blue',
+								zones: ['Zone'],
+							},
+						],
+					},
+				],
+			}),
+		).rejects.toThrow('Invalid JellyFish calendar schedule day')
+	} finally {
+		storage.close()
+	}
+})
