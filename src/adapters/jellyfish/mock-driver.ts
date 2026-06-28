@@ -1,6 +1,5 @@
 import {
 	type JellyfishDiscoveredController,
-	type JellyfishScheduleEvent,
 	jellyfishDefaultPort,
 } from './types.ts'
 
@@ -27,8 +26,8 @@ const mockPatternFileData = {
 }
 
 let mockLastRunPattern: Record<string, unknown> | null = null
-let mockDailySchedule: Array<JellyfishScheduleEvent> = []
-let mockCalendarSchedule: Array<JellyfishScheduleEvent> = []
+let mockDailySchedule: Array<Record<string, unknown>> = []
+let mockCalendarSchedule: Array<Record<string, unknown>> = []
 
 export function resetMockJellyfishState() {
 	mockLastRunPattern = null
@@ -64,6 +63,14 @@ export function resetMockJellyfishState() {
 			],
 		},
 	]
+}
+
+export function setMockJellyfishScheduleState(input: {
+	daily?: Array<Record<string, unknown>>
+	calendar?: Array<Record<string, unknown>>
+}) {
+	if (input.daily) mockDailySchedule = structuredClone(input.daily)
+	if (input.calendar) mockCalendarSchedule = structuredClone(input.calendar)
 }
 
 export function isMockJellyfishHost(host: string) {
@@ -151,7 +158,7 @@ function buildPatternFileDataResponse(folder: string, name: string) {
 
 function buildScheduleResponse(
 	key: 'scheduleDaily' | 'scheduleCalendar',
-	events: Array<JellyfishScheduleEvent>,
+	events: Array<Record<string, unknown>>,
 ) {
 	return {
 		cmd: 'fromCtlr',
@@ -200,15 +207,15 @@ export async function sendMockJellyfishCommand(
 		const schedule = command['schedule']
 		const events = command['events']
 		if (schedule === 'daily' && Array.isArray(events)) {
-			mockDailySchedule = structuredClone(
-				events,
-			) as Array<JellyfishScheduleEvent>
+			mockDailySchedule = structuredClone(events) as Array<
+				Record<string, unknown>
+			>
 			return buildScheduleResponse('scheduleDaily', mockDailySchedule)
 		}
 		if (schedule === 'calendar' && Array.isArray(events)) {
-			mockCalendarSchedule = structuredClone(
-				events,
-			) as Array<JellyfishScheduleEvent>
+			mockCalendarSchedule = structuredClone(events) as Array<
+				Record<string, unknown>
+			>
 			return buildScheduleResponse('scheduleCalendar', mockCalendarSchedule)
 		}
 	}

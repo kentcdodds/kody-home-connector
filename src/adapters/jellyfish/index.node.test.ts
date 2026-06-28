@@ -4,6 +4,10 @@ import { loadHomeConnectorConfig } from '../../config.ts'
 import { createAppState } from '../../state.ts'
 import { createHomeConnectorStorage } from '../../storage/index.ts'
 import { createJellyfishAdapter } from './index.ts'
+import {
+	resetMockJellyfishState,
+	setMockJellyfishScheduleState,
+} from './mock-driver.ts'
 
 function createConfig() {
 	process.env.MOCKS = 'true'
@@ -214,6 +218,56 @@ test('jellyfish schedule methods read and replace daily and calendar schedules',
 			],
 		})
 	} finally {
+		storage.close()
+	}
+})
+
+test('jellyfish schedule reads preserve existing controller payloads', async () => {
+	setMockJellyfishScheduleState({
+		daily: [
+			{
+				label: 'Controller legacy stop',
+				days: ['Everyday'],
+				actions: [
+					{
+						type: 'STOP',
+						startFrom: 'sunrise',
+						hour: 1,
+						minute: 7,
+						zones: ['Zone'],
+					},
+				],
+			},
+		],
+	})
+	const config = createConfig()
+	const state = createAppState()
+	const storage = createHomeConnectorStorage(config)
+	const jellyfish = createJellyfishAdapter({
+		config,
+		state,
+		storage,
+	})
+
+	try {
+		const daily = await jellyfish.getDailySchedule()
+		expect(daily.events).toEqual([
+			{
+				label: 'Controller legacy stop',
+				days: ['Everyday'],
+				actions: [
+					{
+						type: 'STOP',
+						startFrom: 'sunrise',
+						hour: 1,
+						minute: 7,
+						zones: ['Zone'],
+					},
+				],
+			},
+		])
+	} finally {
+		resetMockJellyfishState()
 		storage.close()
 	}
 })

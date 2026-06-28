@@ -396,7 +396,14 @@ function parseScheduleResponse(
 			`JellyFish controller did not return a valid ${key} payload.`,
 		)
 	}
-	return normalizeScheduleEvents(events, scheduleType)
+	return events.map((event, index) => {
+		if (!isRecord(event)) {
+			throw new Error(
+				`JellyFish controller returned invalid ${key} event ${String(index)}.`,
+			)
+		}
+		return structuredClone(event) as Record<string, unknown>
+	})
 }
 
 function requireSingleController(
