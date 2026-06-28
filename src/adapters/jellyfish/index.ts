@@ -10,6 +10,8 @@ import {
 	upsertDiscoveredJellyfishControllers,
 } from './repository.ts'
 import {
+	isJellyfishCalendarScheduleDay,
+	jellyfishDailyScheduleDays,
 	type JellyfishPattern,
 	type JellyfishPatternData,
 	type JellyfishPersistedController,
@@ -17,14 +19,13 @@ import {
 	type JellyfishScheduleActionStartFrom,
 	type JellyfishScheduleActionType,
 	type JellyfishScheduleEvent,
+	jellyfishScheduleActionStartFromValues,
+	jellyfishScheduleActionTypes,
 	type JellyfishScheduleType,
 	type JellyfishZone,
 } from './types.ts'
 
 const defaultCommandTimeoutMs = 5_000
-const dailyScheduleDays = ['M', 'T', 'W', 'TH', 'F', 'SA', 'S'] as const
-const actionTypes = ['RUN', 'STOP'] as const
-const actionStartFromValues = ['sunrise', 'sunset', 'time'] as const
 
 function controllerLabel(controller: JellyfishPersistedController) {
 	return `${controller.name} (${controller.hostname})`
@@ -204,21 +205,21 @@ function normalizeScheduleDays(
 ) {
 	const days = normalizeStringArray(input, 'event days')
 	if (scheduleType === 'daily') {
-		const validDays = new Set<string>(dailyScheduleDays)
+		const validDays = new Set<string>(jellyfishDailyScheduleDays)
 		const normalizedDays = days.map((day) => day.toUpperCase())
 		const invalidDays = normalizedDays.filter((day) => !validDays.has(day))
 		if (invalidDays.length > 0) {
 			throw new Error(
-				`Invalid JellyFish daily schedule day(s): ${invalidDays.join(', ')}. Expected one of ${dailyScheduleDays.join(', ')}.`,
+				`Invalid JellyFish daily schedule day(s): ${invalidDays.join(', ')}. Expected one of ${jellyfishDailyScheduleDays.join(', ')}.`,
 			)
 		}
 		return normalizedDays
 	}
 
-	const invalidDays = days.filter((day) => !/^\d{8}$/.test(day))
+	const invalidDays = days.filter((day) => !isJellyfishCalendarScheduleDay(day))
 	if (invalidDays.length > 0) {
 		throw new Error(
-			`Invalid JellyFish calendar schedule day(s): ${invalidDays.join(', ')}. Expected YYYYMMDD strings.`,
+			`Invalid JellyFish calendar schedule day(s): ${invalidDays.join(', ')}. Expected valid YYYYMMDD strings.`,
 		)
 	}
 	return days
@@ -231,7 +232,11 @@ function normalizeScheduleActionType(
 		throw new Error('JellyFish schedule action type must be a string.')
 	}
 	const normalized = value.trim().toUpperCase()
-	if (!actionTypes.includes(normalized as JellyfishScheduleActionType)) {
+	if (
+		!jellyfishScheduleActionTypes.includes(
+			normalized as JellyfishScheduleActionType,
+		)
+	) {
 		throw new Error(
 			`Invalid JellyFish schedule action type "${value}". Expected RUN or STOP.`,
 		)
@@ -247,7 +252,7 @@ function normalizeScheduleActionStartFrom(
 	}
 	const normalized = value.trim().toLowerCase()
 	if (
-		!actionStartFromValues.includes(
+		!jellyfishScheduleActionStartFromValues.includes(
 			normalized as JellyfishScheduleActionStartFrom,
 		)
 	) {
@@ -298,22 +303,24 @@ function normalizeScheduleAction(input: unknown, path: string) {
 	if (!isRecord(input)) {
 		throw new Error(`JellyFish schedule ${path} must be an object.`)
 	}
+	const patternFileInput = input['patternFile']
+	if (patternFileInput != null && typeof patternFileInput !== 'string') {
+		throw new Error('JellyFish schedule action patternFile must be a string.')
+	}
+	const patternFile =
+		typeof patternFileInput === 'string' && patternFileInput.trim()
+			? patternFileInput.trim()
+			: undefined
 	const action: JellyfishScheduleAction = {
 		type: normalizeScheduleActionType(input['type']),
 		startFrom: normalizeScheduleActionStartFrom(input['startFrom']),
 		hour: normalizeScheduleInteger(input['hour'], 'hour'),
 		minute: normalizeScheduleInteger(input['minute'], 'minute'),
-		patternFile:
-			typeof input['patternFile'] === 'string'
-				? input['patternFile'].trim()
-				: '',
+		...(patternFile ? { patternFile } : {}),
 		zones: normalizeStringArray(input['zones'], `${path}.zones`),
 	}
 	if (action.type === 'RUN' && !action.patternFile) {
 		throw new Error('JellyFish schedule RUN actions require patternFile.')
-	}
-	if (typeof input['patternFile'] !== 'string') {
-		throw new Error('JellyFish schedule action patternFile must be a string.')
 	}
 	validateScheduleActionTiming(action)
 	return action
@@ -512,10 +519,14 @@ export function createJellyfishAdapter(input: {
 		controller: JellyfishPersistedController
 		command: Record<string, unknown>
 		timeoutMs?: number
+		retryOnControllerChange?: boolean
 	}) {
 		try {
 			return await sendWithResolvedController(input)
 		} catch (error) {
+			if (input.retryOnControllerChange === false) {
+				throw error
+			}
 			const rescanned = await scanAndPersist()
 			if (rescanned.controllers.length !== 1) {
 				throw error
@@ -562,6 +573,7 @@ export function createJellyfishAdapter(input: {
 		controller: JellyfishPersistedController
 		scheduleType: JellyfishScheduleType
 		timeoutMs?: number
+		retryOnControllerChange?: boolean
 	}) {
 		const result = await executeResolvedCommand({
 			controller: input.controller,
@@ -570,6 +582,7 @@ export function createJellyfishAdapter(input: {
 				get: [[getScheduleResponseKey(input.scheduleType)]],
 			},
 			timeoutMs: input.timeoutMs,
+			retryOnControllerChange: input.retryOnControllerChange,
 		})
 		return {
 			controller: result.controller,
@@ -602,18 +615,38 @@ export function createJellyfishAdapter(input: {
 				events,
 			},
 			timeoutMs: input.timeoutMs,
+			retryOnControllerChange: false,
 		})
-		const current = await getScheduleForController({
-			controller: result.controller,
-			scheduleType: input.scheduleType,
-			timeoutMs: input.timeoutMs,
-		})
+		let currentController = result.controller
+		let currentEvents: Array<Record<string, unknown>>
+		let scheduleRefreshError: string | null = null
+		try {
+			currentEvents = parseScheduleResponse(result.response, input.scheduleType)
+		} catch {
+			try {
+				const current = await getScheduleForController({
+					controller: result.controller,
+					scheduleType: input.scheduleType,
+					timeoutMs: input.timeoutMs,
+					retryOnControllerChange: false,
+				})
+				currentController = current.controller
+				currentEvents = current.events
+			} catch (error) {
+				scheduleRefreshError =
+					error instanceof Error ? error.message : String(error)
+				currentEvents = events.map(
+					(event) => structuredClone(event) as Record<string, unknown>,
+				)
+			}
+		}
 		return {
-			controller: current.controller,
-			scheduleType: current.scheduleType,
-			events: current.events,
+			controller: currentController,
+			scheduleType: input.scheduleType,
+			events: currentEvents,
 			availableZones: zoneResult.zones,
 			setResponse: result.response,
+			scheduleRefreshError,
 		}
 	}
 

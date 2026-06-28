@@ -283,6 +283,37 @@ test('jellyfish schedule writes validate timing, days, and known zones', async (
 	})
 
 	try {
+		const stopOnlySchedule = await jellyfish.setDailySchedule({
+			events: [
+				{
+					days: ['S'],
+					actions: [
+						{
+							type: 'STOP',
+							startFrom: 'time',
+							hour: 22,
+							minute: 0,
+							zones: ['Zone'],
+						},
+					],
+				},
+			],
+		})
+		expect(stopOnlySchedule.events).toEqual([
+			{
+				days: ['S'],
+				actions: [
+					{
+						type: 'STOP',
+						startFrom: 'time',
+						hour: 22,
+						minute: 0,
+						zones: ['Zone'],
+					},
+				],
+			},
+		])
+
 		await expect(
 			jellyfish.setDailySchedule({
 				events: [
@@ -350,6 +381,26 @@ test('jellyfish schedule writes validate timing, days, and known zones', async (
 				events: [
 					{
 						days: ['2026-06-28'],
+						actions: [
+							{
+								type: 'RUN',
+								startFrom: 'time',
+								hour: 18,
+								minute: 0,
+								patternFile: 'Colors/Blue',
+								zones: ['Zone'],
+							},
+						],
+					},
+				],
+			}),
+		).rejects.toThrow('Invalid JellyFish calendar schedule day')
+
+		await expect(
+			jellyfish.setCalendarSchedule({
+				events: [
+					{
+						days: ['20250231'],
 						actions: [
 							{
 								type: 'RUN',

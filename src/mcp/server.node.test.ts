@@ -744,6 +744,15 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 		expect(jellyfishSetDailyTool?.description).toContain(
 			'Replace the entire JellyFish Daily Schedule',
 		)
+		const jellyfishSetCalendarTool = tools.find(
+			(tool) => tool.name === 'jellyfish_set_calendar_schedule',
+		)
+		expect(jellyfishSetCalendarTool?.annotations?.['destructiveHint']).toBe(
+			true,
+		)
+		expect(jellyfishSetCalendarTool?.description).toContain(
+			'Replace the entire JellyFish Calendar Schedule',
+		)
 		const jellyfishDailySchedule = await mcp.callTool(
 			'jellyfish_get_daily_schedule',
 		)

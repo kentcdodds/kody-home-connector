@@ -8,6 +8,12 @@ import { type createBondAdapter } from '../adapters/bond/index.ts'
 import { type createIslandRouterApiAdapter } from '../adapters/island-router-api/index.ts'
 import { type createIslandRouterAdapter } from '../adapters/island-router/index.ts'
 import { type createJellyfishAdapter } from '../adapters/jellyfish/index.ts'
+import {
+	isJellyfishCalendarScheduleDay,
+	jellyfishDailyScheduleDays,
+	jellyfishScheduleActionStartFromValues,
+	jellyfishScheduleActionTypes,
+} from '../adapters/jellyfish/types.ts'
 import { type createKasaAdapter } from '../adapters/kasa/index.ts'
 import { isLutronProcessorNotFoundError } from '../adapters/lutron/errors.ts'
 import { type createLutronAdapter } from '../adapters/lutron/index.ts'
@@ -471,9 +477,11 @@ export function createHomeConnectorMcpServer(input: {
 
 	const jellyfishScheduleActionSchema = z
 		.object({
-			type: z.enum(['RUN', 'STOP']).describe('JellyFish schedule action type.'),
+			type: z
+				.enum(jellyfishScheduleActionTypes)
+				.describe('JellyFish schedule action type.'),
 			startFrom: z
-				.enum(['sunrise', 'sunset', 'time'])
+				.enum(jellyfishScheduleActionStartFromValues)
 				.describe('Timing anchor for this schedule action.'),
 			hour: z
 				.number()
@@ -489,6 +497,7 @@ export function createHomeConnectorMcpServer(input: {
 				),
 			patternFile: z
 				.string()
+				.optional()
 				.describe(
 					'Saved JellyFish pattern file, usually "<folder>/<pattern name>". RUN actions require a non-empty value.',
 				),
@@ -499,7 +508,10 @@ export function createHomeConnectorMcpServer(input: {
 				),
 		})
 		.superRefine((value, context) => {
-			if (value.type === 'RUN' && value.patternFile.trim().length === 0) {
+			if (
+				value.type === 'RUN' &&
+				(value.patternFile?.trim().length ?? 0) === 0
+			) {
 				context.addIssue({
 					code: 'custom',
 					path: ['patternFile'],
@@ -560,7 +572,7 @@ export function createHomeConnectorMcpServer(input: {
 				z.object({
 					label: z.string().optional().describe('Optional event label.'),
 					days: z
-						.array(z.enum(['M', 'T', 'W', 'TH', 'F', 'SA', 'S']))
+						.array(z.enum(jellyfishDailyScheduleDays))
 						.describe(
 							'Daily schedule weekdays. Use M, T, W, TH, F, SA, and S.',
 						),
@@ -583,9 +595,13 @@ export function createHomeConnectorMcpServer(input: {
 				z.object({
 					label: z.string().optional().describe('Optional event label.'),
 					days: z
-						.array(z.string().regex(/^\d{8}$/))
+						.array(
+							z.string().refine(isJellyfishCalendarScheduleDay, {
+								message: 'Expected a valid YYYYMMDD calendar date.',
+							}),
+						)
 						.describe(
-							'Calendar schedule dates in YYYYMMDD form. JellyFish public docs describe these as annual entries despite including a year.',
+							'Valid calendar schedule dates in YYYYMMDD form. JellyFish public docs describe these as annual entries despite including a year.',
 						),
 					actions: z.array(jellyfishScheduleActionSchema),
 				}),
