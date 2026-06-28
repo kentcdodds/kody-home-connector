@@ -10,9 +10,18 @@ import {
 	upsertDiscoveredJellyfishControllers,
 } from './repository.ts'
 import {
+	isJellyfishCalendarScheduleDay,
+	jellyfishDailyScheduleDays,
 	type JellyfishPattern,
 	type JellyfishPatternData,
 	type JellyfishPersistedController,
+	type JellyfishScheduleAction,
+	type JellyfishScheduleActionStartFrom,
+	type JellyfishScheduleActionType,
+	type JellyfishScheduleEvent,
+	jellyfishScheduleActionStartFromValues,
+	jellyfishScheduleActionTypes,
+	type JellyfishScheduleType,
 	type JellyfishZone,
 } from './types.ts'
 
@@ -153,6 +162,257 @@ function parsePatternFileDataResponse(
 	}
 }
 
+function getScheduleResponseKey(scheduleType: JellyfishScheduleType) {
+	switch (scheduleType) {
+		case 'daily':
+			return 'scheduleDaily'
+		case 'calendar':
+			return 'scheduleCalendar'
+		default: {
+			const exhaustiveCheck: never = scheduleType
+			return exhaustiveCheck
+		}
+	}
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function normalizeStringArray(input: unknown, path: string) {
+	if (!Array.isArray(input)) {
+		throw new Error(`JellyFish schedule ${path} must be an array.`)
+	}
+	return input.map((value, index) => {
+		if (typeof value !== 'string') {
+			throw new Error(
+				`JellyFish schedule ${path}[${String(index)}] must be a string.`,
+			)
+		}
+		const normalized = value.trim()
+		if (!normalized) {
+			throw new Error(
+				`JellyFish schedule ${path}[${String(index)}] must not be empty.`,
+			)
+		}
+		return normalized
+	})
+}
+
+function normalizeScheduleDays(
+	input: unknown,
+	scheduleType: JellyfishScheduleType,
+) {
+	const days = normalizeStringArray(input, 'event days')
+	if (scheduleType === 'daily') {
+		const validDays = new Set<string>(jellyfishDailyScheduleDays)
+		const normalizedDays = days.map((day) => day.toUpperCase())
+		const invalidDays = normalizedDays.filter((day) => !validDays.has(day))
+		if (invalidDays.length > 0) {
+			throw new Error(
+				`Invalid JellyFish daily schedule day(s): ${invalidDays.join(', ')}. Expected one of ${jellyfishDailyScheduleDays.join(', ')}.`,
+			)
+		}
+		return normalizedDays
+	}
+
+	const invalidDays = days.filter((day) => !isJellyfishCalendarScheduleDay(day))
+	if (invalidDays.length > 0) {
+		throw new Error(
+			`Invalid JellyFish calendar schedule day(s): ${invalidDays.join(', ')}. Expected valid YYYYMMDD strings.`,
+		)
+	}
+	return days
+}
+
+function normalizeScheduleActionType(
+	value: unknown,
+): JellyfishScheduleActionType {
+	if (typeof value !== 'string') {
+		throw new Error('JellyFish schedule action type must be a string.')
+	}
+	const normalized = value.trim().toUpperCase()
+	if (
+		!jellyfishScheduleActionTypes.includes(
+			normalized as JellyfishScheduleActionType,
+		)
+	) {
+		throw new Error(
+			`Invalid JellyFish schedule action type "${value}". Expected RUN or STOP.`,
+		)
+	}
+	return normalized as JellyfishScheduleActionType
+}
+
+function normalizeScheduleActionStartFrom(
+	value: unknown,
+): JellyfishScheduleActionStartFrom {
+	if (typeof value !== 'string') {
+		throw new Error('JellyFish schedule action startFrom must be a string.')
+	}
+	const normalized = value.trim().toLowerCase()
+	if (
+		!jellyfishScheduleActionStartFromValues.includes(
+			normalized as JellyfishScheduleActionStartFrom,
+		)
+	) {
+		throw new Error(
+			`Invalid JellyFish schedule action startFrom "${value}". Expected sunrise, sunset, or time.`,
+		)
+	}
+	return normalized as JellyfishScheduleActionStartFrom
+}
+
+function normalizeScheduleInteger(value: unknown, fieldName: string) {
+	if (typeof value !== 'number' || !Number.isInteger(value)) {
+		throw new Error(
+			`JellyFish schedule action ${fieldName} must be an integer.`,
+		)
+	}
+	return value
+}
+
+function validateScheduleActionTiming(action: JellyfishScheduleAction) {
+	if (action.startFrom === 'time') {
+		if (action.hour < 0 || action.hour > 23) {
+			throw new Error(
+				'JellyFish schedule time actions require hour between 0 and 23.',
+			)
+		}
+		if (action.minute < 0 || action.minute > 59) {
+			throw new Error(
+				'JellyFish schedule time actions require minute between 0 and 59.',
+			)
+		}
+		return
+	}
+
+	if (action.hour !== 0) {
+		throw new Error(
+			'JellyFish schedule sunrise/sunset actions require hour to be 0.',
+		)
+	}
+	if (action.minute < -55 || action.minute > 55 || action.minute % 5 !== 0) {
+		throw new Error(
+			'JellyFish schedule sunrise/sunset actions require minute offset between -55 and 55, divisible by 5.',
+		)
+	}
+}
+
+function normalizeScheduleAction(input: unknown, path: string) {
+	if (!isRecord(input)) {
+		throw new Error(`JellyFish schedule ${path} must be an object.`)
+	}
+	const patternFileInput = input['patternFile']
+	if (patternFileInput != null && typeof patternFileInput !== 'string') {
+		throw new Error('JellyFish schedule action patternFile must be a string.')
+	}
+	const patternFile =
+		typeof patternFileInput === 'string' && patternFileInput.trim()
+			? patternFileInput.trim()
+			: undefined
+	const action: JellyfishScheduleAction = {
+		type: normalizeScheduleActionType(input['type']),
+		startFrom: normalizeScheduleActionStartFrom(input['startFrom']),
+		hour: normalizeScheduleInteger(input['hour'], 'hour'),
+		minute: normalizeScheduleInteger(input['minute'], 'minute'),
+		...(patternFile ? { patternFile } : {}),
+		zones: normalizeStringArray(input['zones'], `${path}.zones`),
+	}
+	if (action.type === 'RUN' && !action.patternFile) {
+		throw new Error('JellyFish schedule RUN actions require patternFile.')
+	}
+	validateScheduleActionTiming(action)
+	return action
+}
+
+function normalizeScheduleEvent(
+	input: unknown,
+	scheduleType: JellyfishScheduleType,
+	index: number,
+) {
+	if (!isRecord(input)) {
+		throw new Error(
+			`JellyFish ${scheduleType} schedule event ${String(index)} must be an object.`,
+		)
+	}
+	const label =
+		typeof input['label'] === 'string' && input['label'].trim()
+			? input['label'].trim()
+			: undefined
+	const actionsInput = input['actions']
+	if (!Array.isArray(actionsInput)) {
+		throw new Error(
+			`JellyFish ${scheduleType} schedule event ${String(index)} actions must be an array.`,
+		)
+	}
+	const event: JellyfishScheduleEvent = {
+		...(label ? { label } : {}),
+		days: normalizeScheduleDays(input['days'], scheduleType),
+		actions: actionsInput.map((action, actionIndex) =>
+			normalizeScheduleAction(
+				action,
+				`event ${String(index)} action ${String(actionIndex)}`,
+			),
+		),
+	}
+	return event
+}
+
+function normalizeScheduleEvents(
+	events: unknown,
+	scheduleType: JellyfishScheduleType,
+) {
+	if (!Array.isArray(events)) {
+		throw new Error(
+			`JellyFish ${scheduleType} schedule events must be an array.`,
+		)
+	}
+	return events.map((event, index) =>
+		normalizeScheduleEvent(event, scheduleType, index),
+	)
+}
+
+function validateScheduleZones(input: {
+	events: Array<JellyfishScheduleEvent>
+	availableZoneNames: Array<string>
+}) {
+	const available = new Set(input.availableZoneNames)
+	const requested = new Set<string>()
+	for (const event of input.events) {
+		for (const action of event.actions) {
+			for (const zone of action.zones) requested.add(zone)
+		}
+	}
+	const missing = [...requested].filter((zone) => !available.has(zone))
+	if (missing.length > 0) {
+		throw new Error(
+			`Unknown JellyFish zone(s): ${missing.join(', ')}. Known zones: ${input.availableZoneNames.join(', ')}.`,
+		)
+	}
+}
+
+function parseScheduleResponse(
+	response: Record<string, unknown>,
+	scheduleType: JellyfishScheduleType,
+) {
+	const key = getScheduleResponseKey(scheduleType)
+	const events = response[key]
+	if (!Array.isArray(events)) {
+		throw new Error(
+			`JellyFish controller did not return a valid ${key} payload.`,
+		)
+	}
+	return events.map((event, index) => {
+		if (!isRecord(event)) {
+			throw new Error(
+				`JellyFish controller returned invalid ${key} event ${String(index)}.`,
+			)
+		}
+		return structuredClone(event) as Record<string, unknown>
+	})
+}
+
 function requireSingleController(
 	controllers: Array<JellyfishPersistedController>,
 ) {
@@ -259,10 +519,14 @@ export function createJellyfishAdapter(input: {
 		controller: JellyfishPersistedController
 		command: Record<string, unknown>
 		timeoutMs?: number
+		retryOnControllerChange?: boolean
 	}) {
 		try {
 			return await sendWithResolvedController(input)
 		} catch (error) {
+			if (input.retryOnControllerChange === false) {
+				throw error
+			}
 			const rescanned = await scanAndPersist()
 			if (rescanned.controllers.length !== 1) {
 				throw error
@@ -302,6 +566,87 @@ export function createJellyfishAdapter(input: {
 		return {
 			controller: result.controller,
 			zones: parseZonesResponse(result.response),
+		}
+	}
+
+	async function getScheduleForController(input: {
+		controller: JellyfishPersistedController
+		scheduleType: JellyfishScheduleType
+		timeoutMs?: number
+		retryOnControllerChange?: boolean
+	}) {
+		const result = await executeResolvedCommand({
+			controller: input.controller,
+			command: {
+				cmd: 'toCtlrGet',
+				get: [[getScheduleResponseKey(input.scheduleType)]],
+			},
+			timeoutMs: input.timeoutMs,
+			retryOnControllerChange: input.retryOnControllerChange,
+		})
+		return {
+			controller: result.controller,
+			scheduleType: input.scheduleType,
+			events: parseScheduleResponse(result.response, input.scheduleType),
+		}
+	}
+
+	async function setScheduleForController(input: {
+		controller: JellyfishPersistedController
+		scheduleType: JellyfishScheduleType
+		events: unknown
+		timeoutMs?: number
+	}) {
+		const zoneResult = await listZonesForController({
+			controller: input.controller,
+			timeoutMs: input.timeoutMs,
+		})
+		const availableZoneNames = zoneResult.zones.map((zone) => zone.name)
+		const events = normalizeScheduleEvents(input.events, input.scheduleType)
+		validateScheduleZones({
+			events,
+			availableZoneNames,
+		})
+		const result = await executeResolvedCommand({
+			controller: zoneResult.controller,
+			command: {
+				cmd: 'toCtlrSet',
+				schedule: input.scheduleType,
+				events,
+			},
+			timeoutMs: input.timeoutMs,
+			retryOnControllerChange: false,
+		})
+		let currentController = result.controller
+		let currentEvents: Array<Record<string, unknown>>
+		let scheduleRefreshError: string | null = null
+		try {
+			currentEvents = parseScheduleResponse(result.response, input.scheduleType)
+		} catch {
+			try {
+				const current = await getScheduleForController({
+					controller: result.controller,
+					scheduleType: input.scheduleType,
+					timeoutMs: input.timeoutMs,
+					retryOnControllerChange: false,
+				})
+				currentController = current.controller
+				currentEvents = current.events
+			} catch (error) {
+				scheduleRefreshError =
+					error instanceof Error ? error.message : String(error)
+				currentEvents = events.map(
+					(event) => structuredClone(event) as Record<string, unknown>,
+				)
+			}
+		}
+		return {
+			controller: currentController,
+			scheduleType: input.scheduleType,
+			events: currentEvents,
+			availableZones: zoneResult.zones,
+			setResponse: result.response,
+			scheduleRefreshError,
 		}
 	}
 
@@ -389,6 +734,40 @@ export function createJellyfishAdapter(input: {
 				controller: result.controller,
 				pattern: parsePatternFileDataResponse(result.response),
 			}
+		},
+		async getDailySchedule(input?: { timeoutMs?: number }) {
+			const controller = await resolveController()
+			return await getScheduleForController({
+				controller,
+				scheduleType: 'daily',
+				timeoutMs: input?.timeoutMs,
+			})
+		},
+		async setDailySchedule(input: { events: unknown; timeoutMs?: number }) {
+			const controller = await resolveController()
+			return await setScheduleForController({
+				controller,
+				scheduleType: 'daily',
+				events: input.events,
+				timeoutMs: input.timeoutMs,
+			})
+		},
+		async getCalendarSchedule(input?: { timeoutMs?: number }) {
+			const controller = await resolveController()
+			return await getScheduleForController({
+				controller,
+				scheduleType: 'calendar',
+				timeoutMs: input?.timeoutMs,
+			})
+		},
+		async setCalendarSchedule(input: { events: unknown; timeoutMs?: number }) {
+			const controller = await resolveController()
+			return await setScheduleForController({
+				controller,
+				scheduleType: 'calendar',
+				events: input.events,
+				timeoutMs: input.timeoutMs,
+			})
 		},
 		async runPattern(input: {
 			patternPath?: string

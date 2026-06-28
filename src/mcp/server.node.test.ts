@@ -737,6 +737,112 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 				zoneName: ['Zone'],
 			},
 		})
+		const jellyfishSetDailyTool = tools.find(
+			(tool) => tool.name === 'jellyfish_set_daily_schedule',
+		)
+		expect(jellyfishSetDailyTool?.annotations?.['destructiveHint']).toBe(true)
+		expect(jellyfishSetDailyTool?.description).toContain(
+			'Replace the entire JellyFish Daily Schedule',
+		)
+		const jellyfishSetCalendarTool = tools.find(
+			(tool) => tool.name === 'jellyfish_set_calendar_schedule',
+		)
+		expect(jellyfishSetCalendarTool?.annotations?.['destructiveHint']).toBe(
+			true,
+		)
+		expect(jellyfishSetCalendarTool?.description).toContain(
+			'Replace the entire JellyFish Calendar Schedule',
+		)
+		const jellyfishDailySchedule = await mcp.callTool(
+			'jellyfish_get_daily_schedule',
+		)
+		expect(jellyfishDailySchedule.structuredContent).toMatchObject({
+			scheduleType: 'daily',
+			events: expect.arrayContaining([
+				expect.objectContaining({
+					label: 'Daily Accent',
+				}),
+			]),
+		})
+		const jellyfishUpdatedDailySchedule = await mcp.callTool(
+			'jellyfish_set_daily_schedule',
+			{
+				events: [
+					{
+						label: 'Birthday celebration',
+						days: ['S'],
+						actions: [
+							{
+								type: 'RUN',
+								startFrom: 'time',
+								hour: 18,
+								minute: 30,
+								patternFile: 'Colors/Blue',
+								zones: ['Zone'],
+							},
+						],
+					},
+				],
+			},
+		)
+		expect(jellyfishUpdatedDailySchedule.structuredContent).toMatchObject({
+			controller: {
+				hostname: 'JellyFish-F348.local',
+			},
+			scheduleType: 'daily',
+			availableZones: [
+				{
+					name: 'Zone',
+				},
+			],
+			events: [
+				{
+					label: 'Birthday celebration',
+					days: ['S'],
+				},
+			],
+		})
+		const jellyfishCalendarSchedule = await mcp.callTool(
+			'jellyfish_get_calendar_schedule',
+		)
+		expect(jellyfishCalendarSchedule.structuredContent).toMatchObject({
+			scheduleType: 'calendar',
+			events: expect.arrayContaining([
+				expect.objectContaining({
+					days: ['20260628'],
+				}),
+			]),
+		})
+		const jellyfishUpdatedCalendarSchedule = await mcp.callTool(
+			'jellyfish_set_calendar_schedule',
+			{
+				events: [
+					{
+						label: 'Brooke birthday',
+						days: ['20260628'],
+						actions: [
+							{
+								type: 'RUN',
+								startFrom: 'sunset',
+								hour: 0,
+								minute: -5,
+								patternFile: 'Christmas/Christmas Tree',
+								zones: ['Zone'],
+							},
+						],
+					},
+				],
+			},
+		)
+		expect(jellyfishUpdatedCalendarSchedule.structuredContent).toMatchObject({
+			scheduleType: 'calendar',
+			events: [
+				{
+					label: 'Brooke birthday',
+					days: ['20260628'],
+				},
+			],
+		})
 
 		const venstarThermostats = await mcp.callTool('venstar_list_thermostats')
 		expect(venstarThermostats.structuredContent).toMatchObject({

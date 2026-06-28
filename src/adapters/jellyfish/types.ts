@@ -44,6 +44,60 @@ export type JellyfishPatternData = {
 	rawJsonData: string
 }
 
+export const jellyfishDailyScheduleDays = [
+	'M',
+	'T',
+	'W',
+	'TH',
+	'F',
+	'SA',
+	'S',
+] as const
+
+export const jellyfishScheduleActionTypes = ['RUN', 'STOP'] as const
+
+export const jellyfishScheduleActionStartFromValues = [
+	'sunrise',
+	'sunset',
+	'time',
+] as const
+
+export type JellyfishScheduleType = 'daily' | 'calendar'
+
+export type JellyfishScheduleActionType =
+	(typeof jellyfishScheduleActionTypes)[number]
+
+export type JellyfishScheduleActionStartFrom =
+	(typeof jellyfishScheduleActionStartFromValues)[number]
+
+export type JellyfishScheduleAction = {
+	type: JellyfishScheduleActionType
+	startFrom: JellyfishScheduleActionStartFrom
+	hour: number
+	minute: number
+	patternFile?: string
+	zones: Array<string>
+}
+
+export type JellyfishScheduleEvent = {
+	label?: string
+	days: Array<string>
+	actions: Array<JellyfishScheduleAction>
+}
+
+export function isJellyfishCalendarScheduleDay(day: string) {
+	if (!/^\d{8}$/.test(day)) return false
+	const year = Number(day.slice(0, 4))
+	const month = Number(day.slice(4, 6))
+	const dayOfMonth = Number(day.slice(6, 8))
+	const date = new Date(Date.UTC(year, month - 1, dayOfMonth))
+	return (
+		date.getUTCFullYear() === year &&
+		date.getUTCMonth() === month - 1 &&
+		date.getUTCDate() === dayOfMonth
+	)
+}
+
 export type JellyfishProbeDiagnostic = {
 	host: string
 	port: number

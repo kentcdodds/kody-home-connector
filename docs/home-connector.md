@@ -48,6 +48,8 @@ The connector exposes these local-device families:
   catalog
 - Access Networks Unleashed / RUCKUS Unleashed WiFi controller reads and typed
   high-risk writes over the local AJAX management interface
+- JellyFish Lighting controller discovery, zones, patterns, and daily/calendar
+  schedules over the controller's local WebSocket API
 
 All surfaces are registered as MCP tools inside the connector and then exposed
 to the Worker through the existing outbound WebSocket session to
@@ -78,6 +80,37 @@ not source in this repository. It should be updated in Kody to call
 `home_default_bond_get_bridge_version({ bridgeId })`. When health says the
 bridge is cooling down, the monitor should record a skipped/backoff sample and
 avoid the version fetch until `nextRecommendedAttemptAt`.
+
+## JellyFish Lighting integration
+
+The JellyFish adapter lives under `src/adapters/jellyfish/` and talks to local
+controllers through their WebSocket JSON API from the connector host. This is
+the right boundary for workflows that need controller access because Cursor
+Cloud machines typically cannot reach the user's LAN controller directly.
+
+The MCP surface includes:
+
+- `jellyfish_scan_controllers`
+- `jellyfish_list_controllers`
+- `jellyfish_list_zones`
+- `jellyfish_list_patterns`
+- `jellyfish_get_pattern`
+- `jellyfish_run_pattern`
+- `jellyfish_get_daily_schedule`
+- `jellyfish_set_daily_schedule`
+- `jellyfish_get_calendar_schedule`
+- `jellyfish_set_calendar_schedule`
+
+Schedule write tools replace the full controller schedule list. Callers should
+read the schedule first, remove or edit only the intended events, and then write
+the complete desired list back. The connector validates schedule action types,
+time/sunrise/sunset bounds, daily day codes (`M`, `T`, `W`, `TH`, `F`, `SA`,
+`S`), calendar `YYYYMMDD` strings, and zone names against the controller's known
+zones before sending a write.
+
+Calendar schedule days include a year, but public JellyFish docs describe those
+entries as annual. Do not treat the calendar schedule as a verified one-off
+restoration mechanism without checking live controller behavior.
 
 ## Lutron integration
 
@@ -407,6 +440,7 @@ The connector stores a local SQLite database containing:
 - Kasa TP-Link account credentials encrypted locally with
   `HOME_CONNECTOR_SHARED_SECRET`
 - last Kasa authentication success/error details
+- discovered JellyFish controller metadata and latest connection status
 - discovered Bond bridges and tokens
 - discovered Sonos players
 - managed Venstar thermostats
