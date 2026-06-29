@@ -982,8 +982,9 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 			}),
 		)
 
-		await expect(
-			mcp.callTool('access_networks_unleashed_request', {
+		const missingHighRiskAcknowledgement = await mcp.callTool(
+			'access_networks_unleashed_request',
+			{
 				action: 'docmd',
 				comp: 'stamgr',
 				xmlBody: '<bogus/>',
@@ -991,8 +992,15 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 				reason:
 					'Trying to call without acknowledgement to make sure the tool rejects the request.',
 				confirmation: accessNetworksUnleashed.requestConfirmation,
-			}),
-		).rejects.toThrow('acknowledgeHighRisk')
+			},
+		)
+		expect(missingHighRiskAcknowledgement.isError).toBe(true)
+		expect(missingHighRiskAcknowledgement.structuredContent).toMatchObject({
+			error: {
+				code: 'invalid_tool_arguments',
+				message: expect.stringContaining('acknowledgeHighRisk'),
+			},
+		})
 
 		await mcp.callTool('bond_adopt_bridge', { bridgeId: 'MOCKBOND1' })
 		bond.setToken('MOCKBOND1', 'mock-bond-token')
