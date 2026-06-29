@@ -57,6 +57,25 @@ function requireLutronCredentials(processor: {
 	}
 }
 
+function updateLutronAuthFailure(input: {
+	storage: HomeConnectorStorage
+	connectorId: string
+	processorId: string
+	error: unknown
+}) {
+	if (isLutronUnsupportedZoneLevelError(input.error)) {
+		return
+	}
+	updateLutronAuthStatus({
+		storage: input.storage,
+		connectorId: input.connectorId,
+		processorId: input.processorId,
+		lastAuthenticatedAt: null,
+		lastAuthError:
+			input.error instanceof Error ? input.error.message : String(input.error),
+	})
+}
+
 export function createLutronAdapter(input: {
 	config: HomeConnectorConfig
 	state: HomeConnectorState
@@ -180,12 +199,11 @@ export function createLutronAdapter(input: {
 					lastAuthError: null,
 				})
 			} catch (error) {
-				updateLutronAuthStatus({
+				updateLutronAuthFailure({
 					storage: input.storage,
 					connectorId: input.config.homeConnectorId,
 					processorId,
-					lastAuthenticatedAt: null,
-					lastAuthError: error instanceof Error ? error.message : String(error),
+					error,
 				})
 				throw error
 			}
@@ -224,16 +242,12 @@ export function createLutronAdapter(input: {
 				})
 				return inventory
 			} catch (error) {
-				if (!isLutronUnsupportedZoneLevelError(error)) {
-					updateLutronAuthStatus({
-						storage: input.storage,
-						connectorId: input.config.homeConnectorId,
-						processorId,
-						lastAuthenticatedAt: null,
-						lastAuthError:
-							error instanceof Error ? error.message : String(error),
-					})
-				}
+				updateLutronAuthFailure({
+					storage: input.storage,
+					connectorId: input.config.homeConnectorId,
+					processorId,
+					error,
+				})
 				throw error
 			}
 		},
@@ -267,12 +281,11 @@ export function createLutronAdapter(input: {
 					response,
 				}
 			} catch (error) {
-				updateLutronAuthStatus({
+				updateLutronAuthFailure({
 					storage: input.storage,
 					connectorId: input.config.homeConnectorId,
 					processorId,
-					lastAuthenticatedAt: null,
-					lastAuthError: error instanceof Error ? error.message : String(error),
+					error,
 				})
 				throw error
 			}
@@ -309,12 +322,11 @@ export function createLutronAdapter(input: {
 					response,
 				}
 			} catch (error) {
-				updateLutronAuthStatus({
+				updateLutronAuthFailure({
 					storage: input.storage,
 					connectorId: input.config.homeConnectorId,
 					processorId,
-					lastAuthenticatedAt: null,
-					lastAuthError: error instanceof Error ? error.message : String(error),
+					error,
 				})
 				throw error
 			}
@@ -372,12 +384,11 @@ export function createLutronAdapter(input: {
 					response,
 				}
 			} catch (error) {
-				updateLutronAuthStatus({
+				updateLutronAuthFailure({
 					storage: input.storage,
 					connectorId: input.config.homeConnectorId,
 					processorId,
-					lastAuthenticatedAt: null,
-					lastAuthError: error instanceof Error ? error.message : String(error),
+					error,
 				})
 				throw error
 			}
@@ -427,12 +438,11 @@ export function createLutronAdapter(input: {
 					response,
 				}
 			} catch (error) {
-				updateLutronAuthStatus({
+				updateLutronAuthFailure({
 					storage: input.storage,
 					connectorId: input.config.homeConnectorId,
 					processorId,
-					lastAuthenticatedAt: null,
-					lastAuthError: error instanceof Error ? error.message : String(error),
+					error,
 				})
 				throw error
 			}
@@ -473,12 +483,11 @@ export function createLutronAdapter(input: {
 					response,
 				}
 			} catch (error) {
-				updateLutronAuthStatus({
+				updateLutronAuthFailure({
 					storage: input.storage,
 					connectorId: input.config.homeConnectorId,
 					processorId,
-					lastAuthenticatedAt: null,
-					lastAuthError: error instanceof Error ? error.message : String(error),
+					error,
 				})
 				throw error
 			}
@@ -515,12 +524,11 @@ export function createLutronAdapter(input: {
 					response,
 				}
 			} catch (error) {
-				updateLutronAuthStatus({
+				updateLutronAuthFailure({
 					storage: input.storage,
 					connectorId: input.config.homeConnectorId,
 					processorId,
-					lastAuthenticatedAt: null,
-					lastAuthError: error instanceof Error ? error.message : String(error),
+					error,
 				})
 				throw error
 			}
