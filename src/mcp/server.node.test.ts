@@ -537,11 +537,16 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 				},
 			],
 		})
-		await expect(
-			mcp.callTool('home_connector_list_logs', {
-				since: 'yesterday',
-			}),
-		).rejects.toThrow('since must be an ISO datetime string.')
+		const invalidLogsArgs = await mcp.callTool('home_connector_list_logs', {
+			since: 'yesterday',
+		})
+		expect(invalidLogsArgs.isError).toBe(true)
+		expect(invalidLogsArgs.structuredContent).toMatchObject({
+			error: {
+				code: 'invalid_tool_arguments',
+				message: expect.stringContaining('Invalid ISO datetime'),
+			},
+		})
 		const accessNetworksScanTool = tools.find(
 			(tool) => tool.name === 'access_networks_unleashed_scan_controllers',
 		)
@@ -1195,14 +1200,19 @@ test('mcp server exposes island router write tools when host verification is con
 			},
 		})
 
-		await expect(
-			mcp.callTool('router_run_command', {
-				commandId: 'write memory',
-				reason:
-					'Persist the currently validated maintenance change before the scheduled reboot window.',
-				confirmation: 'wrong',
-			}),
-		).rejects.toThrow('requires the exact confirmation')
+		const invalidConfirmation = await mcp.callTool('router_run_command', {
+			commandId: 'write memory',
+			reason:
+				'Persist the currently validated maintenance change before the scheduled reboot window.',
+			confirmation: 'wrong',
+		})
+		expect(invalidConfirmation.isError).toBe(true)
+		expect(invalidConfirmation.structuredContent).toMatchObject({
+			error: {
+				code: 'invalid_tool_arguments',
+				message: expect.stringContaining('confirmation'),
+			},
+		})
 	} finally {
 		storage.close()
 	}
