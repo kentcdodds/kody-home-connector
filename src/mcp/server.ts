@@ -17,6 +17,7 @@ import {
 import { type createKasaAdapter } from '../adapters/kasa/index.ts'
 import { isLutronProcessorNotFoundError } from '../adapters/lutron/errors.ts'
 import { type createLutronAdapter } from '../adapters/lutron/index.ts'
+import { isLutronUnsupportedZoneLevelError } from '../adapters/lutron/leap-client.ts'
 import { createRokuAdapter } from '../adapters/roku/index.ts'
 import { type createSonosAdapter } from '../adapters/sonos/index.ts'
 import { type createSamsungTvAdapter } from '../adapters/samsung-tv/index.ts'
@@ -177,6 +178,11 @@ export function createHomeConnectorMcpServer(input: {
 			args,
 			context,
 		) => {
+			const validation = validateToolArgs(descriptor, args)
+			if (!validation.success) {
+				return invalidToolArgumentsResult(descriptor.name, validation.error)
+			}
+			const validatedArgs = validation.args
 			return await Sentry.startSpan(
 				{
 					op: 'mcp.server',
@@ -197,12 +203,13 @@ export function createHomeConnectorMcpServer(input: {
 						...(context?.source
 							? { 'home_connector.tool.source': context.source }
 							: {}),
-						'home_connector.tool.argument_count': Object.keys(args).length,
+						'home_connector.tool.argument_count':
+							Object.keys(validatedArgs).length,
 					},
 				},
 				async (span) => {
 					try {
-						const result = await handler(args, context)
+						const result = await handler(validatedArgs, context)
 						span.setAttribute(
 							'mcp.tool.result.is_error',
 							Boolean(result.isError),
@@ -268,6 +275,69 @@ export function createHomeConnectorMcpServer(input: {
 		}
 	}
 
+	function isZodSchema(schema: ToolInputSchema): schema is z.ZodTypeAny {
+		return (
+			typeof schema === 'object' &&
+			schema !== null &&
+			'safeParse' in schema &&
+			typeof schema.safeParse === 'function'
+		)
+	}
+
+	function toZodSchema(schema: ToolInputSchema) {
+		return isZodSchema(schema) ? schema : z.object(schema)
+	}
+
+	function invalidToolArgumentsResult(
+		toolName: string,
+		error: z.ZodError,
+	): CallToolResult {
+		const issues = error.issues.map((issue) => ({
+			path: issue.path.map(String).join('.'),
+			message: issue.message,
+			code: issue.code,
+		}))
+		const issueSummary = issues
+			.map((issue) =>
+				issue.path ? `${issue.path}: ${issue.message}` : issue.message,
+			)
+			.join('; ')
+		const message = `Invalid arguments for ${toolName}: ${issueSummary}`
+		return {
+			isError: true,
+			content: [
+				{
+					type: 'text',
+					text: message,
+				},
+			],
+			structuredContent: {
+				error: {
+					code: 'invalid_tool_arguments',
+					message,
+					issues,
+				},
+			},
+		}
+	}
+
+	function validateToolArgs(
+		descriptor: HomeConnectorRegisteredToolDescriptor,
+		args: Record<string, unknown>,
+	) {
+		if (!descriptor.sdkInputSchema) {
+			return { success: true as const, args }
+		}
+		const result = toZodSchema(descriptor.sdkInputSchema).safeParse(args)
+		if (result.success) {
+			return {
+				success: true as const,
+				args: result.data as Record<string, unknown>,
+			}
+		}
+		return { success: false as const, error: result.error }
+	}
+
 	function lutronProcessorNotFoundResult(
 		error: unknown,
 	): CallToolResult | null {
@@ -292,13 +362,41 @@ export function createHomeConnectorMcpServer(input: {
 		}
 	}
 
+	function lutronUnsupportedZoneLevelResult(
+		error: unknown,
+	): CallToolResult | null {
+		if (!isLutronUnsupportedZoneLevelError(error)) {
+			return null
+		}
+		return {
+			isError: true,
+			content: [
+				{
+					type: 'text',
+					text: error.message,
+				},
+			],
+			structuredContent: {
+				error: {
+					code: 'lutron_zone_level_not_supported',
+					message: error.message,
+					action: error.action,
+					statusCode: error.statusCode,
+					responseBody: error.responseBody ?? null,
+				},
+			},
+		}
+	}
+
 	async function handleExpectedLutronError(
 		handler: () => Promise<CallToolResult> | CallToolResult,
 	) {
 		try {
 			return await handler()
 		} catch (error) {
-			const result = lutronProcessorNotFoundResult(error)
+			const result =
+				lutronProcessorNotFoundResult(error) ??
+				lutronUnsupportedZoneLevelResult(error)
 			if (result) return result
 			throw error
 		}

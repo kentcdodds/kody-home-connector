@@ -32,6 +32,7 @@ export type HomeConnectorConnectionState = {
 		| 'refresh_requested'
 		| 'registered'
 		| 'empty_local_registry'
+		| 'remote_list_missing'
 		| 'reconnecting_after_missing_remote_list'
 	toolInventoryStatusReason: string
 	lastToolsChangedNotificationAt: string | null

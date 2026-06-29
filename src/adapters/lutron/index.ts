@@ -20,6 +20,7 @@ import {
 	authenticateLutronProcessor,
 	loadLutronInventory,
 	pressLutronButton,
+	isLutronUnsupportedZoneLevelError,
 	setLutronShadeLevel,
 	setLutronZoneColor,
 	setLutronZoneLevel,
@@ -223,13 +224,16 @@ export function createLutronAdapter(input: {
 				})
 				return inventory
 			} catch (error) {
-				updateLutronAuthStatus({
-					storage: input.storage,
-					connectorId: input.config.homeConnectorId,
-					processorId,
-					lastAuthenticatedAt: null,
-					lastAuthError: error instanceof Error ? error.message : String(error),
-				})
+				if (!isLutronUnsupportedZoneLevelError(error)) {
+					updateLutronAuthStatus({
+						storage: input.storage,
+						connectorId: input.config.homeConnectorId,
+						processorId,
+						lastAuthenticatedAt: null,
+						lastAuthError:
+							error instanceof Error ? error.message : String(error),
+					})
+				}
 				throw error
 			}
 		},

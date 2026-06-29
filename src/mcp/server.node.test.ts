@@ -641,6 +641,18 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 				plugId: 'kasa-plug-1',
 			},
 		})
+		const missingKasaAlias = await mcp.callTool('kasa_get_plug_status', {
+			alias: 'HRV for upstairs',
+		})
+		expect(missingKasaAlias.isError).toBe(true)
+		expect(missingKasaAlias.structuredContent).toEqual({
+			error: {
+				code: 'kasa_plug_alias_not_found',
+				message: 'Kasa plug alias "HRV for upstairs" was not found.',
+				plugId: null,
+				alias: 'HRV for upstairs',
+			},
+		})
 		const kasaOffTool = tools.find((tool) => tool.name === 'kasa_turn_plug_off')
 		expect(kasaOffTool?.annotations?.['destructiveHint']).toBe(true)
 		const kasaTurnOff = await mcp.callTool('kasa_turn_plug_off', {
@@ -735,6 +747,22 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 				file: 'Christmas/Christmas Tree',
 				state: 1,
 				zoneName: ['Zone'],
+			},
+		})
+		const invalidJellyfishRunPattern = await mcp.callTool(
+			'jellyfish_run_pattern',
+			{
+				zoneNames: ['Zone'],
+				state: 'on',
+			},
+		)
+		expect(invalidJellyfishRunPattern.isError).toBe(true)
+		expect(invalidJellyfishRunPattern.structuredContent).toMatchObject({
+			error: {
+				code: 'invalid_tool_arguments',
+				message: expect.stringContaining(
+					'Provide exactly one of patternPath or patternData',
+				),
 			},
 		})
 		const jellyfishSetDailyTool = tools.find(
