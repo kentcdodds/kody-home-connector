@@ -1,4 +1,5 @@
 import { type HomeConnectorConfig } from '../../config.ts'
+import { type HomeConnectorErrorCaptureContext } from '../../sentry.ts'
 import { type HomeConnectorState } from '../../state.ts'
 import { type HomeConnectorStorage } from '../../storage/index.ts'
 import { createKasaKlapClient } from './klap-client.ts'
@@ -39,6 +40,45 @@ type KasaScanFunction = () => Promise<{
 	plugs: Array<KasaDiscoveredPlug>
 	diagnostics: KasaDiscoveryDiagnostics
 }>
+
+type KasaPlugSelectionErrorCode =
+	| 'kasa_plug_not_found'
+	| 'kasa_plug_alias_not_found'
+	| 'kasa_plug_alias_ambiguous'
+	| 'kasa_plug_selector_invalid'
+
+export class KasaPlugSelectionError extends Error {
+	readonly code: KasaPlugSelectionErrorCode
+	readonly plugId: string | undefined
+	readonly alias: string | undefined
+	homeConnectorCaptureContext?: HomeConnectorErrorCaptureContext
+
+	constructor(input: {
+		code: KasaPlugSelectionErrorCode
+		message: string
+		plugId?: string
+		alias?: string
+	}) {
+		super(input.message)
+		this.name = 'KasaPlugSelectionError'
+		this.code = input.code
+		this.plugId = input.plugId
+		this.alias = input.alias
+		this.homeConnectorCaptureContext = {
+			shouldCapture: false,
+			tags: {
+				connector_vendor: 'kasa',
+				kasa_selection_error: input.code,
+			},
+		}
+	}
+}
+
+export function isKasaPlugSelectionError(
+	error: unknown,
+): error is KasaPlugSelectionError {
+	return error instanceof KasaPlugSelectionError
+}
 
 function assertNonEmpty(value: string, field: string) {
 	const trimmed = value.trim()
@@ -156,7 +196,13 @@ export function createKasaAdapter(input: {
 
 	function requirePlug(plugId: string) {
 		const plug = getKasaPlug(storage, connectorId, plugId)
-		if (!plug) throw new Error(`Kasa plug "${plugId}" was not found.`)
+		if (!plug) {
+			throw new KasaPlugSelectionError({
+				code: 'kasa_plug_not_found',
+				message: `Kasa plug "${plugId}" was not found.`,
+				plugId,
+			})
+		}
 		return plug
 	}
 
@@ -164,7 +210,10 @@ export function createKasaAdapter(input: {
 		const hasPlugId = Boolean(selector.plugId?.trim())
 		const hasAlias = Boolean(selector.alias?.trim())
 		if (hasPlugId === hasAlias) {
-			throw new Error('Provide exactly one of plugId or alias.')
+			throw new KasaPlugSelectionError({
+				code: 'kasa_plug_selector_invalid',
+				message: 'Provide exactly one of plugId or alias.',
+			})
 		}
 		if (hasPlugId) return requirePlug(selector.plugId!.trim())
 		const alias = selector.alias!.trim()
@@ -172,12 +221,18 @@ export function createKasaAdapter(input: {
 			(plug) => normalizeAlias(plug.alias) === normalizeAlias(alias),
 		)
 		if (matches.length === 0) {
-			throw new Error(`Kasa plug alias "${alias}" was not found.`)
+			throw new KasaPlugSelectionError({
+				code: 'kasa_plug_alias_not_found',
+				message: `Kasa plug alias "${alias}" was not found.`,
+				alias,
+			})
 		}
 		if (matches.length > 1) {
-			throw new Error(
-				`Kasa plug alias "${alias}" is ambiguous. Use a plugId instead.`,
-			)
+			throw new KasaPlugSelectionError({
+				code: 'kasa_plug_alias_ambiguous',
+				message: `Kasa plug alias "${alias}" is ambiguous. Use a plugId instead.`,
+				alias,
+			})
 		}
 		return matches[0]!
 	}

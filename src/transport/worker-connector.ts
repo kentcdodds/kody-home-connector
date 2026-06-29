@@ -26,8 +26,6 @@ const slowToolCallThresholdMs = 5_000
 const websocketSentryReconnectThreshold = 3
 const toolInventoryRegistrationGraceMs = 5_000
 const maxToolInventoryRefreshAttempts = 2
-const toolInventoryReconnectCloseCode = 4_000
-const toolInventoryReconnectReason = 'tool inventory registration recovery'
 const homeConnectorDescription =
 	'Local-network home automation for Sonos, Bond shades, Venstar thermostats, Roku, Samsung TVs, Lutron, JellyFish lighting, and network gear.'
 
@@ -525,18 +523,17 @@ export function createWorkerConnector(input: {
 			return
 		}
 
-		const recoveryCount = input.state.connection.toolInventoryRecoveryCount + 1
 		updateToolInventoryStatus({
 			localToolCount,
-			status: 'reconnecting_after_missing_remote_list',
+			status: 'remote_list_missing',
 			reason: toolsListRequestedForConnection
-				? 'Local registry recovered after Kody received an empty tools/list response, but Kody did not request a follow-up tools/list after refresh retries; reconnecting websocket session to rebuild remote registration state.'
-				: 'Kody did not request tools/list after retries; reconnecting websocket session to rebuild remote registration state.',
-			recoveryCount,
+				? 'Local registry recovered after Kody received an empty tools/list response, but Kody did not request a follow-up tools/list after refresh retries.'
+				: 'Kody did not request tools/list after retries; leaving websocket connected and awaiting a remote registry refresh.',
+			recoveryCount: input.state.connection.toolInventoryRecoveryCount,
 		})
-		input.logger.error(
-			'worker.tools.inventory_reconnect',
-			`Reconnecting home connector websocket to recover tool inventory registration localToolCount=${localToolCount}.`,
+		input.logger.warn(
+			'worker.tools.remote_list_still_missing',
+			`Home connector tool inventory registration is still pending localToolCount=${localToolCount}.`,
 			{
 				...createSocketEventContext({
 					config: input.config,
@@ -545,34 +542,9 @@ export function createWorkerConnector(input: {
 				}),
 				localToolCount,
 				attempts: toolInventoryRefreshAttempts,
-				recoveryCount,
 				toolsListRequestedForConnection,
 			},
 		)
-		captureHomeConnectorMessage(
-			'Home connector tool inventory registration did not complete.',
-			{
-				level: 'error',
-				fingerprint: [
-					'home-connector',
-					'tool-inventory-registration',
-					input.config.homeConnectorId,
-				],
-				tags: {
-					home_connector_id: input.config.homeConnectorId,
-					connector_event: 'tool_inventory.registration_incomplete',
-				},
-				contexts: {
-					tool_inventory: {
-						localToolCount,
-						attempts: toolInventoryRefreshAttempts,
-						recoveryCount,
-						toolsListRequestedForConnection,
-					},
-				},
-			},
-		)
-		socket.close(toolInventoryReconnectCloseCode, toolInventoryReconnectReason)
 	}
 
 	function scheduleToolInventoryMonitor(expectedConnectionAttempt: number) {
@@ -889,10 +861,8 @@ export function createWorkerConnector(input: {
 				? consecutiveReconnects
 				: consecutiveReconnects + 1
 			const isToolInventoryRecoveryClose =
-				(event.code === toolInventoryReconnectCloseCode &&
-					event.reason === toolInventoryReconnectReason) ||
 				input.state.connection.toolInventoryStatus ===
-					'reconnecting_after_missing_remote_list'
+				'reconnecting_after_missing_remote_list'
 			updateConnectionState(input.state, {
 				connected: false,
 				lastError: closeMessage,

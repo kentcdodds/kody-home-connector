@@ -446,7 +446,7 @@ test('ack preserves tool inventory when Kody lists tools before ack', async () =
 	}
 })
 
-test('connected websocket retries and reconnects when Kody never lists tools', async () => {
+test('connected websocket warns without reconnecting when Kody never lists tools', async () => {
 	vi.useFakeTimers()
 	globalThis.WebSocket = FakeWorkerWebSocket as unknown as typeof WebSocket
 	const state = createAppState()
@@ -487,35 +487,26 @@ test('connected websocket retries and reconnects when Kody never lists tools', a
 		expect(countToolsChangedNotifications(socket)).toBe(3)
 
 		await vi.advanceTimersByTimeAsync(5_000)
-		expect(logger.error).toHaveBeenCalledWith(
-			'worker.tools.inventory_reconnect',
-			expect.stringContaining('Reconnecting home connector websocket'),
+		expect(logger.warn).toHaveBeenCalledWith(
+			'worker.tools.remote_list_still_missing',
+			expect.stringContaining(
+				'Home connector tool inventory registration is still pending',
+			),
 			expect.objectContaining({
 				localToolCount: 1,
 				attempts: 3,
-				recoveryCount: 1,
 			}),
 		)
-		expect(sentryMock.captureHomeConnectorMessage).toHaveBeenCalledWith(
-			'Home connector tool inventory registration did not complete.',
-			expect.objectContaining({
-				level: 'error',
-				tags: expect.objectContaining({
-					connector_event: 'tool_inventory.registration_incomplete',
-				}),
-			}),
-		)
-		expect(state.connection.connected).toBe(false)
-		expect(state.connection.toolInventoryStatus).toBe(
-			'reconnecting_after_missing_remote_list',
-		)
+		expect(sentryMock.captureHomeConnectorMessage).not.toHaveBeenCalled()
+		expect(state.connection.connected).toBe(true)
+		expect(state.connection.toolInventoryStatus).toBe('remote_list_missing')
 		expect(state.connection.toolInventoryStatusReason).toContain(
 			'Kody did not request tools/list',
 		)
-		expect(state.connection.toolInventoryRecoveryCount).toBe(1)
+		expect(state.connection.toolInventoryRecoveryCount).toBe(0)
 
 		await vi.advanceTimersByTimeAsync(2_000)
-		expect(fakeWebSocketInstances).toHaveLength(2)
+		expect(fakeWebSocketInstances).toHaveLength(1)
 	} finally {
 		connector.stop()
 	}
@@ -788,7 +779,7 @@ test('empty tools/list polling does not postpone recovery timer', async () => {
 	}
 })
 
-test('reconnect reason reflects recovery after an empty tools/list response', async () => {
+test('remote list missing reason reflects recovery after an empty tools/list response', async () => {
 	vi.useFakeTimers()
 	globalThis.WebSocket = FakeWorkerWebSocket as unknown as typeof WebSocket
 	let tools: ReturnType<HomeConnectorToolRegistry['list']> = []
@@ -825,10 +816,8 @@ test('reconnect reason reflects recovery after an empty tools/list response', as
 		tools = [bondShadeTool]
 		await vi.advanceTimersByTimeAsync(15_000)
 
-		expect(state.connection.connected).toBe(false)
-		expect(state.connection.toolInventoryStatus).toBe(
-			'reconnecting_after_missing_remote_list',
-		)
+		expect(state.connection.connected).toBe(true)
+		expect(state.connection.toolInventoryStatus).toBe('remote_list_missing')
 		expect(state.connection.toolInventoryStatusReason).toContain(
 			'Kody received an empty tools/list response',
 		)

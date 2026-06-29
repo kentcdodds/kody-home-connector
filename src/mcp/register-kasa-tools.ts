@@ -1,7 +1,10 @@
 import { type CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { markSecretInputFields } from '@kody-bot/connector-kit/schema'
 import { z } from 'zod'
-import { type createKasaAdapter } from '../adapters/kasa/index.ts'
+import {
+	isKasaPlugSelectionError,
+	type createKasaAdapter,
+} from '../adapters/kasa/index.ts'
 import {
 	buildToolInputSchema,
 	type ToolInputSchema,
@@ -35,6 +38,41 @@ function structuredTextResult(
 			},
 		],
 		structuredContent,
+	}
+}
+
+function kasaPlugSelectionErrorResult(error: unknown): CallToolResult | null {
+	if (!isKasaPlugSelectionError(error)) {
+		return null
+	}
+	return {
+		isError: true,
+		content: [
+			{
+				type: 'text',
+				text: error.message,
+			},
+		],
+		structuredContent: {
+			error: {
+				code: error.code,
+				message: error.message,
+				plugId: error.plugId ?? null,
+				alias: error.alias ?? null,
+			},
+		},
+	}
+}
+
+async function handleExpectedKasaError(
+	handler: () => Promise<CallToolResult> | CallToolResult,
+) {
+	try {
+		return await handler()
+	} catch (error) {
+		const result = kasaPlugSelectionErrorResult(error)
+		if (result) return result
+		throw error
 	}
 }
 
@@ -129,9 +167,11 @@ export function registerKasaHomeConnectorTools(input: {
 			sdkInputSchema: selectorSchema.sdkInputSchema,
 		},
 		async (args) => {
-			const plug = kasa.adoptPlug(getSelector(args))
-			return structuredTextResult(`Adopted Kasa smart plug ${plug.alias}.`, {
-				plug,
+			return await handleExpectedKasaError(() => {
+				const plug = kasa.adoptPlug(getSelector(args))
+				return structuredTextResult(`Adopted Kasa smart plug ${plug.alias}.`, {
+					plug,
+				})
 			})
 		},
 	)
@@ -146,9 +186,11 @@ export function registerKasaHomeConnectorTools(input: {
 			sdkInputSchema: selectorSchema.sdkInputSchema,
 		},
 		async (args) => {
-			const plug = kasa.forgetPlug(getSelector(args))
-			return structuredTextResult(`Forgot Kasa smart plug ${plug.alias}.`, {
-				plug,
+			return await handleExpectedKasaError(() => {
+				const plug = kasa.forgetPlug(getSelector(args))
+				return structuredTextResult(`Forgot Kasa smart plug ${plug.alias}.`, {
+					plug,
+				})
 			})
 		},
 	)
@@ -197,11 +239,13 @@ export function registerKasaHomeConnectorTools(input: {
 			},
 		},
 		async (args) => {
-			const result = await kasa.getPlugStatus(getSelector(args))
-			return structuredTextResult(
-				`Kasa smart plug ${result.plug.alias} is ${result.relayState}.`,
-				result,
-			)
+			return await handleExpectedKasaError(async () => {
+				const result = await kasa.getPlugStatus(getSelector(args))
+				return structuredTextResult(
+					`Kasa smart plug ${result.plug.alias} is ${result.relayState}.`,
+					result,
+				)
+			})
 		},
 	)
 
@@ -215,11 +259,13 @@ export function registerKasaHomeConnectorTools(input: {
 			sdkInputSchema: selectorSchema.sdkInputSchema,
 		},
 		async (args) => {
-			const result = await kasa.turnOn(getSelector(args))
-			return structuredTextResult(
-				`Turned Kasa smart plug ${result.plug.alias} on.`,
-				result,
-			)
+			return await handleExpectedKasaError(async () => {
+				const result = await kasa.turnOn(getSelector(args))
+				return structuredTextResult(
+					`Turned Kasa smart plug ${result.plug.alias} on.`,
+					result,
+				)
+			})
 		},
 	)
 
@@ -236,11 +282,13 @@ export function registerKasaHomeConnectorTools(input: {
 			},
 		},
 		async (args) => {
-			const result = await kasa.turnOff(getSelector(args))
-			return structuredTextResult(
-				`Turned Kasa smart plug ${result.plug.alias} off.`,
-				result,
-			)
+			return await handleExpectedKasaError(async () => {
+				const result = await kasa.turnOff(getSelector(args))
+				return structuredTextResult(
+					`Turned Kasa smart plug ${result.plug.alias} off.`,
+					result,
+				)
+			})
 		},
 	)
 }

@@ -537,11 +537,16 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 				},
 			],
 		})
-		await expect(
-			mcp.callTool('home_connector_list_logs', {
-				since: 'yesterday',
-			}),
-		).rejects.toThrow('since must be an ISO datetime string.')
+		const invalidLogsArgs = await mcp.callTool('home_connector_list_logs', {
+			since: 'yesterday',
+		})
+		expect(invalidLogsArgs.isError).toBe(true)
+		expect(invalidLogsArgs.structuredContent).toMatchObject({
+			error: {
+				code: 'invalid_tool_arguments',
+				message: expect.stringContaining('Invalid ISO datetime'),
+			},
+		})
 		const accessNetworksScanTool = tools.find(
 			(tool) => tool.name === 'access_networks_unleashed_scan_controllers',
 		)
@@ -641,6 +646,18 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 				plugId: 'kasa-plug-1',
 			},
 		})
+		const missingKasaAlias = await mcp.callTool('kasa_get_plug_status', {
+			alias: 'HRV for upstairs',
+		})
+		expect(missingKasaAlias.isError).toBe(true)
+		expect(missingKasaAlias.structuredContent).toEqual({
+			error: {
+				code: 'kasa_plug_alias_not_found',
+				message: 'Kasa plug alias "HRV for upstairs" was not found.',
+				plugId: null,
+				alias: 'HRV for upstairs',
+			},
+		})
 		const kasaOffTool = tools.find((tool) => tool.name === 'kasa_turn_plug_off')
 		expect(kasaOffTool?.annotations?.['destructiveHint']).toBe(true)
 		const kasaTurnOff = await mcp.callTool('kasa_turn_plug_off', {
@@ -672,14 +689,14 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 			processors: expect.any(Array),
 		})
 		const missingLutronProcessor = await mcp.callTool('lutron_get_inventory', {
-			processorId: '',
+			processorId: 'missing-processor',
 		})
 		expect(missingLutronProcessor.isError).toBe(true)
 		expect(missingLutronProcessor.structuredContent).toEqual({
 			error: {
 				code: 'lutron_processor_not_found',
-				message: 'Lutron processor "" was not found.',
-				processorId: '',
+				message: 'Lutron processor "missing-processor" was not found.',
+				processorId: 'missing-processor',
 			},
 		})
 
@@ -735,6 +752,22 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 				file: 'Christmas/Christmas Tree',
 				state: 1,
 				zoneName: ['Zone'],
+			},
+		})
+		const invalidJellyfishRunPattern = await mcp.callTool(
+			'jellyfish_run_pattern',
+			{
+				zoneNames: ['Zone'],
+				state: 'on',
+			},
+		)
+		expect(invalidJellyfishRunPattern.isError).toBe(true)
+		expect(invalidJellyfishRunPattern.structuredContent).toMatchObject({
+			error: {
+				code: 'invalid_tool_arguments',
+				message: expect.stringContaining(
+					'Provide exactly one of patternPath or patternData',
+				),
 			},
 		})
 		const jellyfishSetDailyTool = tools.find(
@@ -949,8 +982,9 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 			}),
 		)
 
-		await expect(
-			mcp.callTool('access_networks_unleashed_request', {
+		const missingHighRiskAcknowledgement = await mcp.callTool(
+			'access_networks_unleashed_request',
+			{
 				action: 'docmd',
 				comp: 'stamgr',
 				xmlBody: '<bogus/>',
@@ -958,8 +992,15 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 				reason:
 					'Trying to call without acknowledgement to make sure the tool rejects the request.',
 				confirmation: accessNetworksUnleashed.requestConfirmation,
-			}),
-		).rejects.toThrow('acknowledgeHighRisk')
+			},
+		)
+		expect(missingHighRiskAcknowledgement.isError).toBe(true)
+		expect(missingHighRiskAcknowledgement.structuredContent).toMatchObject({
+			error: {
+				code: 'invalid_tool_arguments',
+				message: expect.stringContaining('acknowledgeHighRisk'),
+			},
+		})
 
 		await mcp.callTool('bond_adopt_bridge', { bridgeId: 'MOCKBOND1' })
 		bond.setToken('MOCKBOND1', 'mock-bond-token')
@@ -1167,14 +1208,19 @@ test('mcp server exposes island router write tools when host verification is con
 			},
 		})
 
-		await expect(
-			mcp.callTool('router_run_command', {
-				commandId: 'write memory',
-				reason:
-					'Persist the currently validated maintenance change before the scheduled reboot window.',
-				confirmation: 'wrong',
-			}),
-		).rejects.toThrow('requires the exact confirmation')
+		const invalidConfirmation = await mcp.callTool('router_run_command', {
+			commandId: 'write memory',
+			reason:
+				'Persist the currently validated maintenance change before the scheduled reboot window.',
+			confirmation: 'wrong',
+		})
+		expect(invalidConfirmation.isError).toBe(true)
+		expect(invalidConfirmation.structuredContent).toMatchObject({
+			error: {
+				code: 'invalid_tool_arguments',
+				message: expect.stringContaining('confirmation'),
+			},
+		})
 	} finally {
 		storage.close()
 	}

@@ -11,6 +11,7 @@ import {
 	type LutronInventory,
 	type LutronAssociatedGangedDevice,
 } from './types.ts'
+import { type HomeConnectorErrorCaptureContext } from '../../sentry.ts'
 
 type LeapResponse = {
 	CommuniqueType?: string
@@ -21,6 +22,62 @@ type LeapResponse = {
 		MessageBodyType?: string
 	}
 	Body?: Record<string, unknown>
+}
+
+export class LutronLeapResponseError extends Error {
+	readonly action: string
+	readonly statusCode: string
+	readonly responseBody: Record<string, unknown> | undefined
+	homeConnectorCaptureContext?: HomeConnectorErrorCaptureContext
+
+	constructor(input: {
+		action: string
+		statusCode: string
+		responseBody: Record<string, unknown> | undefined
+	}) {
+		const details = input.responseBody
+			? JSON.stringify(input.responseBody)
+			: input.statusCode
+		super(
+			`Lutron ${input.action} failed with ${input.statusCode || 'unknown status'}: ${details}`,
+		)
+		this.name = 'LutronLeapResponseError'
+		this.action = input.action
+		this.statusCode = input.statusCode
+		this.responseBody = input.responseBody
+		if (isUnsupportedGoToLevelResponse(input)) {
+			this.homeConnectorCaptureContext = {
+				shouldCapture: false,
+				tags: {
+					connector_vendor: 'lutron',
+					lutron_failure_code: 'unsupported_zone_level',
+				},
+			}
+		}
+	}
+}
+
+function isUnsupportedGoToLevelResponse(input: {
+	action: string
+	statusCode: string
+	responseBody: Record<string, unknown> | undefined
+}) {
+	return (
+		input.action.startsWith('zone ') &&
+		input.action.endsWith(' level set') &&
+		input.statusCode.startsWith('405') &&
+		input.responseBody?.['Message'] ===
+			'GoToLevel not supported for the specified ZoneType'
+	)
+}
+
+export function isLutronUnsupportedZoneLevelError(
+	error: unknown,
+): error is LutronLeapResponseError {
+	return (
+		error instanceof LutronLeapResponseError &&
+		isUnsupportedGoToLevelResponse(error)
+	)
 }
 
 const LEAP_SOCKET_TIMEOUT_MS = 5_000
@@ -200,10 +257,11 @@ function assertSuccessfulResponse(response: LeapResponse, action: string) {
 		return
 	}
 
-	const details = response.Body ? JSON.stringify(response.Body) : statusCode
-	throw new Error(
-		`Lutron ${action} failed with ${statusCode || 'unknown status'}: ${details}`,
-	)
+	throw new LutronLeapResponseError({
+		action,
+		statusCode,
+		responseBody: response.Body,
+	})
 }
 
 export async function createLutronLeapClient(

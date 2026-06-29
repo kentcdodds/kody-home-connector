@@ -150,7 +150,8 @@ function getConnectionTone(state: HomeConnectorState): StatusTone {
 	}
 	if (
 		state.connection.toolInventoryStatus === 'pending_remote_list' ||
-		state.connection.toolInventoryStatus === 'refresh_requested'
+		state.connection.toolInventoryStatus === 'refresh_requested' ||
+		state.connection.toolInventoryStatus === 'remote_list_missing'
 	) {
 		return 'warn'
 	}
@@ -174,6 +175,9 @@ function getConnectionLabel(state: HomeConnectorState) {
 	}
 	if (state.connection.toolInventoryStatus === 'refresh_requested') {
 		return 'Connected; tool inventory refresh requested'
+	}
+	if (state.connection.toolInventoryStatus === 'remote_list_missing') {
+		return 'Connected; waiting for remote tool inventory list'
 	}
 	if (state.connection.toolInventoryStatus === 'pending_remote_list') {
 		return 'Connected; awaiting tool inventory registration'
