@@ -689,14 +689,14 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 			processors: expect.any(Array),
 		})
 		const missingLutronProcessor = await mcp.callTool('lutron_get_inventory', {
-			processorId: '',
+			processorId: 'missing-processor',
 		})
 		expect(missingLutronProcessor.isError).toBe(true)
 		expect(missingLutronProcessor.structuredContent).toEqual({
 			error: {
 				code: 'lutron_processor_not_found',
-				message: 'Lutron processor "" was not found.',
-				processorId: '',
+				message: 'Lutron processor "missing-processor" was not found.',
+				processorId: 'missing-processor',
 			},
 		})
 
