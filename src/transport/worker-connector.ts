@@ -788,9 +788,10 @@ export function createWorkerConnector(input: {
 							})
 							return
 						}
+						const responseSocket = socket
 						if (
 							isJsonRpcRequest(message) &&
-							socket?.readyState === WebSocket.OPEN
+							responseSocket?.readyState === WebSocket.OPEN
 						) {
 							const response = await handleJsonRpcRequest(
 								message,
@@ -798,7 +799,28 @@ export function createWorkerConnector(input: {
 								input.logger,
 								handleToolsListRequest,
 							)
-							socket.send(
+							if (
+								socket !== responseSocket ||
+								responseSocket.readyState !== WebSocket.OPEN
+							) {
+								input.logger.warn(
+									'worker.websocket.response_dropped',
+									'Home connector skipped sending JSON-RPC response because the websocket changed while handling the request.',
+									{
+										...createSocketEventContext({
+											config: input.config,
+											connectionAttempt,
+											consecutiveReconnects,
+										}),
+										requestId: formatRequestId(message.id),
+										method: message.method,
+										readyState: responseSocket.readyState,
+										hasActiveSocket: Boolean(socket),
+									},
+								)
+								return
+							}
+							responseSocket.send(
 								stringifyConnectorMessage({
 									type: 'connector.jsonrpc',
 									message: response,
