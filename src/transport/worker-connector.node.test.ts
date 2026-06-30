@@ -151,16 +151,6 @@ function createRegisteredToolRegistry(
 	}
 }
 
-function createDeferred<T>() {
-	let resolve!: (value: T) => void
-	let reject!: (reason?: unknown) => void
-	const promise = new Promise<T>((promiseResolve, promiseReject) => {
-		resolve = promiseResolve
-		reject = promiseReject
-	})
-	return { promise, resolve, reject }
-}
-
 function getSentMessage(socket: FakeWorkerWebSocket, index: number) {
 	const raw = socket.sentMessages[index]
 	if (!raw) return null
@@ -461,7 +451,9 @@ test('in-flight JSON-RPC responses are dropped when websocket closes', async () 
 	globalThis.WebSocket = FakeWorkerWebSocket as unknown as typeof WebSocket
 	const logger = createLogger()
 	const deferred =
-		createDeferred<Awaited<ReturnType<HomeConnectorToolRegistry['call']>>>()
+		Promise.withResolvers<
+			Awaited<ReturnType<HomeConnectorToolRegistry['call']>>
+		>()
 	const toolRegistry: HomeConnectorToolRegistry = {
 		list: vi.fn(() => []),
 		call: vi.fn(() => deferred.promise),
