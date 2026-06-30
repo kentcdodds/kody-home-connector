@@ -446,6 +446,74 @@ test('ack preserves tool inventory when Kody lists tools before ack', async () =
 	}
 })
 
+test('in-flight JSON-RPC responses are dropped when websocket closes', async () => {
+	vi.useFakeTimers()
+	globalThis.WebSocket = FakeWorkerWebSocket as unknown as typeof WebSocket
+	const logger = createLogger()
+	const deferred =
+		Promise.withResolvers<
+			Awaited<ReturnType<HomeConnectorToolRegistry['call']>>
+		>()
+	const toolRegistry: HomeConnectorToolRegistry = {
+		list: vi.fn(() => []),
+		call: vi.fn(() => deferred.promise),
+	}
+	const connector = createWorkerConnector({
+		config: createConfig(),
+		state: createAppState(),
+		logger,
+		toolRegistry,
+	})
+
+	try {
+		await connector.start()
+		const socket = fakeWebSocketInstances[0]
+		if (!socket) throw new Error('Expected websocket instance')
+		await socket.dispatchOpen()
+		const messagePromise = socket.dispatchMessage(
+			JSON.stringify({
+				type: 'connector.jsonrpc',
+				message: {
+					jsonrpc: '2.0',
+					id: 'in-flight-tool',
+					method: 'tools/call',
+					params: {
+						name: 'bond_get_bridge_version',
+						arguments: { bridgeId: 'bond-bridge' },
+					},
+				},
+			}),
+		)
+
+		socket.dispatchClose({
+			code: 1006,
+			reason: '',
+			wasClean: false,
+		})
+		deferred.resolve({
+			content: [{ type: 'text', text: 'ok' }],
+		})
+		await messagePromise
+
+		expect(socket.sentMessages).toHaveLength(1)
+		expect(getSentMessage(socket, 0)).toMatchObject({
+			type: 'connector.hello',
+		})
+		expect(logger.warn).toHaveBeenCalledWith(
+			'worker.websocket.response_dropped',
+			expect.stringContaining('skipped sending JSON-RPC response'),
+			expect.objectContaining({
+				requestId: 'in-flight-tool',
+				method: 'tools/call',
+				hasActiveSocket: false,
+			}),
+		)
+		expect(sentryMock.captureHomeConnectorException).not.toHaveBeenCalled()
+	} finally {
+		connector.stop()
+	}
+})
+
 test('connected websocket warns without reconnecting when Kody never lists tools', async () => {
 	vi.useFakeTimers()
 	globalThis.WebSocket = FakeWorkerWebSocket as unknown as typeof WebSocket
