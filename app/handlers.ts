@@ -2,7 +2,7 @@ import { type Action } from 'remix/router'
 import { html } from 'remix/html-template'
 import { render } from './render.ts'
 import { RootLayout } from './root.ts'
-import { type routes } from './routes.ts'
+import { routes } from './routes.ts'
 import { type createLutronAdapter } from '../src/adapters/lutron/index.ts'
 import { type LutronDiscoveryDiagnostics } from '../src/adapters/lutron/types.ts'
 import { type createBondAdapter } from '../src/adapters/bond/index.ts'
@@ -27,23 +27,23 @@ function renderQuickLinks(
 		? `${config.workerSessionUrl}/snapshot`
 		: null
 	return html`<ul class="list">
-		<li><a href="/roku/status">Roku status</a></li>
-		<li><a href="/roku/setup">Roku setup</a></li>
-		<li><a href="/lutron/status">Lutron status</a></li>
-		<li><a href="/lutron/setup">Lutron setup</a></li>
-		<li><a href="/kasa/status">Kasa status</a></li>
-		<li><a href="/kasa/setup">Kasa setup</a></li>
-		<li><a href="/sonos/status">Sonos status</a></li>
-		<li><a href="/sonos/setup">Sonos setup</a></li>
-		<li><a href="/samsung-tv/status">Samsung TV status</a></li>
-		<li><a href="/samsung-tv/setup">Samsung TV setup</a></li>
-		<li><a href="/bond/status">Bond status</a></li>
-		<li><a href="/bond/setup">Bond token setup</a></li>
-		<li><a href="/jellyfish/status">JellyFish status</a></li>
-		<li><a href="/jellyfish/setup">JellyFish setup</a></li>
-		<li><a href="/venstar/status">Venstar status</a></li>
-		<li><a href="/venstar/setup">Venstar setup</a></li>
-		<li><a href="/health">Health JSON</a></li>
+		<li><a href="${routes.rokuStatus.href()}">Roku status</a></li>
+		<li><a href="${routes.rokuSetup.href()}">Roku setup</a></li>
+		<li><a href="${routes.lutronStatus.href()}">Lutron status</a></li>
+		<li><a href="${routes.lutronSetup.href()}">Lutron setup</a></li>
+		<li><a href="${routes.kasaStatus.href()}">Kasa status</a></li>
+		<li><a href="${routes.kasaSetup.href()}">Kasa setup</a></li>
+		<li><a href="${routes.sonosStatus.href()}">Sonos status</a></li>
+		<li><a href="${routes.sonosSetup.href()}">Sonos setup</a></li>
+		<li><a href="${routes.samsungTvStatus.href()}">Samsung TV status</a></li>
+		<li><a href="${routes.samsungTvSetup.href()}">Samsung TV setup</a></li>
+		<li><a href="${routes.bondStatus.href()}">Bond status</a></li>
+		<li><a href="${routes.bondSetup.href()}">Bond token setup</a></li>
+		<li><a href="${routes.jellyfishStatus.href()}">JellyFish status</a></li>
+		<li><a href="${routes.jellyfishSetup.href()}">JellyFish setup</a></li>
+		<li><a href="${routes.venstarStatus.href()}">Venstar status</a></li>
+		<li><a href="${routes.venstarSetup.href()}">Venstar setup</a></li>
+		<li><a href="${routes.health.href()}">Health JSON</a></li>
 		${workerSnapshotUrl
 			? html`<li>
 					<a href="${workerSnapshotUrl}">Worker connector snapshot</a>

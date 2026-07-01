@@ -158,7 +158,7 @@ function renderJellyfishStatusPage(input: {
 						Current discovery and controller state for JellyFish Lighting.
 					</p>
 					<p>
-						<a href="/jellyfish/setup">JellyFish setup</a>
+						<a href="${routes.jellyfishSetup.href()}">JellyFish setup</a>
 						<span class="muted">
 							— connector configuration and scan settings</span
 						>
@@ -293,7 +293,7 @@ export function createJellyfishSetupHandler(
 							Lighting.
 						</p>
 						<p>
-							<a href="/jellyfish/status">JellyFish status</a>
+							<a href="${routes.jellyfishStatus.href()}">JellyFish status</a>
 							<span class="muted"> — scan and inspect live controllers</span>
 						</p>
 						${renderInfoRows([

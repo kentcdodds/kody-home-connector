@@ -280,7 +280,7 @@ function renderVenstarStatusPage(input: {
 						connector.
 					</p>
 					<p>
-						<a href="/venstar/setup">Venstar setup</a>
+						<a href="${routes.venstarSetup.href()}">Venstar setup</a>
 						<span class="muted">
 							— add, remove, and review managed thermostats
 						</span>
@@ -436,7 +436,7 @@ export function createVenstarSetupHandler(
 							discovered devices with one click.
 						</p>
 						<p>
-							<a href="/venstar/status">Venstar status</a>
+							<a href="${routes.venstarStatus.href()}">Venstar status</a>
 							<span class="muted">
 								— scan the network and verify live thermostat status
 							</span>

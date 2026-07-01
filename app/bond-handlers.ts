@@ -85,7 +85,7 @@ function renderBondStatusPage(input: {
 						Discovered Bond bridges, adoption state, and stored token presence.
 					</p>
 					<p>
-						<a href="/bond/setup">Bond token setup</a>
+						<a href="${routes.bondSetup.href()}">Bond token setup</a>
 						<span class="muted"> — paste or retrieve the local API token</span>
 					</p>
 					<form method="POST">
@@ -228,7 +228,7 @@ function renderBondSetupPage(input: {
 						<code>bond_authentication_guide</code>.
 					</p>
 					<p>
-						<a href="/bond/status">Bond status</a>
+						<a href="${routes.bondStatus.href()}">Bond status</a>
 						<span class="muted"> — scan the network for bridges first</span>
 					</p>
 					<p class="muted">
