@@ -10,7 +10,7 @@ import {
 import { type HomeConnectorState } from '../src/state.ts'
 import { render } from './render.ts'
 import { RootLayout } from './root.ts'
-import { type routes } from './routes.ts'
+import { routes } from './routes.ts'
 import {
 	formatJson,
 	renderBanner,
