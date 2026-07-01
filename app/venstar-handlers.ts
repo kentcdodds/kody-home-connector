@@ -1,4 +1,4 @@
-import { type BuildAction } from 'remix/fetch-router'
+import { type Action } from 'remix/router'
 import { html } from 'remix/html-template'
 import { captureHomeConnectorException } from '../src/sentry.ts'
 import { type HomeConnectorConfig } from '../src/config.ts'
@@ -412,10 +412,7 @@ export function createVenstarStatusHandler(
 				thermostats: await venstar.listThermostatsWithStatus(),
 			})
 		},
-	} satisfies BuildAction<
-		typeof routes.venstarStatus.method,
-		typeof routes.venstarStatus.pattern
-	>
+	} satisfies Action<typeof routes.venstarStatus>
 }
 
 export function createVenstarSetupHandler(
@@ -563,8 +560,5 @@ export function createVenstarSetupHandler(
 
 			return renderVenstarSetupPage({})
 		},
-	} satisfies BuildAction<
-		typeof routes.venstarSetup.method,
-		typeof routes.venstarSetup.pattern
-	>
+	} satisfies Action<typeof routes.venstarSetup>
 }

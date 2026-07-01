@@ -1,4 +1,4 @@
-import { createRouter } from 'remix/fetch-router'
+import { createRouter } from 'remix/router'
 import {
 	createAccessNetworksUnleashedSetupHandler,
 	createAccessNetworksUnleashedStatusHandler,

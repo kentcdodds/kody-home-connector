@@ -1,4 +1,4 @@
-import { type BuildAction } from 'remix/fetch-router'
+import { type Action } from 'remix/router'
 import { html } from 'remix/html-template'
 import { type createJellyfishAdapter } from '../src/adapters/jellyfish/index.ts'
 import { type HomeConnectorConfig } from '../src/config.ts'
@@ -271,10 +271,7 @@ export function createJellyfishStatusHandler(
 				banner,
 			})
 		},
-	} satisfies BuildAction<
-		typeof routes.jellyfishStatus.method,
-		typeof routes.jellyfishStatus.pattern
-	>
+	} satisfies Action<typeof routes.jellyfishStatus>
 }
 
 export function createJellyfishSetupHandler(
@@ -333,8 +330,5 @@ export function createJellyfishSetupHandler(
 				}),
 			)
 		},
-	} satisfies BuildAction<
-		typeof routes.jellyfishSetup.method,
-		typeof routes.jellyfishSetup.pattern
-	>
+	} satisfies Action<typeof routes.jellyfishSetup>
 }

@@ -1,4 +1,4 @@
-import { type BuildAction } from 'remix/fetch-router'
+import { type Action } from 'remix/router'
 import { html } from 'remix/html-template'
 import {
 	renderActionCard,
@@ -473,7 +473,7 @@ function renderConnectionSummary(
 			},
 		],
 		primaryLink: {
-			href: routes.systemStatus.pattern,
+			href: routes.systemStatus.href(),
 			label: 'Open system status',
 		},
 		secondaryLink: snapshot.workerSnapshotUrl
@@ -516,11 +516,11 @@ function renderIntegrationSummaryCards(snapshot: DashboardSnapshot) {
 				},
 			],
 			primaryLink: {
-				href: routes.rokuStatus.pattern,
+				href: routes.rokuStatus.href(),
 				label: 'Roku status',
 			},
 			secondaryLink: {
-				href: routes.rokuSetup.pattern,
+				href: routes.rokuSetup.href(),
 				label: 'Roku setup',
 			},
 		})}
@@ -550,11 +550,11 @@ function renderIntegrationSummaryCards(snapshot: DashboardSnapshot) {
 				},
 			],
 			primaryLink: {
-				href: routes.lutronStatus.pattern,
+				href: routes.lutronStatus.href(),
 				label: 'Lutron status',
 			},
 			secondaryLink: {
-				href: routes.lutronSetup.pattern,
+				href: routes.lutronSetup.href(),
 				label: 'Lutron setup',
 			},
 		})}
@@ -584,11 +584,11 @@ function renderIntegrationSummaryCards(snapshot: DashboardSnapshot) {
 				},
 			],
 			primaryLink: {
-				href: routes.kasaStatus.pattern,
+				href: routes.kasaStatus.href(),
 				label: 'Kasa status',
 			},
 			secondaryLink: {
-				href: routes.kasaSetup.pattern,
+				href: routes.kasaSetup.href(),
 				label: 'Kasa setup',
 			},
 		})}
@@ -612,11 +612,11 @@ function renderIntegrationSummaryCards(snapshot: DashboardSnapshot) {
 				{ label: 'Audio input', value: snapshot.sonos.audioInputSupported },
 			],
 			primaryLink: {
-				href: routes.sonosStatus.pattern,
+				href: routes.sonosStatus.href(),
 				label: 'Sonos status',
 			},
 			secondaryLink: {
-				href: routes.sonosSetup.pattern,
+				href: routes.sonosSetup.href(),
 				label: 'Sonos setup',
 			},
 		})}
@@ -643,11 +643,11 @@ function renderIntegrationSummaryCards(snapshot: DashboardSnapshot) {
 				{ label: 'Paired', value: snapshot.samsungTv.paired },
 			],
 			primaryLink: {
-				href: routes.samsungTvStatus.pattern,
+				href: routes.samsungTvStatus.href(),
 				label: 'Samsung TV status',
 			},
 			secondaryLink: {
-				href: routes.samsungTvSetup.pattern,
+				href: routes.samsungTvSetup.href(),
 				label: 'Samsung TV setup',
 			},
 		})}
@@ -674,11 +674,11 @@ function renderIntegrationSummaryCards(snapshot: DashboardSnapshot) {
 				{ label: 'With token', value: snapshot.bond.withToken },
 			],
 			primaryLink: {
-				href: routes.bondStatus.pattern,
+				href: routes.bondStatus.href(),
 				label: 'Bond status',
 			},
 			secondaryLink: {
-				href: routes.bondSetup.pattern,
+				href: routes.bondSetup.href(),
 				label: 'Bond setup',
 			},
 		})}
@@ -705,11 +705,11 @@ function renderIntegrationSummaryCards(snapshot: DashboardSnapshot) {
 				},
 			],
 			primaryLink: {
-				href: routes.jellyfishStatus.pattern,
+				href: routes.jellyfishStatus.href(),
 				label: 'JellyFish status',
 			},
 			secondaryLink: {
-				href: routes.jellyfishSetup.pattern,
+				href: routes.jellyfishSetup.href(),
 				label: 'JellyFish setup',
 			},
 		})}
@@ -736,11 +736,11 @@ function renderIntegrationSummaryCards(snapshot: DashboardSnapshot) {
 				{ label: 'Discovered', value: snapshot.venstar.discovered },
 			],
 			primaryLink: {
-				href: routes.venstarStatus.pattern,
+				href: routes.venstarStatus.href(),
 				label: 'Venstar status',
 			},
 			secondaryLink: {
-				href: routes.venstarSetup.pattern,
+				href: routes.venstarSetup.href(),
 				label: 'Venstar setup',
 			},
 		})}
@@ -750,7 +750,7 @@ function renderIntegrationSummaryCards(snapshot: DashboardSnapshot) {
 function renderDrillDownActions(snapshot: DashboardSnapshot) {
 	return html`<div class="action-grid">
 		${renderActionCard({
-			href: routes.systemStatus.pattern,
+			href: routes.systemStatus.href(),
 			title: 'System status',
 			description:
 				'See worker URLs, connector identity, environment-derived configuration, and aggregate counts in one place.',
@@ -760,7 +760,7 @@ function renderDrillDownActions(snapshot: DashboardSnapshot) {
 			},
 		})}
 		${renderActionCard({
-			href: routes.diagnostics.pattern,
+			href: routes.diagnostics.href(),
 			title: 'Diagnostics',
 			description:
 				'Review discovery recency, configuration gaps, error banners, and JSON payload access paths.',
@@ -773,7 +773,7 @@ function renderDrillDownActions(snapshot: DashboardSnapshot) {
 			},
 		})}
 		${renderActionCard({
-			href: routes.islandRouterStatus.pattern,
+			href: routes.islandRouterStatus.href(),
 			title: 'Island router diagnostics',
 			description:
 				'Inspect SSH configuration readiness, live status, interfaces, neighbor cache, and host-level router diagnosis.',
@@ -783,7 +783,7 @@ function renderDrillDownActions(snapshot: DashboardSnapshot) {
 			},
 		})}
 		${renderActionCard({
-			href: routes.islandRouterApiStatus.pattern,
+			href: routes.islandRouterApiStatus.href(),
 			title: 'Island Router API proxy',
 			description:
 				'Review HTTP API proxy readiness and manage the encrypted local PIN used for Island startup authentication.',
@@ -793,7 +793,7 @@ function renderDrillDownActions(snapshot: DashboardSnapshot) {
 			},
 		})}
 		${renderActionCard({
-			href: routes.kasaStatus.pattern,
+			href: routes.kasaStatus.href(),
 			title: 'Kasa smart plugs',
 			description:
 				'Review Kasa credential readiness, discovered KLAP plugs, and discovery diagnostics.',
@@ -912,25 +912,25 @@ export function createDashboardHandler(deps: DashboardDependencies) {
 			return render(
 				RootLayout({
 					title: 'home connector - dashboard',
-					currentPath: routes.home.pattern,
+					currentPath: routes.home.href(),
 					body: html`${renderPageIntro({
 							eyebrow: 'Dashboard',
 							title: 'Home connector dashboard',
 							description:
 								'Quick-look operational view for the local admin UI with health, counts, status colors, and direct links into deeper diagnostics.',
 							actions: [
-								{ href: routes.systemStatus.pattern, label: 'System status' },
-								{ href: routes.diagnostics.pattern, label: 'Diagnostics' },
+								{ href: routes.systemStatus.href(), label: 'System status' },
+								{ href: routes.diagnostics.href(), label: 'Diagnostics' },
 								{
-									href: routes.islandRouterStatus.pattern,
+									href: routes.islandRouterStatus.href(),
 									label: 'Island router',
 								},
 								{
-									href: routes.islandRouterApiSetup.pattern,
+									href: routes.islandRouterApiSetup.href(),
 									label: 'Island API PIN',
 								},
 								{
-									href: routes.kasaSetup.pattern,
+									href: routes.kasaSetup.href(),
 									label: 'Kasa credentials',
 								},
 							],
@@ -1010,7 +1010,7 @@ export function createDashboardHandler(deps: DashboardDependencies) {
 				}),
 			)
 		},
-	} satisfies BuildAction<typeof routes.home.method, typeof routes.home.pattern>
+	} satisfies Action<typeof routes.home>
 }
 
 function renderConfigWarningList(configStatus: IslandRouterConfigStatus) {
@@ -1039,15 +1039,15 @@ export function createSystemStatusHandler(deps: DashboardDependencies) {
 			return render(
 				RootLayout({
 					title: 'home connector - system status',
-					currentPath: routes.systemStatus.pattern,
+					currentPath: routes.systemStatus.href(),
 					body: html`${renderPageIntro({
 							eyebrow: 'System',
 							title: 'System status',
 							description:
 								'High-level connector identity, network endpoints, environment-derived configuration, and aggregated inventory counts.',
 							actions: [
-								{ href: routes.home.pattern, label: 'Back to dashboard' },
-								{ href: routes.diagnostics.pattern, label: 'Diagnostics' },
+								{ href: routes.home.href(), label: 'Back to dashboard' },
+								{ href: routes.diagnostics.href(), label: 'Diagnostics' },
 							],
 						})}
 						<div class="metric-grid">
@@ -1296,10 +1296,7 @@ export function createSystemStatusHandler(deps: DashboardDependencies) {
 				}),
 			)
 		},
-	} satisfies BuildAction<
-		typeof routes.systemStatus.method,
-		typeof routes.systemStatus.pattern
-	>
+	} satisfies Action<typeof routes.systemStatus>
 }
 
 type DiagnosticRow = {
@@ -1337,8 +1334,8 @@ export function createDiagnosticsHandler(deps: DashboardDependencies) {
 						snapshot.connectionIssues[0] ??
 						'Worker URL, shared secret, and connector identity look consistent.',
 					links: [
-						{ href: routes.systemStatus.pattern, label: 'System status' },
-						{ href: routes.health.pattern, label: 'Health JSON' },
+						{ href: routes.systemStatus.href(), label: 'System status' },
+						{ href: routes.health.href(), label: 'Health JSON' },
 					],
 				},
 				{
@@ -1351,11 +1348,11 @@ export function createDiagnosticsHandler(deps: DashboardDependencies) {
 						`${snapshot.islandRouter.interfaceCount} interfaces, ${snapshot.islandRouter.neighborCount} neighbors.`,
 					links: [
 						{
-							href: routes.islandRouterStatus.pattern,
+							href: routes.islandRouterStatus.href(),
 							label: 'Router status',
 						},
 						{
-							href: `${routes.islandRouterStatus.pattern}?host=192.168.1.10`,
+							href: `${routes.islandRouterStatus.href()}?host=192.168.1.10`,
 							label: 'Host diagnosis example',
 						},
 					],
@@ -1369,11 +1366,11 @@ export function createDiagnosticsHandler(deps: DashboardDependencies) {
 						: 'No Island Router API PIN is stored locally.',
 					links: [
 						{
-							href: routes.islandRouterApiStatus.pattern,
+							href: routes.islandRouterApiStatus.href(),
 							label: 'API status',
 						},
 						{
-							href: routes.islandRouterApiSetup.pattern,
+							href: routes.islandRouterApiSetup.href(),
 							label: 'API setup',
 						},
 					],
@@ -1392,8 +1389,8 @@ export function createDiagnosticsHandler(deps: DashboardDependencies) {
 						? `Last scan ${deps.state.rokuDiscoveryDiagnostics.scannedAt} with ${deps.state.rokuDiscoveryDiagnostics.ssdpHits.length} SSDP hits.`
 						: 'No Roku scan diagnostics captured yet.',
 					links: [
-						{ href: routes.rokuStatus.pattern, label: 'Roku status' },
-						{ href: routes.rokuSetup.pattern, label: 'Roku setup' },
+						{ href: routes.rokuStatus.href(), label: 'Roku status' },
+						{ href: routes.rokuSetup.href(), label: 'Roku setup' },
 					],
 				},
 				{
@@ -1410,8 +1407,8 @@ export function createDiagnosticsHandler(deps: DashboardDependencies) {
 						? `Last scan ${deps.state.lutronDiscoveryDiagnostics.scannedAt} with ${deps.state.lutronDiscoveryDiagnostics.services.length} services and ${deps.state.lutronDiscoveryDiagnostics.errors.length} error(s).`
 						: 'No Lutron scan diagnostics captured yet.',
 					links: [
-						{ href: routes.lutronStatus.pattern, label: 'Lutron status' },
-						{ href: routes.lutronSetup.pattern, label: 'Lutron setup' },
+						{ href: routes.lutronStatus.href(), label: 'Lutron status' },
+						{ href: routes.lutronSetup.href(), label: 'Lutron setup' },
 					],
 				},
 				{
@@ -1429,8 +1426,8 @@ export function createDiagnosticsHandler(deps: DashboardDependencies) {
 						? `Last scan ${deps.state.kasaDiscoveryDiagnostics.scannedAt} with ${deps.state.kasaDiscoveryDiagnostics.subnetProbe.shipMatches} SHIP match(es).`
 						: 'No Kasa scan diagnostics captured yet.',
 					links: [
-						{ href: routes.kasaStatus.pattern, label: 'Kasa status' },
-						{ href: routes.kasaSetup.pattern, label: 'Kasa setup' },
+						{ href: routes.kasaStatus.href(), label: 'Kasa status' },
+						{ href: routes.kasaSetup.href(), label: 'Kasa setup' },
 					],
 				},
 				{
@@ -1443,8 +1440,8 @@ export function createDiagnosticsHandler(deps: DashboardDependencies) {
 						? `Last scan ${deps.state.sonosDiscoveryDiagnostics.scannedAt} with ${deps.state.sonosDiscoveryDiagnostics.ssdpHits.length} SSDP hits and ${deps.state.sonosDiscoveryDiagnostics.descriptionLookups.length} description lookups.`
 						: 'No Sonos diagnostics captured yet.',
 					links: [
-						{ href: routes.sonosStatus.pattern, label: 'Sonos status' },
-						{ href: routes.sonosSetup.pattern, label: 'Sonos setup' },
+						{ href: routes.sonosStatus.href(), label: 'Sonos status' },
+						{ href: routes.sonosSetup.href(), label: 'Sonos setup' },
 					],
 				},
 				{
@@ -1458,11 +1455,11 @@ export function createDiagnosticsHandler(deps: DashboardDependencies) {
 						: 'No Samsung TV diagnostics captured yet.',
 					links: [
 						{
-							href: routes.samsungTvStatus.pattern,
+							href: routes.samsungTvStatus.href(),
 							label: 'Samsung TV status',
 						},
 						{
-							href: routes.samsungTvSetup.pattern,
+							href: routes.samsungTvSetup.href(),
 							label: 'Samsung TV setup',
 						},
 					],
@@ -1481,8 +1478,8 @@ export function createDiagnosticsHandler(deps: DashboardDependencies) {
 						? `Last scan ${deps.state.bondDiscoveryDiagnostics.scannedAt} with ${deps.state.bondDiscoveryDiagnostics.services.length} services and ${deps.state.bondDiscoveryDiagnostics.errors.length} error(s).`
 						: 'No Bond diagnostics captured yet.',
 					links: [
-						{ href: routes.bondStatus.pattern, label: 'Bond status' },
-						{ href: routes.bondSetup.pattern, label: 'Bond setup' },
+						{ href: routes.bondStatus.href(), label: 'Bond status' },
+						{ href: routes.bondSetup.href(), label: 'Bond setup' },
 					],
 				},
 				{
@@ -1496,11 +1493,11 @@ export function createDiagnosticsHandler(deps: DashboardDependencies) {
 						: 'No JellyFish diagnostics captured yet.',
 					links: [
 						{
-							href: routes.jellyfishStatus.pattern,
+							href: routes.jellyfishStatus.href(),
 							label: 'JellyFish status',
 						},
 						{
-							href: routes.jellyfishSetup.pattern,
+							href: routes.jellyfishSetup.href(),
 							label: 'JellyFish setup',
 						},
 					],
@@ -1521,8 +1518,8 @@ export function createDiagnosticsHandler(deps: DashboardDependencies) {
 						? `Last scan ${deps.state.venstarDiscoveryDiagnostics.scannedAt} with ${deps.state.venstarDiscoveryDiagnostics.infoLookups.length} info lookup(s).`
 						: 'No Venstar diagnostics captured yet.',
 					links: [
-						{ href: routes.venstarStatus.pattern, label: 'Venstar status' },
-						{ href: routes.venstarSetup.pattern, label: 'Venstar setup' },
+						{ href: routes.venstarStatus.href(), label: 'Venstar status' },
+						{ href: routes.venstarSetup.href(), label: 'Venstar setup' },
 					],
 				},
 			]
@@ -1530,16 +1527,16 @@ export function createDiagnosticsHandler(deps: DashboardDependencies) {
 			return render(
 				RootLayout({
 					title: 'home connector - diagnostics',
-					currentPath: routes.diagnostics.pattern,
+					currentPath: routes.diagnostics.href(),
 					body: html`${renderPageIntro({
 							eyebrow: 'Diagnostics',
 							title: 'Diagnostics overview',
 							description:
 								'Cross-cutting visibility into discovery recency, configuration gaps, and where to drill in for live operational data.',
 							actions: [
-								{ href: routes.home.pattern, label: 'Dashboard' },
+								{ href: routes.home.href(), label: 'Dashboard' },
 								{
-									href: routes.islandRouterStatus.pattern,
+									href: routes.islandRouterStatus.href(),
 									label: 'Island router',
 								},
 							],
@@ -1627,10 +1624,7 @@ export function createDiagnosticsHandler(deps: DashboardDependencies) {
 				}),
 			)
 		},
-	} satisfies BuildAction<
-		typeof routes.diagnostics.method,
-		typeof routes.diagnostics.pattern
-	>
+	} satisfies Action<typeof routes.diagnostics>
 }
 
 function renderNeighborTable(
@@ -1714,15 +1708,15 @@ export function createIslandRouterStatusHandler(deps: DashboardDependencies) {
 			return render(
 				RootLayout({
 					title: 'home connector - island router status',
-					currentPath: routes.islandRouterStatus.pattern,
+					currentPath: routes.islandRouterStatus.href(),
 					body: html`${renderPageIntro({
 							eyebrow: 'Island router',
 							title: 'Island router status',
 							description:
 								'Router-state diagnostics surfaced directly in the local admin UI, including SSH readiness, interface summaries, neighbors, and host-level drill-downs.',
 							actions: [
-								{ href: routes.home.pattern, label: 'Dashboard' },
-								{ href: routes.diagnostics.pattern, label: 'Diagnostics' },
+								{ href: routes.home.href(), label: 'Dashboard' },
+								{ href: routes.diagnostics.href(), label: 'Diagnostics' },
 							],
 						})}
 						<div class="metric-grid">
@@ -1977,8 +1971,5 @@ export function createIslandRouterStatusHandler(deps: DashboardDependencies) {
 				}),
 			)
 		},
-	} satisfies BuildAction<
-		typeof routes.islandRouterStatus.method,
-		typeof routes.islandRouterStatus.pattern
-	>
+	} satisfies Action<typeof routes.islandRouterStatus>
 }

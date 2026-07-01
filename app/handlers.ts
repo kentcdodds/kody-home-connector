@@ -1,4 +1,4 @@
-import { type BuildAction } from 'remix/fetch-router'
+import { type Action } from 'remix/router'
 import { html } from 'remix/html-template'
 import { render } from './render.ts'
 import { RootLayout } from './root.ts'
@@ -241,7 +241,7 @@ export function createHomeDashboardHandler(
 				}),
 			)
 		},
-	} satisfies BuildAction<typeof routes.home.method, typeof routes.home.pattern>
+	} satisfies Action<typeof routes.home>
 }
 
 function renderDeviceList(
@@ -489,10 +489,7 @@ export function createLutronStatusHandler(
 				status: lutron.getStatus(),
 			})
 		},
-	} satisfies BuildAction<
-		typeof routes.lutronStatus.method,
-		typeof routes.lutronStatus.pattern
-	>
+	} satisfies Action<typeof routes.lutronStatus>
 }
 
 export function createLutronSetupHandler(
@@ -538,10 +535,7 @@ export function createLutronSetupHandler(
 				}),
 			)
 		},
-	} satisfies BuildAction<
-		typeof routes.lutronSetup.method,
-		typeof routes.lutronSetup.pattern
-	>
+	} satisfies Action<typeof routes.lutronSetup>
 }
 
 function renderRokuDiscoveryDiagnostics(
@@ -646,10 +640,7 @@ export function createHealthHandler(
 				},
 			})
 		},
-	} satisfies BuildAction<
-		typeof routes.health.method,
-		typeof routes.health.pattern
-	>
+	} satisfies Action<typeof routes.health>
 }
 
 function renderRokuStatusPage(input: {
@@ -754,10 +745,7 @@ export function createRokuStatusHandler(
 
 			return renderRokuStatusPage({ state })
 		},
-	} satisfies BuildAction<
-		typeof routes.rokuStatus.method,
-		typeof routes.rokuStatus.pattern
-	>
+	} satisfies Action<typeof routes.rokuStatus>
 }
 
 export function createRokuSetupHandler(state: HomeConnectorState) {
@@ -797,10 +785,7 @@ export function createRokuSetupHandler(state: HomeConnectorState) {
 				}),
 			)
 		},
-	} satisfies BuildAction<
-		typeof routes.rokuSetup.method,
-		typeof routes.rokuSetup.pattern
-	>
+	} satisfies Action<typeof routes.rokuSetup>
 }
 
 function renderSamsungTvDeviceList(
@@ -1014,10 +999,7 @@ export function createSamsungTvStatusHandler(
 				status: samsungTv.getStatus(),
 			})
 		},
-	} satisfies BuildAction<
-		typeof routes.samsungTvStatus.method,
-		typeof routes.samsungTvStatus.pattern
-	>
+	} satisfies Action<typeof routes.samsungTvStatus>
 }
 
 export function createSamsungTvSetupHandler(
@@ -1061,8 +1043,5 @@ export function createSamsungTvSetupHandler(
 				}),
 			)
 		},
-	} satisfies BuildAction<
-		typeof routes.samsungTvSetup.method,
-		typeof routes.samsungTvSetup.pattern
-	>
+	} satisfies Action<typeof routes.samsungTvSetup>
 }

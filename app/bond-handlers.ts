@@ -1,4 +1,4 @@
-import { type BuildAction } from 'remix/fetch-router'
+import { type Action } from 'remix/router'
 import { html } from 'remix/html-template'
 import { type createBondAdapter } from '../src/adapters/bond/index.ts'
 import { type BondDiscoveryDiagnostics } from '../src/adapters/bond/types.ts'
@@ -191,10 +191,7 @@ export function createBondStatusHandler(
 				status: bond.getStatus(),
 			})
 		},
-	} satisfies BuildAction<
-		typeof routes.bondStatus.method,
-		typeof routes.bondStatus.pattern
-	>
+	} satisfies Action<typeof routes.bondStatus>
 }
 
 function renderBondSetupPage(input: {
@@ -413,8 +410,5 @@ export function createBondSetupHandler(
 				banner,
 			})
 		},
-	} satisfies BuildAction<
-		typeof routes.bondSetup.method,
-		typeof routes.bondSetup.pattern
-	>
+	} satisfies Action<typeof routes.bondSetup>
 }

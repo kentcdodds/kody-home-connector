@@ -1,4 +1,4 @@
-import { type BuildAction } from 'remix/fetch-router'
+import { type Action } from 'remix/router'
 import { html } from 'remix/html-template'
 import { renderEmptyState } from './admin-ui.ts'
 import { renderBanner, renderInfoRows } from './handler-utils.ts'
@@ -21,7 +21,7 @@ function renderIslandRouterApiStatusPage(input: {
 	return render(
 		RootLayout({
 			title: 'home connector - island router api status',
-			currentPath: routes.islandRouterApiStatus.pattern,
+			currentPath: routes.islandRouterApiStatus.href(),
 			body: html`<section class="card">
 					<h1>Island Router API status</h1>
 					<p class="muted">
@@ -30,7 +30,7 @@ function renderIslandRouterApiStatusPage(input: {
 						Island PIN locally in encrypted SQLite storage.
 					</p>
 					<p>
-						<a href="${routes.islandRouterApiSetup.pattern}"
+						<a href="${routes.islandRouterApiSetup.href()}"
 							>Island Router API setup</a
 						>
 						<span class="muted">— save or clear the local PIN</span>
@@ -90,7 +90,7 @@ function renderIslandRouterApiSetupPage(input: {
 	return render(
 		RootLayout({
 			title: 'home connector - island router api setup',
-			currentPath: routes.islandRouterApiSetup.pattern,
+			currentPath: routes.islandRouterApiSetup.href(),
 			body: html`<section class="card">
 					<h1>Island Router API setup</h1>
 					<p class="muted">
@@ -101,7 +101,7 @@ function renderIslandRouterApiSetupPage(input: {
 						to the browser.
 					</p>
 					<p>
-						<a href="${routes.islandRouterApiStatus.pattern}"
+						<a href="${routes.islandRouterApiStatus.href()}"
 							>Island Router API status</a
 						>
 						<span class="muted">— review API proxy readiness</span>
@@ -183,10 +183,7 @@ export function createIslandRouterApiStatusHandler(
 				status: islandRouterApi.getStatus(),
 			})
 		},
-	} satisfies BuildAction<
-		typeof routes.islandRouterApiStatus.method,
-		typeof routes.islandRouterApiStatus.pattern
-	>
+	} satisfies Action<typeof routes.islandRouterApiStatus>
 }
 
 export function createIslandRouterApiSetupHandler(
@@ -253,8 +250,5 @@ export function createIslandRouterApiSetupHandler(
 
 			return renderPage()
 		},
-	} satisfies BuildAction<
-		typeof routes.islandRouterApiSetup.method,
-		typeof routes.islandRouterApiSetup.pattern
-	>
+	} satisfies Action<typeof routes.islandRouterApiSetup>
 }

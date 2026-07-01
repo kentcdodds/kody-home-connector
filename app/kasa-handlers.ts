@@ -1,4 +1,4 @@
-import { type BuildAction } from 'remix/fetch-router'
+import { type Action } from 'remix/router'
 import { html } from 'remix/html-template'
 import { renderDataTable, renderEmptyState } from './admin-ui.ts'
 import {
@@ -162,7 +162,7 @@ function renderKasaSetupPage(input: {
 	return render(
 		RootLayout({
 			title: 'home connector - kasa setup',
-			currentPath: routes.kasaSetup.pattern,
+			currentPath: routes.kasaSetup.href(),
 			body: html`<section class="card">
 					<h1>Kasa setup</h1>
 					<p class="muted">
@@ -172,10 +172,10 @@ function renderKasaSetupPage(input: {
 						browser.
 					</p>
 					<p>
-						<a href="${routes.kasaStatus.pattern}">Kasa status</a>
+						<a href="${routes.kasaStatus.href()}">Kasa status</a>
 						<span class="muted">— scan plugs and inspect readiness</span>
 						<br />
-						<a href="${routes.home.pattern}">Dashboard</a>
+						<a href="${routes.home.href()}">Dashboard</a>
 					</p>
 					${renderInfoRows([
 						{
@@ -268,7 +268,7 @@ function renderKasaStatusPage(input: {
 	return render(
 		RootLayout({
 			title: 'home connector - kasa status',
-			currentPath: routes.kasaStatus.pattern,
+			currentPath: routes.kasaStatus.href(),
 			body: html`<section class="card">
 					<h1>Kasa status</h1>
 					<p class="muted">
@@ -276,7 +276,7 @@ function renderKasaStatusPage(input: {
 						readiness, and inspect the latest discovery diagnostics.
 					</p>
 					<p>
-						<a href="${routes.kasaSetup.pattern}">Kasa setup</a>
+						<a href="${routes.kasaSetup.href()}">Kasa setup</a>
 						<span class="muted">— save TP-Link account credentials</span>
 					</p>
 					<form method="POST">
@@ -375,10 +375,7 @@ export function createKasaSetupHandler(
 			}
 			return renderPage()
 		},
-	} satisfies BuildAction<
-		typeof routes.kasaSetup.method,
-		typeof routes.kasaSetup.pattern
-	>
+	} satisfies Action<typeof routes.kasaSetup>
 }
 
 export function createKasaStatusHandler(
@@ -425,8 +422,5 @@ export function createKasaStatusHandler(
 			}
 			return renderPage()
 		},
-	} satisfies BuildAction<
-		typeof routes.kasaStatus.method,
-		typeof routes.kasaStatus.pattern
-	>
+	} satisfies Action<typeof routes.kasaStatus>
 }
