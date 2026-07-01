@@ -1,5 +1,5 @@
 import http from 'node:http'
-import { createRequestListener } from '@remix-run/node-fetch-server'
+import { createRequestListener } from 'remix/node-fetch-server'
 import { createHomeConnectorRouter } from '../app/router.ts'
 import {
 	closeHomeConnectorSentry,

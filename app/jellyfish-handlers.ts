@@ -1,4 +1,4 @@
-import { type BuildAction } from 'remix/fetch-router'
+import { type Action } from 'remix/router'
 import { html } from 'remix/html-template'
 import { type createJellyfishAdapter } from '../src/adapters/jellyfish/index.ts'
 import { type HomeConnectorConfig } from '../src/config.ts'
@@ -7,7 +7,7 @@ import { captureHomeConnectorException } from '../src/sentry.ts'
 import { renderInfoRows, renderBanner } from './handler-utils.ts'
 import { render } from './render.ts'
 import { RootLayout } from './root.ts'
-import { type routes } from './routes.ts'
+import { routes } from './routes.ts'
 
 function renderJellyfishControllerList(
 	controllers: ReturnType<
@@ -158,7 +158,7 @@ function renderJellyfishStatusPage(input: {
 						Current discovery and controller state for JellyFish Lighting.
 					</p>
 					<p>
-						<a href="/jellyfish/setup">JellyFish setup</a>
+						<a href="${routes.jellyfishSetup.href()}">JellyFish setup</a>
 						<span class="muted">
 							— connector configuration and scan settings</span
 						>
@@ -271,10 +271,7 @@ export function createJellyfishStatusHandler(
 				banner,
 			})
 		},
-	} satisfies BuildAction<
-		typeof routes.jellyfishStatus.method,
-		typeof routes.jellyfishStatus.pattern
-	>
+	} satisfies Action<typeof routes.jellyfishStatus>
 }
 
 export function createJellyfishSetupHandler(
@@ -296,7 +293,7 @@ export function createJellyfishSetupHandler(
 							Lighting.
 						</p>
 						<p>
-							<a href="/jellyfish/status">JellyFish status</a>
+							<a href="${routes.jellyfishStatus.href()}">JellyFish status</a>
 							<span class="muted"> — scan and inspect live controllers</span>
 						</p>
 						${renderInfoRows([
@@ -333,8 +330,5 @@ export function createJellyfishSetupHandler(
 				}),
 			)
 		},
-	} satisfies BuildAction<
-		typeof routes.jellyfishSetup.method,
-		typeof routes.jellyfishSetup.pattern
-	>
+	} satisfies Action<typeof routes.jellyfishSetup>
 }

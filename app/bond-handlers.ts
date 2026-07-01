@@ -1,4 +1,4 @@
-import { type BuildAction } from 'remix/fetch-router'
+import { type Action } from 'remix/router'
 import { html } from 'remix/html-template'
 import { type createBondAdapter } from '../src/adapters/bond/index.ts'
 import { type BondDiscoveryDiagnostics } from '../src/adapters/bond/types.ts'
@@ -6,7 +6,7 @@ import { captureHomeConnectorException } from '../src/sentry.ts'
 import { type HomeConnectorState } from '../src/state.ts'
 import { render } from './render.ts'
 import { RootLayout } from './root.ts'
-import { type routes } from './routes.ts'
+import { routes } from './routes.ts'
 import { formatJson, renderBanner, renderCodeBlock } from './handler-utils.ts'
 
 function renderBondDiscoveryDiagnostics(
@@ -85,7 +85,7 @@ function renderBondStatusPage(input: {
 						Discovered Bond bridges, adoption state, and stored token presence.
 					</p>
 					<p>
-						<a href="/bond/setup">Bond token setup</a>
+						<a href="${routes.bondSetup.href()}">Bond token setup</a>
 						<span class="muted"> — paste or retrieve the local API token</span>
 					</p>
 					<form method="POST">
@@ -191,10 +191,7 @@ export function createBondStatusHandler(
 				status: bond.getStatus(),
 			})
 		},
-	} satisfies BuildAction<
-		typeof routes.bondStatus.method,
-		typeof routes.bondStatus.pattern
-	>
+	} satisfies Action<typeof routes.bondStatus>
 }
 
 function renderBondSetupPage(input: {
@@ -231,7 +228,7 @@ function renderBondSetupPage(input: {
 						<code>bond_authentication_guide</code>.
 					</p>
 					<p>
-						<a href="/bond/status">Bond status</a>
+						<a href="${routes.bondStatus.href()}">Bond status</a>
 						<span class="muted"> — scan the network for bridges first</span>
 					</p>
 					<p class="muted">
@@ -413,8 +410,5 @@ export function createBondSetupHandler(
 				banner,
 			})
 		},
-	} satisfies BuildAction<
-		typeof routes.bondSetup.method,
-		typeof routes.bondSetup.pattern
-	>
+	} satisfies Action<typeof routes.bondSetup>
 }

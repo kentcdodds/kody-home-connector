@@ -1,4 +1,4 @@
-import { type BuildAction } from 'remix/fetch-router'
+import { type Action } from 'remix/router'
 import { html } from 'remix/html-template'
 import { captureHomeConnectorException } from '../src/sentry.ts'
 import { type HomeConnectorConfig } from '../src/config.ts'
@@ -10,7 +10,7 @@ import {
 import { type HomeConnectorState } from '../src/state.ts'
 import { render } from './render.ts'
 import { RootLayout } from './root.ts'
-import { type routes } from './routes.ts'
+import { routes } from './routes.ts'
 import {
 	formatJson,
 	renderBanner,
@@ -280,7 +280,7 @@ function renderVenstarStatusPage(input: {
 						connector.
 					</p>
 					<p>
-						<a href="/venstar/setup">Venstar setup</a>
+						<a href="${routes.venstarSetup.href()}">Venstar setup</a>
 						<span class="muted">
 							— add, remove, and review managed thermostats
 						</span>
@@ -412,10 +412,7 @@ export function createVenstarStatusHandler(
 				thermostats: await venstar.listThermostatsWithStatus(),
 			})
 		},
-	} satisfies BuildAction<
-		typeof routes.venstarStatus.method,
-		typeof routes.venstarStatus.pattern
-	>
+	} satisfies Action<typeof routes.venstarStatus>
 }
 
 export function createVenstarSetupHandler(
@@ -439,7 +436,7 @@ export function createVenstarSetupHandler(
 							discovered devices with one click.
 						</p>
 						<p>
-							<a href="/venstar/status">Venstar status</a>
+							<a href="${routes.venstarStatus.href()}">Venstar status</a>
 							<span class="muted">
 								— scan the network and verify live thermostat status
 							</span>
@@ -563,8 +560,5 @@ export function createVenstarSetupHandler(
 
 			return renderVenstarSetupPage({})
 		},
-	} satisfies BuildAction<
-		typeof routes.venstarSetup.method,
-		typeof routes.venstarSetup.pattern
-	>
+	} satisfies Action<typeof routes.venstarSetup>
 }

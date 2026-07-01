@@ -1,4 +1,4 @@
-import { type BuildAction } from 'remix/fetch-router'
+import { type Action } from 'remix/router'
 import { html } from 'remix/html-template'
 import { type createSonosAdapter } from '../src/adapters/sonos/index.ts'
 import {
@@ -290,10 +290,7 @@ export function createSonosStatusHandler(
 				groups,
 			})
 		},
-	} satisfies BuildAction<
-		typeof routes.sonosStatus.method,
-		typeof routes.sonosStatus.pattern
-	>
+	} satisfies Action<typeof routes.sonosStatus>
 }
 
 export function createSonosSetupHandler(
@@ -338,8 +335,5 @@ export function createSonosSetupHandler(
 				}),
 			)
 		},
-	} satisfies BuildAction<
-		typeof routes.sonosSetup.method,
-		typeof routes.sonosSetup.pattern
-	>
+	} satisfies Action<typeof routes.sonosSetup>
 }

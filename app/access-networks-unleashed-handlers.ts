@@ -1,4 +1,4 @@
-import { type BuildAction } from 'remix/fetch-router'
+import { type Action } from 'remix/router'
 import { html } from 'remix/html-template'
 import { renderDataTable, renderEmptyState } from './admin-ui.ts'
 import {
@@ -144,7 +144,7 @@ function renderAccessNetworksUnleashedStatusPage(input: {
 	return render(
 		RootLayout({
 			title: 'home connector - access networks unleashed status',
-			currentPath: routes.accessNetworksUnleashedStatus.pattern,
+			currentPath: routes.accessNetworksUnleashedStatus.href(),
 			body: html`<section class="card">
 					<h1>Access Networks Unleashed status</h1>
 					<p class="muted">
@@ -156,7 +156,7 @@ function renderAccessNetworksUnleashedStatusPage(input: {
 						higher-level callers can wrap as needed.
 					</p>
 					<p>
-						<a href="${routes.accessNetworksUnleashedSetup.pattern}"
+						<a href="${routes.accessNetworksUnleashedSetup.href()}"
 							>Access Networks Unleashed setup</a
 						>
 						<span class="muted">
@@ -254,7 +254,7 @@ function renderAccessNetworksUnleashedSetupPage(input: {
 	return render(
 		RootLayout({
 			title: 'home connector - access networks unleashed setup',
-			currentPath: routes.accessNetworksUnleashedSetup.pattern,
+			currentPath: routes.accessNetworksUnleashedSetup.href(),
 			body: html`<section class="card">
 					<h1>Access Networks Unleashed setup</h1>
 					<p class="muted">
@@ -263,7 +263,7 @@ function renderAccessNetworksUnleashedSetupPage(input: {
 						exposing credentials back to the browser.
 					</p>
 					<p>
-						<a href="${routes.accessNetworksUnleashedStatus.pattern}"
+						<a href="${routes.accessNetworksUnleashedStatus.href()}"
 							>Access Networks Unleashed status</a
 						>
 						<span class="muted">
@@ -470,10 +470,7 @@ export function createAccessNetworksUnleashedStatusHandler(
 
 			return renderPage()
 		},
-	} satisfies BuildAction<
-		typeof routes.accessNetworksUnleashedStatus.method,
-		typeof routes.accessNetworksUnleashedStatus.pattern
-	>
+	} satisfies Action<typeof routes.accessNetworksUnleashedStatus>
 }
 
 export function createAccessNetworksUnleashedSetupHandler(
@@ -586,8 +583,5 @@ export function createAccessNetworksUnleashedSetupHandler(
 
 			return renderPage()
 		},
-	} satisfies BuildAction<
-		typeof routes.accessNetworksUnleashedSetup.method,
-		typeof routes.accessNetworksUnleashedSetup.pattern
-	>
+	} satisfies Action<typeof routes.accessNetworksUnleashedSetup>
 }
