@@ -35,6 +35,7 @@ type MockPlayerState = {
 }
 
 type MockFavoriteSeed = {
+	favoriteId: string
 	title: string
 	provider: string
 	uri: string
@@ -99,6 +100,7 @@ const basePlayers: Array<SonosPlayerRecord> = [
 
 const initialMockFavoriteSeeds: Array<MockFavoriteSeed> = [
 	{
+		favoriteId: 'FV:2/1',
 		title: 'Relaxing Piano Broadway Mix',
 		provider: 'Spotify',
 		uri: 'x-rincon-cpcontainer:1006286cspotify%3Aplaylist%3Amockrelaxingpiano?sid=12&flags=10348&sn=6',
@@ -120,6 +122,7 @@ const initialMockFavoriteSeeds: Array<MockFavoriteSeed> = [
 		],
 	},
 	{
+		favoriteId: 'FV:2/2',
 		title: 'Upbeat Dance Mix',
 		provider: 'Spotify',
 		uri: 'x-rincon-cpcontainer:1006286cspotify%3Aplaylist%3Amockupbeatdance?sid=12&flags=10348&sn=6',
@@ -137,6 +140,7 @@ const initialMockFavoriteSeeds: Array<MockFavoriteSeed> = [
 ]
 
 let mockFavoriteSeeds = cloneMockFavoriteSeeds()
+let nextMockFavoriteOrdinal = initialMockFavoriteSeeds.length + 1
 
 const mockSavedQueueSeeds: Array<MockSavedQueueSeed> = [
 	{
@@ -336,10 +340,10 @@ function createGroup(group: {
 	}
 }
 
-function createFavorite(index: number, seed: MockFavoriteSeed): SonosFavorite {
+function createFavorite(seed: MockFavoriteSeed): SonosFavorite {
 	return {
 		kind: 'item',
-		id: `FV:2/${index + 1}`,
+		id: seed.favoriteId,
 		parentId: 'FV:2',
 		title: seed.title,
 		className: 'object.itemobject.item.sonos-favorite',
@@ -350,7 +354,7 @@ function createFavorite(index: number, seed: MockFavoriteSeed): SonosFavorite {
 		provider: seed.provider,
 		playbackType: 'instantPlay',
 		isPlayable: true,
-		favoriteId: `FV:2/${index + 1}`,
+		favoriteId: seed.favoriteId,
 	}
 }
 
@@ -448,6 +452,7 @@ export function resetMockSonosState() {
 	mockState.players.clear()
 	mockState.groups.clear()
 	mockFavoriteSeeds = cloneMockFavoriteSeeds()
+	nextMockFavoriteOrdinal = initialMockFavoriteSeeds.length + 1
 	for (const basePlayer of basePlayers) {
 		mockState.players.set(basePlayer.playerId, {
 			player: {
@@ -550,7 +555,7 @@ export function getMockSonosGroupStatus(groupId: string): SonosGroupStatus {
 }
 
 export function listMockSonosFavorites() {
-	return mockFavoriteSeeds.map((seed, index) => createFavorite(index, seed))
+	return mockFavoriteSeeds.map(createFavorite)
 }
 
 export function createMockSonosFavorite(input: {
@@ -559,7 +564,10 @@ export function createMockSonosFavorite(input: {
 	metadata?: string | null
 	description?: string | null
 }): SonosCreatedFavorite {
+	const favoriteId = `FV:2/${nextMockFavoriteOrdinal}`
+	nextMockFavoriteOrdinal += 1
 	mockFavoriteSeeds.push({
+		favoriteId,
 		title: input.title,
 		provider: input.description ?? 'Custom',
 		uri: input.uri,
@@ -573,7 +581,6 @@ export function createMockSonosFavorite(input: {
 			},
 		],
 	})
-	const favoriteId = `FV:2/${mockFavoriteSeeds.length}`
 	return {
 		favoriteId,
 		title: input.title,
@@ -582,8 +589,8 @@ export function createMockSonosFavorite(input: {
 }
 
 export function deleteMockSonosFavorite(favoriteId: string) {
-	const index = listMockSonosFavorites().findIndex(
-		(favorite) => favorite.favoriteId === favoriteId,
+	const index = mockFavoriteSeeds.findIndex(
+		(seed) => seed.favoriteId === favoriteId,
 	)
 	if (index === -1) {
 		throw new Error('Mock Sonos favorite was not found.')
@@ -651,12 +658,12 @@ export function enqueueMockSonosFavorite(input: {
 	title?: string
 }) {
 	const favorite = resolveMockFavorite(input)
-	const seed =
-		mockFavoriteSeeds[
-			listMockSonosFavorites().findIndex(
-				(entry) => entry.favoriteId === favorite.favoriteId,
-			)
-		]
+	const seed = mockFavoriteSeeds.find(
+		(entry) => entry.favoriteId === favorite.favoriteId,
+	)
+	if (!seed) {
+		throw new Error('Mock Sonos favorite was not found.')
+	}
 	const coordinator = getCoordinatorState(input.playerId)
 	coordinator.queue = rebuildQueueIds([
 		...coordinator.queue,
@@ -676,9 +683,12 @@ export function enqueueMockSonosUri(input: {
 }): SonosQueueEnqueueResult {
 	const coordinator = getCoordinatorState(input.playerId)
 	const existingQueue = input.clearQueue ? [] : coordinator.queue
+	const effectiveCurrentTrackIndex = input.clearQueue
+		? null
+		: coordinator.currentTrackIndex
 	const insertIndex =
-		input.enqueueAsNext && coordinator.currentTrackIndex != null
-			? coordinator.currentTrackIndex + 1
+		input.enqueueAsNext && effectiveCurrentTrackIndex != null
+			? Math.min(effectiveCurrentTrackIndex + 1, existingQueue.length)
 			: existingQueue.length
 	const title = extractMockTitleFromMetadata(input.metadata)
 	const tracksToAdd = input.uri.startsWith('x-rincon-cpcontainer:')
@@ -737,12 +747,12 @@ export function playMockSonosFavorite(input: {
 	title?: string
 }) {
 	const favorite = resolveMockFavorite(input)
-	const seed =
-		mockFavoriteSeeds[
-			listMockSonosFavorites().findIndex(
-				(entry) => entry.favoriteId === favorite.favoriteId,
-			)
-		]
+	const seed = mockFavoriteSeeds.find(
+		(entry) => entry.favoriteId === favorite.favoriteId,
+	)
+	if (!seed) {
+		throw new Error('Mock Sonos favorite was not found.')
+	}
 	setQueueAndPlayback(input.playerId, queueTracksFromFavorite(seed), true)
 	return favorite
 }

@@ -97,10 +97,16 @@ test('sonos enqueue uri supports bare Spotify playlist containers in mock mode',
 		const playerId = players[0]!.playerId
 		sonos.adoptPlayer(playerId)
 
+		await sonos.playFavorite({
+			playerId,
+			title: 'Relaxing Piano Broadway Mix',
+		})
+		await sonos.nextTrack(playerId)
 		const result = await sonos.enqueueUri({
 			playerId,
 			uri: 'spotify:playlist:37i9dQZF1DXcBWIGoYBM5M',
 			clearQueue: true,
+			enqueueAsNext: true,
 			playNow: true,
 		})
 		const queue = await sonos.listQueue(playerId)
@@ -147,6 +153,9 @@ test('sonos create and delete favorite update mock favorites', async () => {
 			description: 'Spotify',
 		})
 		const favorites = await sonos.listFavorites(playerId)
+		const originalSecondFavoriteId = favorites.find(
+			(entry) => entry.title === 'Upbeat Dance Mix',
+		)?.favoriteId
 		await sonos.playFavorite({
 			playerId,
 			favoriteId: favorite.favoriteId,
@@ -157,6 +166,9 @@ test('sonos create and delete favorite update mock favorites', async () => {
 			favoriteId: favorite.favoriteId,
 		})
 		const favoritesAfterDelete = await sonos.listFavorites(playerId)
+		const secondFavoriteIdAfterDelete = favoritesAfterDelete.find(
+			(entry) => entry.title === 'Upbeat Dance Mix',
+		)?.favoriteId
 
 		expect(favorite).toMatchObject({
 			favoriteId: expect.stringMatching(/^FV:2\//),
@@ -171,6 +183,7 @@ test('sonos create and delete favorite update mock favorites', async () => {
 				(entry) => entry.favoriteId === favorite.favoriteId,
 			),
 		).toBe(false)
+		expect(secondFavoriteIdAfterDelete).toBe(originalSecondFavoriteId)
 	} finally {
 		storage.close()
 	}

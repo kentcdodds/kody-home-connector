@@ -713,6 +713,9 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 		expect(tools.some((tool) => tool.name === 'sonos_create_favorite')).toBe(
 			true,
 		)
+		expect(tools.some((tool) => tool.name === 'sonos_delete_favorite')).toBe(
+			true,
+		)
 		const sonosEnqueueUri = await mcp.callTool('sonos_enqueue_uri', {
 			playerId: sonosPlayerId,
 			uri: 'spotify:playlist:37i9dQZF1DXcBWIGoYBM5M',
@@ -735,6 +738,18 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 				title: 'MCP Favorite',
 				uri: 'x-sonosapi-radio:mock-station?sid=254&flags=32',
 			},
+		})
+		const sonosCreatedFavoriteId = (
+			sonosCreatedFavorite.structuredContent as {
+				favorite: { favoriteId: string }
+			}
+		).favorite.favoriteId
+		const sonosDeletedFavorite = await mcp.callTool('sonos_delete_favorite', {
+			playerId: sonosPlayerId,
+			favoriteId: sonosCreatedFavoriteId,
+		})
+		expect(sonosDeletedFavorite.structuredContent).toMatchObject({
+			favoriteId: sonosCreatedFavoriteId,
 		})
 
 		const jellyfishScan = await mcp.callTool('jellyfish_scan_controllers')

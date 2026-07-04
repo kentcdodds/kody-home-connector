@@ -71,10 +71,19 @@ function extractSpotifyDescToken(metadata: string | null) {
 	)
 }
 
+function isSpotifyFavoriteUri(uri: string | null) {
+	const normalizedUri = uri?.toLowerCase() ?? ''
+	return (
+		normalizedUri.includes('spotify%3a') ||
+		normalizedUri.startsWith('x-sonos-spotify:')
+	)
+}
+
 function getSpotifyFavoriteServiceInfo(
 	favorites: Array<SonosFavorite>,
 ): SpotifyServiceInfo | null {
 	for (const favorite of favorites) {
+		if (!isSpotifyFavoriteUri(favorite.uri)) continue
 		const descToken = extractSpotifyDescToken(favorite.metadata)
 		const sn = favorite.uri ? getQueryParam(favorite.uri, 'sn') : null
 		const sid = favorite.uri ? getQueryParam(favorite.uri, 'sid') : null
