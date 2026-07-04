@@ -1,10 +1,12 @@
 import {
 	type SonosAudioInputStatus,
+	type SonosCreatedFavorite,
 	type SonosDidlEntry,
 	type SonosGroup,
 	type SonosGroupMember,
 	type SonosLibraryCategory,
 	type SonosPersistedPlayer,
+	type SonosQueueEnqueueResult,
 	type SonosQueueTrack,
 } from './types.ts'
 
@@ -547,15 +549,29 @@ export async function removeSonosQueueTrackLive(
 	)
 }
 
+export async function removeSonosQueueTrackRangeLive(input: {
+	host: string
+	startingIndex: number
+	numberOfTracks: number
+}) {
+	if (input.numberOfTracks <= 0) return
+	await avTransport(
+		input.host,
+		'RemoveTrackRangeFromQueue',
+		`<u:RemoveTrackRangeFromQueue xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"><InstanceID>0</InstanceID><UpdateID>0</UpdateID><StartingIndex>${input.startingIndex}</StartingIndex><NumberOfTracks>${input.numberOfTracks}</NumberOfTracks></u:RemoveTrackRangeFromQueue>`,
+	)
+}
+
 export async function addSonosUriToQueueLive(input: {
 	host: string
 	uri: string
 	metadata?: string | null
-}) {
+	enqueueAsNext?: boolean
+}): Promise<SonosQueueEnqueueResult> {
 	const xml = await avTransport(
 		input.host,
 		'AddURIToQueue',
-		`<u:AddURIToQueue xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"><InstanceID>0</InstanceID><EnqueuedURI>${encodeXml(input.uri)}</EnqueuedURI><EnqueuedURIMetaData>${encodeXml(input.metadata ?? '')}</EnqueuedURIMetaData><DesiredFirstTrackNumberEnqueued>0</DesiredFirstTrackNumberEnqueued><EnqueueAsNext>0</EnqueueAsNext></u:AddURIToQueue>`,
+		`<u:AddURIToQueue xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"><InstanceID>0</InstanceID><EnqueuedURI>${encodeXml(input.uri)}</EnqueuedURI><EnqueuedURIMetaData>${encodeXml(input.metadata ?? '')}</EnqueuedURIMetaData><DesiredFirstTrackNumberEnqueued>0</DesiredFirstTrackNumberEnqueued><EnqueueAsNext>${input.enqueueAsNext ? 1 : 0}</EnqueueAsNext></u:AddURIToQueue>`,
 	)
 	return {
 		firstTrackNumberEnqueued: Number(
@@ -564,6 +580,47 @@ export async function addSonosUriToQueueLive(input: {
 		numTracksAdded: Number(extractTag(xml, 'NumTracksAdded') ?? '0'),
 		newQueueLength: Number(extractTag(xml, 'NewQueueLength') ?? '0'),
 	}
+}
+
+function buildSonosFavoriteElements(input: {
+	title: string
+	uri: string
+	metadata?: string | null
+	description?: string | null
+}) {
+	const description = input.description?.trim()
+	return `<DIDL-Lite xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" xmlns:r="urn:schemas-rinconnetworks-com:metadata-1-0/" xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/"><item id="" parentID="FV:2" restricted="true"><dc:title>${encodeXml(input.title)}</dc:title><upnp:class>object.itemobject.item.sonos-favorite</upnp:class><res>${encodeXml(input.uri)}</res><r:ordinal>0</r:ordinal><r:resMD>${encodeXml(input.metadata ?? '')}</r:resMD><r:type>instantPlay</r:type>${description ? `<r:description>${encodeXml(description)}</r:description>` : ''}</item></DIDL-Lite>`
+}
+
+export async function createSonosFavoriteLive(input: {
+	host: string
+	title: string
+	uri: string
+	metadata?: string | null
+	description?: string | null
+}): Promise<SonosCreatedFavorite> {
+	const elements = buildSonosFavoriteElements(input)
+	const xml = await contentDirectory(
+		input.host,
+		'CreateObject',
+		`<u:CreateObject xmlns:u="urn:schemas-upnp-org:service:ContentDirectory:1"><ContainerID>FV:2</ContainerID><Elements>${encodeXml(elements)}</Elements></u:CreateObject>`,
+	)
+	return {
+		favoriteId: decodeXmlEntities(extractTag(xml, 'ObjectID') ?? ''),
+		title: input.title,
+		uri: input.uri,
+	}
+}
+
+export async function deleteSonosFavoriteLive(input: {
+	host: string
+	favoriteId: string
+}) {
+	await contentDirectory(
+		input.host,
+		'DestroyObject',
+		`<u:DestroyObject xmlns:u="urn:schemas-upnp-org:service:ContentDirectory:1"><ObjectID>${encodeXml(input.favoriteId)}</ObjectID></u:DestroyObject>`,
+	)
 }
 
 export async function setSonosTransportUriLive(input: {
@@ -623,6 +680,17 @@ export async function seekSonosTrackLive(host: string, position: string) {
 		host,
 		'Seek',
 		`<u:Seek xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"><InstanceID>0</InstanceID><Unit>REL_TIME</Unit><Target>${encodeXml(position)}</Target></u:Seek>`,
+	)
+}
+
+export async function seekSonosQueueTrackLive(
+	host: string,
+	trackNumber: number,
+) {
+	await avTransport(
+		host,
+		'Seek',
+		`<u:Seek xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"><InstanceID>0</InstanceID><Unit>TRACK_NR</Unit><Target>${trackNumber}</Target></u:Seek>`,
 	)
 }
 

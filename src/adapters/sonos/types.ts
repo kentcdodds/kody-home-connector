@@ -84,6 +84,18 @@ export type SonosQueueTrack = SonosDidlEntry & {
 	position: number
 }
 
+export type SonosQueueEnqueueResult = {
+	firstTrackNumberEnqueued: number
+	numTracksAdded: number
+	newQueueLength: number
+}
+
+export type SonosCreatedFavorite = {
+	favoriteId: string
+	title: string
+	uri: string
+}
+
 export type SonosGroupMember = {
 	playerId: string
 	udn: string
