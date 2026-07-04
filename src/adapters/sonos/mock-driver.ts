@@ -103,7 +103,7 @@ const initialMockFavoriteSeeds: Array<MockFavoriteSeed> = [
 		favoriteId: 'FV:2/1',
 		title: 'Relaxing Piano Broadway Mix',
 		provider: 'Spotify',
-		uri: 'x-rincon-cpcontainer:1006286cspotify%3Aplaylist%3Amockrelaxingpiano?sid=12&flags=10348&sn=6',
+		uri: 'x-rincon-cpcontainer:1006286cspotify%3Aplaylist%3Amockrelaxingpiano?sid=12&amp;flags=10348&amp;sn=6',
 		metadata:
 			'<DIDL-Lite xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" xmlns:r="urn:schemas-rinconnetworks-com:metadata-1-0/" xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/"><item id="mock-relaxing-piano-broadway-mix" parentID="mock-relaxing-piano-broadway-mix" restricted="true"><dc:title>Relaxing Piano Broadway Mix</dc:title><upnp:class>object.container.playlistContainer</upnp:class><desc id="cdudn" nameSpace="urn:schemas-rinconnetworks-com:metadata-1-0/">SA_RINCON3079_X_#Svc3079-mock</desc></item></DIDL-Lite>',
 		tracks: [
@@ -125,7 +125,7 @@ const initialMockFavoriteSeeds: Array<MockFavoriteSeed> = [
 		favoriteId: 'FV:2/2',
 		title: 'Upbeat Dance Mix',
 		provider: 'Spotify',
-		uri: 'x-rincon-cpcontainer:1006286cspotify%3Aplaylist%3Amockupbeatdance?sid=12&flags=10348&sn=6',
+		uri: 'x-rincon-cpcontainer:1006286cspotify%3Aplaylist%3Amockupbeatdance?sid=12&amp;flags=10348&amp;sn=6',
 		metadata:
 			'<DIDL-Lite xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" xmlns:r="urn:schemas-rinconnetworks-com:metadata-1-0/" xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/"><item id="mock-upbeat-dance-mix" parentID="mock-upbeat-dance-mix" restricted="true"><dc:title>Upbeat Dance Mix</dc:title><upnp:class>object.container.playlistContainer</upnp:class><desc id="cdudn" nameSpace="urn:schemas-rinconnetworks-com:metadata-1-0/">SA_RINCON3079_X_#Svc3079-mock</desc></item></DIDL-Lite>',
 		tracks: [
