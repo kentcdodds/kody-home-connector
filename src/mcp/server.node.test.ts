@@ -704,6 +704,38 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 		expect(sonosPlayers.structuredContent).toMatchObject({
 			players: expect.any(Array),
 		})
+		const sonosPlayerId = (
+			sonosPlayers.structuredContent as {
+				players: Array<{ playerId: string }>
+			}
+		).players[0]!.playerId
+		expect(tools.some((tool) => tool.name === 'sonos_enqueue_uri')).toBe(true)
+		expect(tools.some((tool) => tool.name === 'sonos_create_favorite')).toBe(
+			true,
+		)
+		const sonosEnqueueUri = await mcp.callTool('sonos_enqueue_uri', {
+			playerId: sonosPlayerId,
+			uri: 'spotify:playlist:37i9dQZF1DXcBWIGoYBM5M',
+			clearQueue: true,
+		})
+		expect(sonosEnqueueUri.structuredContent).toMatchObject({
+			result: {
+				firstTrackNumberEnqueued: 1,
+				numTracksAdded: 2,
+			},
+		})
+		const sonosCreatedFavorite = await mcp.callTool('sonos_create_favorite', {
+			playerId: sonosPlayerId,
+			title: 'MCP Favorite',
+			uri: 'x-sonosapi-radio:mock-station?sid=254&flags=32',
+			description: 'Radio',
+		})
+		expect(sonosCreatedFavorite.structuredContent).toMatchObject({
+			favorite: {
+				title: 'MCP Favorite',
+				uri: 'x-sonosapi-radio:mock-station?sid=254&flags=32',
+			},
+		})
 
 		const jellyfishScan = await mcp.callTool('jellyfish_scan_controllers')
 		expect(jellyfishScan.structuredContent).toMatchObject({

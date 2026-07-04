@@ -2739,6 +2739,66 @@ export function createHomeConnectorMcpServer(input: {
 
 	registerTool(
 		{
+			name: 'sonos_create_favorite',
+			title: 'Create Sonos Favorite',
+			description:
+				'Create a Sonos favorite in the household Favorites container from a playable Sonos URI or bare Spotify URI.',
+			...playerScopedSchema({
+				title: z.string().min(1),
+				uri: z.string().min(1),
+				metadata: z.string().optional(),
+				description: z.string().min(1).optional(),
+			}),
+		},
+		async (args) => {
+			const favorite = await sonos.createFavorite({
+				playerId:
+					args['playerId'] == null ? undefined : String(args['playerId']),
+				title: String(args['title'] ?? ''),
+				uri: String(args['uri'] ?? ''),
+				metadata:
+					args['metadata'] == null ? undefined : String(args['metadata']),
+				description:
+					args['description'] == null ? undefined : String(args['description']),
+			})
+			return structuredTextResult(
+				`Created Sonos favorite "${favorite.title}".`,
+				{
+					favorite,
+				},
+			)
+		},
+	)
+
+	registerTool(
+		{
+			name: 'sonos_delete_favorite',
+			title: 'Delete Sonos Favorite',
+			description: 'Delete a Sonos favorite by favorite id.',
+			...playerScopedSchema({
+				favoriteId: z.string().min(1),
+			}),
+			annotations: {
+				destructiveHint: true,
+			},
+		},
+		async (args) => {
+			const playerId =
+				args['playerId'] == null ? undefined : String(args['playerId'])
+			const favoriteId = String(args['favoriteId'] ?? '')
+			await sonos.deleteFavorite({
+				playerId,
+				favoriteId,
+			})
+			return structuredTextResult('Deleted the requested Sonos favorite.', {
+				playerId: playerId ?? null,
+				favoriteId,
+			})
+		},
+	)
+
+	registerTool(
+		{
 			name: 'sonos_list_saved_queues',
 			title: 'List Sonos Saved Queues',
 			description: 'List Sonos saved queues.',
@@ -2920,6 +2980,45 @@ export function createHomeConnectorMcpServer(input: {
 				playerId: playerId ?? null,
 				queueItemId: queueItemId ?? null,
 				position: position ?? null,
+			})
+		},
+	)
+
+	registerTool(
+		{
+			name: 'sonos_enqueue_uri',
+			title: 'Enqueue Sonos URI',
+			description:
+				'Add a Sonos URI, music-service container URI, radio URI, or bare Spotify URI to a player queue and optionally start playback from the enqueued item.',
+			...buildToolInputSchema({
+				playerId: z.string().min(1),
+				uri: z.string().min(1),
+				metadata: z.string().optional(),
+				enqueueAsNext: z.boolean().optional(),
+				clearQueue: z.boolean().optional(),
+				playNow: z.boolean().optional(),
+			}),
+		},
+		async (args) => {
+			const playerId =
+				args['playerId'] == null ? undefined : String(args['playerId'])
+			const result = await sonos.enqueueUri({
+				playerId,
+				uri: String(args['uri'] ?? ''),
+				metadata:
+					args['metadata'] == null ? undefined : String(args['metadata']),
+				enqueueAsNext:
+					args['enqueueAsNext'] == null
+						? undefined
+						: Boolean(args['enqueueAsNext']),
+				clearQueue:
+					args['clearQueue'] == null ? undefined : Boolean(args['clearQueue']),
+				playNow: args['playNow'] == null ? undefined : Boolean(args['playNow']),
+			})
+			return structuredTextResult('Enqueued the Sonos URI.', {
+				playerId: playerId ?? null,
+				uri: String(args['uri'] ?? ''),
+				result,
 			})
 		},
 	)

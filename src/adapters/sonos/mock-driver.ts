@@ -1,5 +1,6 @@
 import {
 	type SonosAudioInputStatus,
+	type SonosCreatedFavorite,
 	type SonosDidlEntry,
 	type SonosFavorite,
 	type SonosGroup,
@@ -9,6 +10,7 @@ import {
 	type SonosLibrarySearchResult,
 	type SonosPersistedPlayer,
 	type SonosPlayerRecord,
+	type SonosQueueEnqueueResult,
 	type SonosPlayerStatus,
 	type SonosQueueTrack,
 	type SonosSavedQueue,
@@ -95,11 +97,11 @@ const basePlayers: Array<SonosPlayerRecord> = [
 	},
 ]
 
-const mockFavoriteSeeds: Array<MockFavoriteSeed> = [
+const initialMockFavoriteSeeds: Array<MockFavoriteSeed> = [
 	{
 		title: 'Relaxing Piano Broadway Mix',
 		provider: 'Spotify',
-		uri: 'x-rincon-cpcontainer:mock-relaxing-piano-broadway-mix',
+		uri: 'x-rincon-cpcontainer:1006286cspotify%3Aplaylist%3Amockrelaxingpiano?sid=12&flags=10348&sn=6',
 		metadata:
 			'<DIDL-Lite xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" xmlns:r="urn:schemas-rinconnetworks-com:metadata-1-0/" xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/"><item id="mock-relaxing-piano-broadway-mix" parentID="mock-relaxing-piano-broadway-mix" restricted="true"><dc:title>Relaxing Piano Broadway Mix</dc:title><upnp:class>object.container.playlistContainer</upnp:class><desc id="cdudn" nameSpace="urn:schemas-rinconnetworks-com:metadata-1-0/">SA_RINCON3079_X_#Svc3079-mock</desc></item></DIDL-Lite>',
 		tracks: [
@@ -120,7 +122,7 @@ const mockFavoriteSeeds: Array<MockFavoriteSeed> = [
 	{
 		title: 'Upbeat Dance Mix',
 		provider: 'Spotify',
-		uri: 'x-rincon-cpcontainer:mock-upbeat-dance-mix',
+		uri: 'x-rincon-cpcontainer:1006286cspotify%3Aplaylist%3Amockupbeatdance?sid=12&flags=10348&sn=6',
 		metadata:
 			'<DIDL-Lite xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" xmlns:r="urn:schemas-rinconnetworks-com:metadata-1-0/" xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/"><item id="mock-upbeat-dance-mix" parentID="mock-upbeat-dance-mix" restricted="true"><dc:title>Upbeat Dance Mix</dc:title><upnp:class>object.container.playlistContainer</upnp:class><desc id="cdudn" nameSpace="urn:schemas-rinconnetworks-com:metadata-1-0/">SA_RINCON3079_X_#Svc3079-mock</desc></item></DIDL-Lite>',
 		tracks: [
@@ -133,6 +135,8 @@ const mockFavoriteSeeds: Array<MockFavoriteSeed> = [
 		],
 	},
 ]
+
+let mockFavoriteSeeds = cloneMockFavoriteSeeds()
 
 const mockSavedQueueSeeds: Array<MockSavedQueueSeed> = [
 	{
@@ -233,6 +237,13 @@ const mockState = {
 			memberPlayerIds: Array<string>
 		}
 	>(),
+}
+
+function cloneMockFavoriteSeeds() {
+	return initialMockFavoriteSeeds.map((seed) => ({
+		...seed,
+		tracks: seed.tracks.map((track) => ({ ...track })),
+	}))
 }
 
 function stripUuidPrefix(udn: string) {
@@ -389,6 +400,12 @@ function normalizeMockTitle(value: string | null | undefined) {
 		.trim()
 }
 
+function extractMockTitleFromMetadata(metadata: string | null | undefined) {
+	return (
+		metadata?.match(/<dc:title>([\s\S]*?)<\/dc:title>/)?.[1] ?? 'Custom URI'
+	)
+}
+
 function setQueueAndPlayback(
 	playerId: string,
 	queueTracks: Array<MockQueueTrack>,
@@ -430,6 +447,7 @@ function queueTracksFromSavedQueue(seed: MockSavedQueueSeed) {
 export function resetMockSonosState() {
 	mockState.players.clear()
 	mockState.groups.clear()
+	mockFavoriteSeeds = cloneMockFavoriteSeeds()
 	for (const basePlayer of basePlayers) {
 		mockState.players.set(basePlayer.playerId, {
 			player: {
@@ -535,6 +553,44 @@ export function listMockSonosFavorites() {
 	return mockFavoriteSeeds.map((seed, index) => createFavorite(index, seed))
 }
 
+export function createMockSonosFavorite(input: {
+	title: string
+	uri: string
+	metadata?: string | null
+	description?: string | null
+}): SonosCreatedFavorite {
+	mockFavoriteSeeds.push({
+		title: input.title,
+		provider: input.description ?? 'Custom',
+		uri: input.uri,
+		metadata: input.metadata ?? '',
+		tracks: [
+			{
+				title: input.title,
+				artist: input.description ?? 'Custom URI',
+				album: input.title,
+				uri: input.uri,
+			},
+		],
+	})
+	const favoriteId = `FV:2/${mockFavoriteSeeds.length}`
+	return {
+		favoriteId,
+		title: input.title,
+		uri: input.uri,
+	}
+}
+
+export function deleteMockSonosFavorite(favoriteId: string) {
+	const index = listMockSonosFavorites().findIndex(
+		(favorite) => favorite.favoriteId === favoriteId,
+	)
+	if (index === -1) {
+		throw new Error('Mock Sonos favorite was not found.')
+	}
+	mockFavoriteSeeds.splice(index, 1)
+}
+
 export function searchMockSonosFavorites(query: string) {
 	return searchEntries(listMockSonosFavorites(), query)
 }
@@ -608,6 +664,71 @@ export function enqueueMockSonosFavorite(input: {
 	])
 	coordinator.currentUri = `x-rincon-queue:${stripUuidPrefix(coordinator.player.udn)}#0`
 	return favorite
+}
+
+export function enqueueMockSonosUri(input: {
+	playerId: string
+	uri: string
+	metadata?: string | null
+	enqueueAsNext?: boolean
+	clearQueue?: boolean
+	playNow?: boolean
+}): SonosQueueEnqueueResult {
+	const coordinator = getCoordinatorState(input.playerId)
+	const existingQueue = input.clearQueue ? [] : coordinator.queue
+	const insertIndex =
+		input.enqueueAsNext && coordinator.currentTrackIndex != null
+			? coordinator.currentTrackIndex + 1
+			: existingQueue.length
+	const title = extractMockTitleFromMetadata(input.metadata)
+	const tracksToAdd = input.uri.startsWith('x-rincon-cpcontainer:')
+		? [
+				createMockQueueTrack({
+					position: 1,
+					title: `${title} Track 1`,
+					artist: 'Spotify',
+					album: title,
+					uri: `${input.uri}#track-1`,
+					metadata: input.metadata,
+				}),
+				createMockQueueTrack({
+					position: 2,
+					title: `${title} Track 2`,
+					artist: 'Spotify',
+					album: title,
+					uri: `${input.uri}#track-2`,
+					metadata: input.metadata,
+				}),
+			]
+		: [
+				createMockQueueTrack({
+					position: 1,
+					title,
+					artist: 'Custom URI',
+					album: title,
+					uri: input.uri,
+					metadata: input.metadata,
+				}),
+			]
+	const queue = [...existingQueue]
+	queue.splice(insertIndex, 0, ...tracksToAdd)
+	coordinator.queue = rebuildQueueIds(queue)
+	coordinator.currentUri = `x-rincon-queue:${stripUuidPrefix(coordinator.player.udn)}#0`
+	if (input.playNow ?? true) {
+		coordinator.currentTrackIndex = insertIndex
+		coordinator.transportState = 'PLAYING'
+		coordinator.transportStatus = 'OK'
+	} else if (
+		coordinator.currentTrackIndex == null &&
+		coordinator.queue.length
+	) {
+		coordinator.currentTrackIndex = 0
+	}
+	return {
+		firstTrackNumberEnqueued: insertIndex + 1,
+		numTracksAdded: tracksToAdd.length,
+		newQueueLength: coordinator.queue.length,
+	}
 }
 
 export function playMockSonosFavorite(input: {

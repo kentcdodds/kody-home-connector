@@ -33,7 +33,10 @@ import {
 	groupMockSonosPlayers,
 	adjustMockSonosVolume,
 	clearMockSonosQueue,
+	createMockSonosFavorite,
+	deleteMockSonosFavorite,
 	enqueueMockSonosFavorite,
+	enqueueMockSonosUri,
 	enqueueMockSonosSavedQueue,
 	nextMockSonosTrack,
 	removeMockSonosQueueTrack,
@@ -50,6 +53,8 @@ import {
 	addSonosUriToQueueLive,
 	browseAllSonosContent,
 	clearSonosQueueLive,
+	createSonosFavoriteLive,
+	deleteSonosFavoriteLive,
 	enqueueSonosEntryIntoQueueLive,
 	getSonosAudioInputLive,
 	getSonosBassLive,
@@ -87,15 +92,19 @@ import {
 	stopSonosLive,
 	stripSonosUuidPrefix,
 	seekSonosTrackLive,
+	seekSonosQueueTrackLive,
 	ungroupSonosPlayerLive,
 } from './soap-client.ts'
 import { scanSonosPlayers } from './discovery.ts'
+import { buildSonosSpotifyUri } from './spotify.ts'
 import {
+	type SonosCreatedFavorite,
 	type SonosDidlEntry,
 	type SonosFavorite,
 	type SonosGroup,
 	type SonosLibraryCategory,
 	type SonosPersistedPlayer,
+	type SonosQueueEnqueueResult,
 	type SonosSavedQueue,
 } from './types.ts'
 
@@ -479,6 +488,128 @@ export function createSonosAdapter(input: {
 		const favorite = await resolveFavorite(inputArgs)
 		await enqueueLiveEntry(player, favorite)
 		return favorite
+	}
+
+	async function buildQueueUri(inputArgs: {
+		playerId?: string
+		uri: string
+		metadata?: string | null
+	}) {
+		if (
+			!inputArgs.uri
+				.trim()
+				.match(/^spotify:(playlist|album|track):[A-Za-z0-9]+$/)
+		) {
+			return {
+				uri: inputArgs.uri,
+				metadata: inputArgs.metadata ?? null,
+			}
+		}
+		const spotify = buildSonosSpotifyUri({
+			uri: inputArgs.uri,
+			favorites: await listFavorites(inputArgs.playerId),
+		})
+		if (!spotify) {
+			throw new Error(`Unsupported Spotify URI "${inputArgs.uri}".`)
+		}
+		return {
+			uri: spotify.uri,
+			metadata: inputArgs.metadata ?? spotify.metadata,
+		}
+	}
+
+	async function enqueueUri(inputArgs: {
+		playerId?: string
+		uri: string
+		metadata?: string | null
+		enqueueAsNext?: boolean
+		clearQueue?: boolean
+		playNow?: boolean
+	}): Promise<SonosQueueEnqueueResult> {
+		const player = resolvePlayer(inputArgs.playerId)
+		const prepared = await buildQueueUri({
+			playerId: player.playerId,
+			uri: inputArgs.uri,
+			metadata: inputArgs.metadata,
+		})
+		if (input.config.mocksEnabled && isMockSonosHost(player.host)) {
+			return enqueueMockSonosUri({
+				playerId: player.playerId,
+				uri: prepared.uri,
+				metadata: prepared.metadata,
+				enqueueAsNext: inputArgs.enqueueAsNext,
+				clearQueue: inputArgs.clearQueue,
+				playNow: inputArgs.playNow,
+			})
+		}
+		if (inputArgs.clearQueue) {
+			await clearSonosQueueLive(player.host)
+		}
+		const result = await addSonosUriToQueueLive({
+			host: player.host,
+			uri: prepared.uri,
+			metadata: prepared.metadata,
+			enqueueAsNext: inputArgs.enqueueAsNext,
+		})
+		if (inputArgs.playNow ?? true) {
+			await setSonosTransportUriLive({
+				host: player.host,
+				uri: `x-rincon-queue:${stripSonosUuidPrefix(player.udn)}#0`,
+			})
+			if (result.firstTrackNumberEnqueued > 0) {
+				await seekSonosQueueTrackLive(
+					player.host,
+					result.firstTrackNumberEnqueued,
+				)
+			}
+			await playSonosLive(player.host)
+		}
+		return result
+	}
+
+	async function createFavorite(inputArgs: {
+		playerId?: string
+		title: string
+		uri: string
+		metadata?: string | null
+		description?: string | null
+	}): Promise<SonosCreatedFavorite> {
+		const householdPlayer = resolveHouseholdPlayer(inputArgs.playerId)
+		const prepared = await buildQueueUri({
+			playerId: householdPlayer.playerId,
+			uri: inputArgs.uri,
+			metadata: inputArgs.metadata,
+		})
+		if (input.config.mocksEnabled && isMockSonosHost(householdPlayer.host)) {
+			return createMockSonosFavorite({
+				title: inputArgs.title,
+				uri: prepared.uri,
+				metadata: prepared.metadata,
+				description: inputArgs.description,
+			})
+		}
+		return await createSonosFavoriteLive({
+			host: householdPlayer.host,
+			title: inputArgs.title,
+			uri: prepared.uri,
+			metadata: prepared.metadata,
+			description: inputArgs.description,
+		})
+	}
+
+	async function deleteFavorite(inputArgs: {
+		playerId?: string
+		favoriteId: string
+	}) {
+		const householdPlayer = resolveHouseholdPlayer(inputArgs.playerId)
+		if (input.config.mocksEnabled && isMockSonosHost(householdPlayer.host)) {
+			deleteMockSonosFavorite(inputArgs.favoriteId)
+			return
+		}
+		await deleteSonosFavoriteLive({
+			host: householdPlayer.host,
+			favoriteId: inputArgs.favoriteId,
+		})
 	}
 
 	async function playFavorite(inputArgs: {
@@ -930,6 +1061,28 @@ export function createSonosAdapter(input: {
 			title?: string
 		}) {
 			return await enqueueFavorite(inputArgs)
+		},
+		async enqueueUri(inputArgs: {
+			playerId?: string
+			uri: string
+			metadata?: string | null
+			enqueueAsNext?: boolean
+			clearQueue?: boolean
+			playNow?: boolean
+		}) {
+			return await enqueueUri(inputArgs)
+		},
+		async createFavorite(inputArgs: {
+			playerId?: string
+			title: string
+			uri: string
+			metadata?: string | null
+			description?: string | null
+		}) {
+			return await createFavorite(inputArgs)
+		},
+		async deleteFavorite(inputArgs: { playerId?: string; favoriteId: string }) {
+			await deleteFavorite(inputArgs)
 		},
 		async listSavedQueues(playerId?: string) {
 			return await listSavedQueues(playerId)
