@@ -54,7 +54,7 @@ function parseSpotifyUri(uri: string): SpotifyContentParts | null {
 }
 
 function getQueryParam(uri: string, name: string) {
-	const query = uri.split('?')[1]
+	const query = decodeXmlEntities(uri).split('?')[1]
 	if (!query) return null
 	return new URLSearchParams(query).get(name)
 }
