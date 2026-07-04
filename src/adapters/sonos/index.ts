@@ -491,6 +491,20 @@ export function createSonosAdapter(input: {
 		return favorite
 	}
 
+	async function resolvePlaybackCoordinator(player: SonosPersistedPlayer) {
+		const groups = await listGroups(player.playerId)
+		const group = groups.find((entry) =>
+			entry.members.some((member) => member.playerId === player.playerId),
+		)
+		if (
+			!group?.coordinatorPlayerId ||
+			group.coordinatorPlayerId === player.playerId
+		) {
+			return player
+		}
+		return resolvePlayer(group.coordinatorPlayerId)
+	}
+
 	async function buildQueueUri(inputArgs: {
 		playerId?: string
 		uri: string
@@ -543,8 +557,9 @@ export function createSonosAdapter(input: {
 				playNow: inputArgs.playNow,
 			})
 		}
+		const queuePlayer = await resolvePlaybackCoordinator(player)
 		const result = await addSonosUriToQueueLive({
-			host: player.host,
+			host: queuePlayer.host,
 			uri: prepared.uri,
 			metadata: prepared.metadata,
 			enqueueAsNext: inputArgs.enqueueAsNext,
@@ -555,12 +570,12 @@ export function createSonosAdapter(input: {
 				const firstOldTrackAfterEnqueue =
 					result.firstTrackNumberEnqueued + result.numTracksAdded
 				await removeSonosQueueTrackRangeLive({
-					host: player.host,
+					host: queuePlayer.host,
 					startingIndex: firstOldTrackAfterEnqueue,
 					numberOfTracks: result.newQueueLength - firstOldTrackAfterEnqueue + 1,
 				})
 				await removeSonosQueueTrackRangeLive({
-					host: player.host,
+					host: queuePlayer.host,
 					startingIndex: 1,
 					numberOfTracks: result.firstTrackNumberEnqueued - 1,
 				})
@@ -570,7 +585,7 @@ export function createSonosAdapter(input: {
 					newQueueLength: result.numTracksAdded,
 				}
 			} else {
-				await clearSonosQueueLive(player.host)
+				await clearSonosQueueLive(queuePlayer.host)
 				queueResult = {
 					firstTrackNumberEnqueued: 0,
 					numTracksAdded: 0,
@@ -580,16 +595,16 @@ export function createSonosAdapter(input: {
 		}
 		if ((inputArgs.playNow ?? true) && queueResult.numTracksAdded > 0) {
 			await setSonosTransportUriLive({
-				host: player.host,
-				uri: `x-rincon-queue:${stripSonosUuidPrefix(player.udn)}#0`,
+				host: queuePlayer.host,
+				uri: `x-rincon-queue:${stripSonosUuidPrefix(queuePlayer.udn)}#0`,
 			})
 			if (queueResult.firstTrackNumberEnqueued > 0) {
 				await seekSonosQueueTrackLive(
-					player.host,
+					queuePlayer.host,
 					queueResult.firstTrackNumberEnqueued,
 				)
 			}
-			await playSonosLive(player.host)
+			await playSonosLive(queuePlayer.host)
 		}
 		return queueResult
 	}
