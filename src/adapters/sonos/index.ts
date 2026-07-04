@@ -549,34 +549,49 @@ export function createSonosAdapter(input: {
 			metadata: prepared.metadata,
 			enqueueAsNext: inputArgs.enqueueAsNext,
 		})
-		if (inputArgs.clearQueue && result.numTracksAdded > 0) {
-			const firstOldTrackAfterEnqueue =
-				result.firstTrackNumberEnqueued + result.numTracksAdded
-			await removeSonosQueueTrackRangeLive({
-				host: player.host,
-				startingIndex: firstOldTrackAfterEnqueue,
-				numberOfTracks: result.newQueueLength - firstOldTrackAfterEnqueue + 1,
-			})
-			await removeSonosQueueTrackRangeLive({
-				host: player.host,
-				startingIndex: 1,
-				numberOfTracks: result.firstTrackNumberEnqueued - 1,
-			})
+		let queueResult = result
+		if (inputArgs.clearQueue) {
+			if (result.numTracksAdded > 0) {
+				const firstOldTrackAfterEnqueue =
+					result.firstTrackNumberEnqueued + result.numTracksAdded
+				await removeSonosQueueTrackRangeLive({
+					host: player.host,
+					startingIndex: firstOldTrackAfterEnqueue,
+					numberOfTracks: result.newQueueLength - firstOldTrackAfterEnqueue + 1,
+				})
+				await removeSonosQueueTrackRangeLive({
+					host: player.host,
+					startingIndex: 1,
+					numberOfTracks: result.firstTrackNumberEnqueued - 1,
+				})
+				queueResult = {
+					firstTrackNumberEnqueued: 1,
+					numTracksAdded: result.numTracksAdded,
+					newQueueLength: result.numTracksAdded,
+				}
+			} else {
+				await clearSonosQueueLive(player.host)
+				queueResult = {
+					firstTrackNumberEnqueued: 0,
+					numTracksAdded: 0,
+					newQueueLength: 0,
+				}
+			}
 		}
-		const firstTrackToPlay = inputArgs.clearQueue
-			? 1
-			: result.firstTrackNumberEnqueued
-		if ((inputArgs.playNow ?? true) && result.numTracksAdded > 0) {
+		if ((inputArgs.playNow ?? true) && queueResult.numTracksAdded > 0) {
 			await setSonosTransportUriLive({
 				host: player.host,
 				uri: `x-rincon-queue:${stripSonosUuidPrefix(player.udn)}#0`,
 			})
-			if (firstTrackToPlay > 0) {
-				await seekSonosQueueTrackLive(player.host, firstTrackToPlay)
+			if (queueResult.firstTrackNumberEnqueued > 0) {
+				await seekSonosQueueTrackLive(
+					player.host,
+					queueResult.firstTrackNumberEnqueued,
+				)
 			}
 			await playSonosLive(player.host)
 		}
-		return result
+		return queueResult
 	}
 
 	async function createFavorite(inputArgs: {
