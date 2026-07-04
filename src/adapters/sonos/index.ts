@@ -76,6 +76,7 @@ import {
 	playSonosLive,
 	previousSonosTrackLive,
 	removeSonosQueueTrackLive,
+	removeSonosQueueTrackRangeLive,
 	searchSonosLocalLibraryLive,
 	selectSonosAudioInputLive,
 	setSonosBassLive,
@@ -542,25 +543,36 @@ export function createSonosAdapter(input: {
 				playNow: inputArgs.playNow,
 			})
 		}
-		if (inputArgs.clearQueue) {
-			await clearSonosQueueLive(player.host)
-		}
 		const result = await addSonosUriToQueueLive({
 			host: player.host,
 			uri: prepared.uri,
 			metadata: prepared.metadata,
 			enqueueAsNext: inputArgs.enqueueAsNext,
 		})
-		if (inputArgs.playNow ?? true) {
+		if (inputArgs.clearQueue && result.numTracksAdded > 0) {
+			const firstOldTrackAfterEnqueue =
+				result.firstTrackNumberEnqueued + result.numTracksAdded
+			await removeSonosQueueTrackRangeLive({
+				host: player.host,
+				startingIndex: firstOldTrackAfterEnqueue,
+				numberOfTracks: result.newQueueLength - firstOldTrackAfterEnqueue + 1,
+			})
+			await removeSonosQueueTrackRangeLive({
+				host: player.host,
+				startingIndex: 1,
+				numberOfTracks: result.firstTrackNumberEnqueued - 1,
+			})
+		}
+		const firstTrackToPlay = inputArgs.clearQueue
+			? 1
+			: result.firstTrackNumberEnqueued
+		if ((inputArgs.playNow ?? true) && result.numTracksAdded > 0) {
 			await setSonosTransportUriLive({
 				host: player.host,
 				uri: `x-rincon-queue:${stripSonosUuidPrefix(player.udn)}#0`,
 			})
-			if (result.firstTrackNumberEnqueued > 0) {
-				await seekSonosQueueTrackLive(
-					player.host,
-					result.firstTrackNumberEnqueued,
-				)
+			if (firstTrackToPlay > 0) {
+				await seekSonosQueueTrackLive(player.host, firstTrackToPlay)
 			}
 			await playSonosLive(player.host)
 		}

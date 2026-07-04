@@ -3,6 +3,7 @@ import {
 	addSonosUriToQueueLive,
 	createSonosFavoriteLive,
 	playSonosLive,
+	removeSonosQueueTrackRangeLive,
 	seekSonosQueueTrackLive,
 	setSonosTransportUriLive,
 } from './soap-client.ts'
@@ -121,4 +122,20 @@ test('queue playback helpers target the Sonos queue and TRACK_NR seek unit', asy
 	])
 	expect(requests[1]?.body).toContain('<Unit>TRACK_NR</Unit>')
 	expect(requests[1]?.body).toContain('<Target>4</Target>')
+})
+
+test('removeSonosQueueTrackRangeLive removes a 1-based queue range', async () => {
+	const requests = installSoapFetchMock()
+
+	await removeSonosQueueTrackRangeLive({
+		host: 'office-sonos.local',
+		startingIndex: 2,
+		numberOfTracks: 3,
+	})
+
+	expect(requests[0]?.action).toBe(
+		'urn:schemas-upnp-org:service:AVTransport:1#RemoveTrackRangeFromQueue',
+	)
+	expect(requests[0]?.body).toContain('<StartingIndex>2</StartingIndex>')
+	expect(requests[0]?.body).toContain('<NumberOfTracks>3</NumberOfTracks>')
 })

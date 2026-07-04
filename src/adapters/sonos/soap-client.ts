@@ -549,6 +549,19 @@ export async function removeSonosQueueTrackLive(
 	)
 }
 
+export async function removeSonosQueueTrackRangeLive(input: {
+	host: string
+	startingIndex: number
+	numberOfTracks: number
+}) {
+	if (input.numberOfTracks <= 0) return
+	await avTransport(
+		input.host,
+		'RemoveTrackRangeFromQueue',
+		`<u:RemoveTrackRangeFromQueue xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"><InstanceID>0</InstanceID><UpdateID>0</UpdateID><StartingIndex>${input.startingIndex}</StartingIndex><NumberOfTracks>${input.numberOfTracks}</NumberOfTracks></u:RemoveTrackRangeFromQueue>`,
+	)
+}
+
 export async function addSonosUriToQueueLive(input: {
 	host: string
 	uri: string
