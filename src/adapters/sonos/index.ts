@@ -374,7 +374,8 @@ export function createSonosAdapter(input: {
 			clearMockSonosQueue(player.playerId)
 			return
 		}
-		await clearSonosQueueLive(player.host)
+		const queuePlayer = await resolvePlaybackCoordinator(player)
+		await clearSonosQueueLive(queuePlayer.host)
 	}
 
 	async function removeQueueTrack(inputArgs: {
@@ -392,8 +393,9 @@ export function createSonosAdapter(input: {
 			return
 		}
 		let queueItemId = inputArgs.queueItemId
+		const queuePlayer = await resolvePlaybackCoordinator(player)
 		if (!queueItemId && typeof inputArgs.position === 'number') {
-			const queue = await listQueue(player.playerId)
+			const queue = await listQueue(queuePlayer.playerId)
 			queueItemId =
 				queue.find((track) => track.position === inputArgs.position)
 					?.queueItemId ?? null
@@ -403,7 +405,7 @@ export function createSonosAdapter(input: {
 				'Specify a queueItemId or a valid 1-based queue position.',
 			)
 		}
-		await removeSonosQueueTrackLive(player.host, queueItemId)
+		await removeSonosQueueTrackLive(queuePlayer.host, queueItemId)
 	}
 
 	async function resolveFavorite(inputArgs: {
