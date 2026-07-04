@@ -374,7 +374,8 @@ export function createSonosAdapter(input: {
 			clearMockSonosQueue(player.playerId)
 			return
 		}
-		await clearSonosQueueLive(player.host)
+		const queuePlayer = await resolvePlaybackCoordinator(player)
+		await clearSonosQueueLive(queuePlayer.host)
 	}
 
 	async function removeQueueTrack(inputArgs: {
@@ -392,8 +393,9 @@ export function createSonosAdapter(input: {
 			return
 		}
 		let queueItemId = inputArgs.queueItemId
+		const queuePlayer = await resolvePlaybackCoordinator(player)
 		if (!queueItemId && typeof inputArgs.position === 'number') {
-			const queue = await listQueue(player.playerId)
+			const queue = await listQueue(queuePlayer.playerId)
 			queueItemId =
 				queue.find((track) => track.position === inputArgs.position)
 					?.queueItemId ?? null
@@ -403,7 +405,7 @@ export function createSonosAdapter(input: {
 				'Specify a queueItemId or a valid 1-based queue position.',
 			)
 		}
-		await removeSonosQueueTrackLive(player.host, queueItemId)
+		await removeSonosQueueTrackLive(queuePlayer.host, queueItemId)
 	}
 
 	async function resolveFavorite(inputArgs: {
@@ -487,7 +489,8 @@ export function createSonosAdapter(input: {
 			})
 		}
 		const favorite = await resolveFavorite(inputArgs)
-		await enqueueLiveEntry(player, favorite)
+		const queuePlayer = await resolvePlaybackCoordinator(player)
+		await enqueueLiveEntry(queuePlayer, favorite)
 		return favorite
 	}
 
@@ -668,13 +671,14 @@ export function createSonosAdapter(input: {
 			})
 		}
 		const favorite = await resolveFavorite(inputArgs)
-		await clearQueue(player.playerId)
-		await enqueueLiveEntry(player, favorite)
+		const queuePlayer = await resolvePlaybackCoordinator(player)
+		await clearQueue(queuePlayer.playerId)
+		await enqueueLiveEntry(queuePlayer, favorite)
 		await setSonosTransportUriLive({
-			host: player.host,
-			uri: `x-rincon-queue:${stripSonosUuidPrefix(player.udn)}#0`,
+			host: queuePlayer.host,
+			uri: `x-rincon-queue:${stripSonosUuidPrefix(queuePlayer.udn)}#0`,
 		})
-		await playSonosLive(player.host)
+		await playSonosLive(queuePlayer.host)
 		return favorite
 	}
 
@@ -692,7 +696,8 @@ export function createSonosAdapter(input: {
 			})
 		}
 		const savedQueue = await resolveSavedQueue(inputArgs)
-		await enqueueLiveEntry(player, savedQueue)
+		const queuePlayer = await resolvePlaybackCoordinator(player)
+		await enqueueLiveEntry(queuePlayer, savedQueue)
 		return savedQueue
 	}
 
@@ -710,13 +715,14 @@ export function createSonosAdapter(input: {
 			})
 		}
 		const savedQueue = await resolveSavedQueue(inputArgs)
-		await clearQueue(player.playerId)
-		await enqueueLiveEntry(player, savedQueue)
+		const queuePlayer = await resolvePlaybackCoordinator(player)
+		await clearQueue(queuePlayer.playerId)
+		await enqueueLiveEntry(queuePlayer, savedQueue)
 		await setSonosTransportUriLive({
-			host: player.host,
-			uri: `x-rincon-queue:${stripSonosUuidPrefix(player.udn)}#0`,
+			host: queuePlayer.host,
+			uri: `x-rincon-queue:${stripSonosUuidPrefix(queuePlayer.udn)}#0`,
 		})
-		await playSonosLive(player.host)
+		await playSonosLive(queuePlayer.host)
 		return savedQueue
 	}
 
