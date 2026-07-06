@@ -24,7 +24,7 @@
     "validate": "npm run format:check && npm run lint && npm test"
   },
   "dependencies": {
-    "@kody-bot/connector-kit": "^1.1.0",
+    "@kody-bot/connector-kit": "^2.0.0",
     "@modelcontextprotocol/sdk": "1.29.0",
     "@sentry/node": "^10.45.0",
     "dns-equal": "^1.0.0",

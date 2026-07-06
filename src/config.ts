@@ -1,5 +1,13 @@
 import { homedir, networkInterfaces } from 'node:os'
 import path from 'node:path'
+import {
+	connectorSessionUrl,
+	connectorWebSocketUrl,
+	isValidRemoteConnectorName,
+	normalizeRemoteConnectorInstanceId,
+	userScopedConnectorSessionUrl,
+	userScopedConnectorWebSocketUrl,
+} from '@kody-bot/connector-kit/urls'
 
 export type HomeConnectorConfig = {
 	homeConnectorId: string
@@ -69,14 +77,46 @@ function trimTrailingSlash(value: string) {
 	return trimmed
 }
 
-function encodeConnectorPathSegment(value: string, envVar: string) {
-	try {
-		return encodeURIComponent(value)
-	} catch (error) {
+function resolveHomeConnectorId() {
+	const homeConnectorId = normalizeRemoteConnectorInstanceId(
+		process.env.HOME_CONNECTOR_ID ?? 'default',
+	)
+	if (!isValidRemoteConnectorName(homeConnectorId)) {
 		throw new Error(
-			`${envVar} contains characters that cannot be encoded in the Kody connector URL.`,
-			{ cause: error },
+			'HOME_CONNECTOR_ID must match Kody remote connector name rules: lowercase letters, numbers, and dashes; start and end with a letter or number; max 64 characters.',
 		)
+	}
+	return homeConnectorId
+}
+
+function resolveWorkerConnectorUrls(input: {
+	workerBaseUrl: string
+	homeConnectorId: string
+	kodyUsername: string | null
+}) {
+	if (input.kodyUsername) {
+		return {
+			workerSessionUrl: userScopedConnectorSessionUrl({
+				workerBaseUrl: input.workerBaseUrl,
+				username: input.kodyUsername,
+				instanceId: input.homeConnectorId,
+			}),
+			workerWebSocketUrl: userScopedConnectorWebSocketUrl({
+				workerBaseUrl: input.workerBaseUrl,
+				username: input.kodyUsername,
+				instanceId: input.homeConnectorId,
+			}),
+		}
+	}
+	return {
+		workerSessionUrl: connectorSessionUrl({
+			workerBaseUrl: input.workerBaseUrl,
+			instanceId: input.homeConnectorId,
+		}),
+		workerWebSocketUrl: connectorWebSocketUrl({
+			workerBaseUrl: input.workerBaseUrl,
+			instanceId: input.homeConnectorId,
+		}),
 	}
 }
 
@@ -108,55 +148,6 @@ function resolveKodyUsername(workerBaseUrl: string) {
 		)
 	}
 	return null
-}
-
-function createConnectorPath(
-	homeConnectorId: string,
-	kodyUsername: string | null,
-) {
-	const encodedHomeConnectorId = encodeConnectorPathSegment(
-		homeConnectorId,
-		'HOME_CONNECTOR_ID',
-	)
-	if (!kodyUsername) {
-		return `/connectors/home/${encodedHomeConnectorId}`
-	}
-	return `/@${encodeConnectorPathSegment(
-		kodyUsername,
-		'KODY_USERNAME',
-	)}/connectors/home/${encodedHomeConnectorId}`
-}
-
-function createWorkerWebSocketBaseUrl(workerBaseUrl: string) {
-	const workerWebSocketUrl = new URL(trimTrailingSlash(workerBaseUrl))
-	if (workerWebSocketUrl.protocol === 'http:') {
-		workerWebSocketUrl.protocol = 'ws:'
-	} else if (workerWebSocketUrl.protocol === 'https:') {
-		workerWebSocketUrl.protocol = 'wss:'
-	}
-	return trimTrailingSlash(workerWebSocketUrl.toString())
-}
-
-function createWorkerSessionUrl(
-	workerBaseUrl: string,
-	homeConnectorId: string,
-	kodyUsername: string | null,
-) {
-	return `${trimTrailingSlash(workerBaseUrl)}${createConnectorPath(
-		homeConnectorId,
-		kodyUsername,
-	)}`
-}
-
-function createWorkerWebSocketUrl(
-	workerBaseUrl: string,
-	homeConnectorId: string,
-	kodyUsername: string | null,
-) {
-	return `${createWorkerWebSocketBaseUrl(workerBaseUrl)}${createConnectorPath(
-		homeConnectorId,
-		kodyUsername,
-	)}`
 }
 
 function resolveHomeConnectorDataPath() {
@@ -348,17 +339,17 @@ export function loadHomeConnectorConfig(): HomeConnectorConfig {
 		process.env.ISLAND_ROUTER_API_REQUEST_TIMEOUT_MS ?? '8000',
 		10,
 	)
-	const homeConnectorId = process.env.HOME_CONNECTOR_ID?.trim() || 'default'
+	const homeConnectorId = resolveHomeConnectorId()
 	const workerBaseUrl =
 		process.env.WORKER_BASE_URL?.trim() || 'http://localhost:3742'
 	const kodyUsername = resolveKodyUsername(workerBaseUrl)
-	const mocksEnabled = process.env.MOCKS === 'true'
-	const dataPath = resolveHomeConnectorDataPath()
-	const workerSessionUrl = createWorkerSessionUrl(
+	const { workerSessionUrl, workerWebSocketUrl } = resolveWorkerConnectorUrls({
 		workerBaseUrl,
 		homeConnectorId,
 		kodyUsername,
-	)
+	})
+	const mocksEnabled = process.env.MOCKS === 'true'
+	const dataPath = resolveHomeConnectorDataPath()
 	const explicitAccessNetworksUnleashedCidrs = resolveScanCidrsFromEnv(
 		'ACCESS_NETWORKS_UNLEASHED_SCAN_CIDRS',
 	)
@@ -383,11 +374,7 @@ export function loadHomeConnectorConfig(): HomeConnectorConfig {
 		homeConnectorId,
 		workerBaseUrl,
 		workerSessionUrl,
-		workerWebSocketUrl: createWorkerWebSocketUrl(
-			workerBaseUrl,
-			homeConnectorId,
-			kodyUsername,
-		),
+		workerWebSocketUrl,
 		sharedSecret: process.env.HOME_CONNECTOR_SHARED_SECRET?.trim() || null,
 		accessNetworksUnleashedScanCidrs,
 		accessNetworksUnleashedAllowInsecureTls:

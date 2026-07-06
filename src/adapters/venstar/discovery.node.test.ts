@@ -7,8 +7,8 @@ function createConfig(scanCidrs: Array<string>): HomeConnectorConfig {
 	return {
 		homeConnectorId: 'default',
 		workerBaseUrl: 'http://localhost:3742',
-		workerSessionUrl: 'http://localhost:3742/connectors/home/default',
-		workerWebSocketUrl: 'ws://localhost:3742/connectors/home/default',
+		workerSessionUrl: 'http://localhost:3742/connectors/default',
+		workerWebSocketUrl: 'ws://localhost:3742/connectors/default',
 		sharedSecret: 'secret',
 		accessNetworksUnleashedScanCidrs: ['192.168.1.10/32'],
 		accessNetworksUnleashedAllowInsecureTls: false,
