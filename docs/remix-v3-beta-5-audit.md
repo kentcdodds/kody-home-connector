@@ -7,8 +7,8 @@ Audit date: 2026-07-09
 This repository is already on Remix v3 Beta 5:
 
 - `package.json` declares `remix` as `^3.0.0-beta.5`.
-- `package-lock.json` resolves `remix@3.0.0-beta.5`,
-  `@remix-run/ui@0.4.0`, and `@remix-run/node-fetch-server@0.14.0`.
+- `package-lock.json` resolves `remix@3.0.0-beta.5`, `@remix-run/ui@0.4.0`, and
+  `@remix-run/node-fetch-server@0.14.0`.
 - The Beta 5 upgrade and public Remix entrypoint migration landed previously in
   [PR #29](https://github.com/kentcdodds/kody-home-connector/pull/29).
 
@@ -28,8 +28,7 @@ The apparent component matches are:
 
 - `remix/ui/button`: the native submit buttons in `app/*-handlers.ts`
 - `remix/ui/input`: the text, password, and textarea fields in setup handlers
-- `remix/ui/select`: the seven native selects in
-  `app/bond-handlers.ts` and
+- `remix/ui/select`: the seven native selects in `app/bond-handlers.ts` and
   `app/access-networks-unleashed-handlers.ts`
 - `remix/ui/breadcrumbs`: possible supplemental wayfinding for the page intros
   in `app/admin-ui.ts`
@@ -37,12 +36,12 @@ The apparent component matches are:
   diagnostics views in `app/dashboard-handlers.ts`
 
 These are not drop-in substitutions. Button and input are `mix` style
-descriptors for the Remix JSX runtime. Select, accordion, and tabs also need
-the component runtime and client hydration for their interactive behavior.
-Adopting them would require converting the rendering boundary to TSX with
-`remix/ui/server`, introducing a client asset pipeline for interactive
-controls, and reconciling the unlayered styles in `app/root.ts` with Remix UI's
-`rmx` cascade layer.
+descriptors for the Remix JSX runtime. Select, accordion, and tabs also need the
+component runtime and client hydration for their interactive behavior. Adopting
+them would require converting the rendering boundary to TSX with
+`remix/ui/server`, introducing a client asset pipeline for interactive controls,
+and reconciling the unlayered styles in `app/root.ts` with Remix UI's `rmx`
+cascade layer.
 
 The current native controls preserve form submissions and keyboard behavior
 without JavaScript. A broad UI migration would increase complexity rather than
@@ -50,24 +49,24 @@ simplify this connector today.
 
 ### `trustProxy`
 
-`server/index.ts` uses `createRequestListener` from
-`remix/node-fetch-server`, but the documented production topology is direct
-LAN access to port 4040 from a host-network Docker container on a NAS. The
-repository contains no reverse-proxy or TLS-termination configuration.
+`server/index.ts` uses `createRequestListener` from `remix/node-fetch-server`,
+but the documented production topology is direct LAN access to port 4040 from a
+host-network Docker container on a NAS. The repository contains no reverse-proxy
+or TLS-termination configuration.
 
-Enabling `trustProxy` is therefore not recommended. Remix warns that clients
-can spoof forwarded host, protocol, and address data unless the server is
-reachable only through a trusted proxy that overwrites those headers.
-Additionally, the existing `host: localhost:<port>` option takes precedence
-over forwarded host values.
+Enabling `trustProxy` is therefore not recommended. Remix warns that clients can
+spoof forwarded host, protocol, and address data unless the server is reachable
+only through a trusted proxy that overwrites those headers. Additionally, the
+existing `host: localhost:<port>` option takes precedence over forwarded host
+values.
 
 If deployment later moves exclusively behind nginx, Caddy, or another trusted
 TLS-terminating proxy:
 
 1. Remove or make conditional the fixed `host` option in `server/index.ts`.
 2. Enable `trustProxy` only for that deployment.
-3. Add integration tests for forwarded host/protocol and the Kasa
-   same-origin check in `app/kasa-handlers.ts`.
+3. Add integration tests for forwarded host/protocol and the Kasa same-origin
+   check in `app/kasa-handlers.ts`.
 4. Ensure direct access to the Node port is blocked.
 
 ### Production template comparison
@@ -84,8 +83,8 @@ The applicable defaults are already present:
 
 The asset and frame changes do not apply. This project has no browser build,
 asset server, or Remix frames; it runs TypeScript directly on Node 24 and
-returns server-rendered HTML. Adding a template-style build solely to mirror
-the starter would add an unused pipeline.
+returns server-rendered HTML. Adding a template-style build solely to mirror the
+starter would add an unused pipeline.
 
 ## Prioritized recommendations
 
@@ -102,11 +101,12 @@ the starter would add an unused pipeline.
 
 ### Medium
 
-1. **If richer client interaction is wanted, prototype one non-credential
-   route before migrating the shell.** Use `remix/ui/server` with
-   `remix/ui/button` and `remix/ui/input` first. Measure output, CSS integration,
-   and hydration cost before considering Select, Tabs, or Accordion. Preserve
-   native form names and no-JavaScript submissions.
+1. **If richer client interaction is wanted, prototype one non-credential route
+   before migrating the shell.** Use `remix/ui/server` with `remix/ui/button`
+   and `remix/ui/input` first, keeping that prototype server-only. Measure
+   output and CSS integration before separately evaluating the browser assets
+   and hydration required for Select, Tabs, or Accordion. Preserve native form
+   names and no-JavaScript submissions.
 2. **Keep one action implementation per route.** `app/handlers.ts` contained an
    unused legacy home action while `app/router.ts` maps the route to
    `createDashboardHandler` in `app/dashboard-handlers.ts`. This audit removes
@@ -115,8 +115,8 @@ the starter would add an unused pipeline.
 3. **Standardize POST origin protection in a separate security change.** Only
    Kasa credential submission currently calls the same-origin guard in
    `app/kasa-handlers.ts`; other credential and device-mutation forms do not.
-   This should be designed and tested across all POST routes rather than
-   bundled into a UI migration.
+   This should be designed and tested across all POST routes rather than bundled
+   into a UI migration.
 
 ### Low
 
