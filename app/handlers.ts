@@ -5,244 +5,19 @@ import { RootLayout } from './root.ts'
 import { routes } from './routes.ts'
 import { type createLutronAdapter } from '../src/adapters/lutron/index.ts'
 import { type LutronDiscoveryDiagnostics } from '../src/adapters/lutron/types.ts'
-import { type createBondAdapter } from '../src/adapters/bond/index.ts'
-import { type createJellyfishAdapter } from '../src/adapters/jellyfish/index.ts'
-import { type createKasaAdapter } from '../src/adapters/kasa/index.ts'
-import { type createSonosAdapter } from '../src/adapters/sonos/index.ts'
 import { type createSamsungTvAdapter } from '../src/adapters/samsung-tv/index.ts'
-import { type createVenstarAdapter } from '../src/adapters/venstar/index.ts'
 import { type HomeConnectorConfig } from '../src/config.ts'
 import { buildHomeConnectorHealthPayload } from '../src/home-connector-metadata.ts'
 import { type HomeConnectorState } from '../src/state.ts'
 import { type RokuDiscoveryDiagnostics } from '../src/adapters/roku/types.ts'
 import { scanRokuDevices } from '../src/adapters/roku/index.ts'
 import { captureHomeConnectorException } from '../src/sentry.ts'
-import { renderInfoRows } from './handler-utils.ts'
-
-function renderQuickLinks(
-	state: HomeConnectorState,
-	config: HomeConnectorConfig,
-) {
-	const workerSnapshotUrl = state.connection.connectorId
-		? `${config.workerSessionUrl}/snapshot`
-		: null
-	return html`<ul class="list">
-		<li><a href="${routes.rokuStatus.href()}">Roku status</a></li>
-		<li><a href="${routes.rokuSetup.href()}">Roku setup</a></li>
-		<li><a href="${routes.lutronStatus.href()}">Lutron status</a></li>
-		<li><a href="${routes.lutronSetup.href()}">Lutron setup</a></li>
-		<li><a href="${routes.kasaStatus.href()}">Kasa status</a></li>
-		<li><a href="${routes.kasaSetup.href()}">Kasa setup</a></li>
-		<li><a href="${routes.sonosStatus.href()}">Sonos status</a></li>
-		<li><a href="${routes.sonosSetup.href()}">Sonos setup</a></li>
-		<li><a href="${routes.samsungTvStatus.href()}">Samsung TV status</a></li>
-		<li><a href="${routes.samsungTvSetup.href()}">Samsung TV setup</a></li>
-		<li><a href="${routes.bondStatus.href()}">Bond status</a></li>
-		<li><a href="${routes.bondSetup.href()}">Bond token setup</a></li>
-		<li><a href="${routes.jellyfishStatus.href()}">JellyFish status</a></li>
-		<li><a href="${routes.jellyfishSetup.href()}">JellyFish setup</a></li>
-		<li><a href="${routes.venstarStatus.href()}">Venstar status</a></li>
-		<li><a href="${routes.venstarSetup.href()}">Venstar setup</a></li>
-		<li><a href="${routes.health.href()}">Health JSON</a></li>
-		${workerSnapshotUrl
-			? html`<li>
-					<a href="${workerSnapshotUrl}">Worker connector snapshot</a>
-				</li>`
-			: ''}
-	</ul>`
-}
-
-function getConnectionStatusSummary(state: HomeConnectorState) {
-	return state.connection.connected ? 'connected' : 'disconnected'
-}
-
-export function createHomeDashboardHandler(
-	config: HomeConnectorConfig,
-	state: HomeConnectorState,
-	lutron: ReturnType<typeof createLutronAdapter>,
-	samsungTv: ReturnType<typeof createSamsungTvAdapter>,
-	sonos: ReturnType<typeof createSonosAdapter>,
-	bond: ReturnType<typeof createBondAdapter>,
-	jellyfish: ReturnType<typeof createJellyfishAdapter>,
-	venstar: ReturnType<typeof createVenstarAdapter>,
-	kasa: ReturnType<typeof createKasaAdapter>,
-) {
-	return {
-		middleware: [],
-		async handler() {
-			const discoveredCount = state.devices.filter(
-				(device) => !device.adopted,
-			).length
-			const adoptedCount = state.devices.filter(
-				(device) => device.adopted,
-			).length
-			const lutronStatus = lutron.getStatus()
-			const samsungStatus = samsungTv.getStatus()
-			const sonosStatus = sonos.getStatus()
-			const bondStatus = bond.getStatus()
-			const jellyfishStatus = jellyfish.getStatus()
-			const kasaStatus = kasa.getStatus()
-			const venstarStatus = await venstar.listThermostatsWithStatus()
-			const onlineVenstarCount = venstarStatus.filter(
-				(thermostat) => thermostat.info != null,
-			).length
-
-			return render(
-				RootLayout({
-					title: 'home connector - admin',
-					body: html`<div class="app-shell">
-						<section class="card">
-							<h1>Home connector admin</h1>
-							<p class="muted">
-								Local admin dashboard for connection health, device state, and
-								useful development links.
-							</p>
-						</section>
-
-						<section class="status-grid">
-							<div class="card">
-								<h2>Connection</h2>
-								${renderInfoRows([
-									{
-										label: 'Status',
-										value: getConnectionStatusSummary(state),
-									},
-									{
-										label: 'Worker',
-										value: html`<code>${state.connection.workerUrl}</code>`,
-									},
-									{
-										label: 'Connector ID',
-										value: html`<code>${state.connection.connectorId}</code>`,
-									},
-									{
-										label: 'Last sync',
-										value: state.connection.lastSyncAt ?? 'never',
-									},
-									{
-										label: 'Shared secret',
-										value: state.connection.sharedSecret
-											? 'configured'
-											: 'missing',
-									},
-									{
-										label: 'Last error',
-										value: state.connection.lastError ?? 'none',
-									},
-								])}
-							</div>
-
-							<div class="card">
-								<h2>Devices</h2>
-								${renderInfoRows([
-									{
-										label: 'Roku adopted',
-										value: String(adoptedCount),
-									},
-									{
-										label: 'Roku discovered',
-										value: String(discoveredCount),
-									},
-									{
-										label: 'Lutron processors',
-										value: String(lutronStatus.processors.length),
-									},
-									{
-										label: 'Lutron credentials',
-										value: String(lutronStatus.configuredCredentialsCount),
-									},
-									{
-										label: 'Kasa plugs',
-										value: String(kasaStatus.plugs.length),
-									},
-									{
-										label: 'Kasa adopted',
-										value: String(kasaStatus.adopted.length),
-									},
-									{
-										label: 'Kasa credentials',
-										value: kasaStatus.config.configured
-											? 'configured'
-											: 'missing',
-									},
-									{
-										label: 'Samsung adopted',
-										value: String(samsungStatus.adopted.length),
-									},
-									{
-										label: 'Samsung discovered',
-										value: String(samsungStatus.discovered.length),
-									},
-									{
-										label: 'Samsung paired',
-										value: String(samsungStatus.pairedCount),
-									},
-									{
-										label: 'Sonos adopted',
-										value: String(sonosStatus.adopted.length),
-									},
-									{
-										label: 'Sonos discovered',
-										value: String(sonosStatus.discovered.length),
-									},
-									{
-										label: 'Sonos audio input',
-										value: String(sonosStatus.audioInputSupportedCount),
-									},
-									{
-										label: 'Bond adopted',
-										value: String(bondStatus.adopted.length),
-									},
-									{
-										label: 'Bond discovered',
-										value: String(bondStatus.discovered.length),
-									},
-									{
-										label: 'Bond with token',
-										value: String(
-											bondStatus.bridges.filter((b) => b.hasStoredToken).length,
-										),
-									},
-									{
-										label: 'JellyFish controllers',
-										value: String(jellyfishStatus.controllers.length),
-									},
-									{
-										label: 'JellyFish discovered',
-										value: String(jellyfishStatus.discovered.length),
-									},
-									{
-										label: 'Venstar configured',
-										value: String(venstarStatus.length),
-									},
-									{
-										label: 'Venstar online',
-										value: String(onlineVenstarCount),
-									},
-									{
-										label: 'Venstar offline',
-										value: String(venstarStatus.length - onlineVenstarCount),
-									},
-									{
-										label: 'Mocks',
-										value: state.connection.mocksEnabled
-											? 'enabled'
-											: 'disabled',
-									},
-								])}
-							</div>
-
-							<div class="card">
-								<h2>Quick links</h2>
-								${renderQuickLinks(state, config)}
-							</div>
-						</section>
-					</div>`,
-				}),
-			)
-		},
-	} satisfies Action<typeof routes.home>
-}
+import {
+	formatJson,
+	renderBanner,
+	renderCodeBlock,
+	renderInfoRows,
+} from './handler-utils.ts'
 
 function renderDeviceList(
 	label: string,
@@ -272,14 +47,6 @@ function renderDeviceList(
 				</li>`,
 		)}
 	</ul>`
-}
-
-function formatJson(value: unknown) {
-	return JSON.stringify(value, null, 2)
-}
-
-function renderCodeBlock(value: string) {
-	return html`<pre><code>${value}</code></pre>`
 }
 
 function renderLutronDiscoveryDiagnostics(
@@ -617,14 +384,6 @@ function renderRokuDiscoveryDiagnostics(
 					</ul>`}
 		</section>
 	`
-}
-
-function renderBanner(input: { tone: 'success' | 'error'; message: string }) {
-	return html`<section
-		class="card ${input.tone === 'error' ? 'card-error' : 'card-success'}"
-	>
-		<p>${input.message}</p>
-	</section>`
 }
 
 export function createHealthHandler(
