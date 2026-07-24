@@ -408,6 +408,75 @@ test('pre-ack server.ping does not reset reconnect backoff', async () => {
 	}
 })
 
+test('pre-ack server.ping does not re-arm the sustained reconnect alarm', async () => {
+	vi.useFakeTimers()
+	globalThis.WebSocket = FakeWorkerWebSocket as unknown as typeof WebSocket
+	const connector = createWorkerConnector({
+		config: createConfig(),
+		state: createAppState(),
+		logger: createLogger(),
+		toolRegistry: createToolRegistry(),
+	})
+
+	async function closeCurrentSocket(index: number, advanceMs: number) {
+		const socket = fakeWebSocketInstances[index]
+		if (!socket) throw new Error('Expected websocket instance')
+		socket.dispatchClose({ code: 1006, reason: '', wasClean: false })
+		await vi.advanceTimersByTimeAsync(advanceMs)
+	}
+
+	try {
+		await connector.start()
+		await closeCurrentSocket(0, 2_000)
+		await closeCurrentSocket(1, 4_000)
+		await closeCurrentSocket(2, 8_000)
+		expect(sentryMock.captureHomeConnectorMessage).toHaveBeenCalledTimes(1)
+
+		const socket = fakeWebSocketInstances[3]
+		if (!socket) throw new Error('Expected websocket instance')
+		await socket.dispatchOpen()
+		await socket.dispatchMessage(JSON.stringify({ type: 'server.ping' }))
+		await closeCurrentSocket(3, 16_000)
+		await closeCurrentSocket(4, 30_000)
+		await closeCurrentSocket(5, 30_000)
+
+		expect(sentryMock.captureHomeConnectorMessage).toHaveBeenCalledTimes(1)
+	} finally {
+		connector.stop()
+	}
+})
+
+test('pre-ack server.ping leaves a reported error in place', async () => {
+	vi.useFakeTimers()
+	globalThis.WebSocket = FakeWorkerWebSocket as unknown as typeof WebSocket
+	const state = createAppState()
+	const connector = createWorkerConnector({
+		config: createConfig(),
+		state,
+		logger: createLogger(),
+		toolRegistry: createToolRegistry(),
+	})
+
+	try {
+		await connector.start()
+		const socket = fakeWebSocketInstances[0]
+		if (!socket) throw new Error('Expected websocket instance')
+		await socket.dispatchOpen()
+		await socket.dispatchMessage(
+			JSON.stringify({
+				type: 'server.error',
+				message: 'Invalid connector shared secret.',
+			}),
+		)
+		await socket.dispatchMessage(JSON.stringify({ type: 'server.ping' }))
+
+		expect(state.connection.lastError).toBe('Invalid connector shared secret.')
+		expect(state.connection.connected).toBe(false)
+	} finally {
+		connector.stop()
+	}
+})
+
 test('pre-ack server.error escalates reconnect delay to handshake rejection backoff', async () => {
 	vi.useFakeTimers()
 	globalThis.WebSocket = FakeWorkerWebSocket as unknown as typeof WebSocket

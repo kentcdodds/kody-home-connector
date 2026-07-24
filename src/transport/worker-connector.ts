@@ -796,10 +796,12 @@ export function createWorkerConnector(input: {
 					| ConnectorJsonRpcEnvelope
 				switch (value.type) {
 					case 'server.ping':
-						// A Worker ping proves the socket is open, not that hello was accepted.
+						// A Worker ping only proves the socket is open: it arrives before
+						// the hello is validated, so it must not reset reconnect backoff
+						// or clear an error the Worker has already reported. connect() and
+						// server.ack are what clear lastError.
 						patchConnectionState({
 							lastSyncAt: new Date().toISOString(),
-							...(sessionAcknowledged ? { lastError: null } : {}),
 						})
 						return
 					case 'server.error':
