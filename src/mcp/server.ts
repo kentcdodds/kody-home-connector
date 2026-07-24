@@ -433,7 +433,7 @@ export function createHomeConnectorMcpServer(input: {
 			name: 'home_connector_get_metadata',
 			title: 'Get Home Connector Metadata',
 			description:
-				'Read runtime metadata for this home connector, including APP_COMMIT_SHA, connector id, worker URL, Node version, uptime, and feature flags.',
+				'Read runtime metadata for this home connector, including APP_COMMIT_SHA, connector id, worker URL, Node version, uptime, feature flags, and per-target Worker session status for multi-account deployments.',
 			inputSchema: {},
 			annotations: {
 				readOnlyHint: true,

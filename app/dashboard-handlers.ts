@@ -139,27 +139,69 @@ type LoadDashboardSnapshotInput = {
 	islandRouterStatus?: IslandRouterStatus
 }
 
+function getWorkerSessions(state: HomeConnectorState) {
+	return state.workerSessions.length > 0
+		? state.workerSessions
+		: [
+				{
+					...state.connection,
+					sessionKey: `${state.connection.kodyUsername ?? 'local'}/${state.connection.connectorId || 'default'}`,
+					workerSessionUrl: '',
+					workerWebSocketUrl: '',
+				},
+			]
+}
+
+function getConnectedSessionCount(state: HomeConnectorState) {
+	return getWorkerSessions(state).filter((session) => session.connected).length
+}
+
 function getConnectionTone(state: HomeConnectorState): StatusTone {
-	if (!state.connection.connected) return 'bad'
+	const sessions = getWorkerSessions(state)
+	const connectedCount = sessions.filter((session) => session.connected).length
+	if (connectedCount === 0) return 'bad'
 	if (
-		state.connection.toolInventoryStatus === 'empty_local_registry' ||
-		state.connection.toolInventoryStatus ===
-			'reconnecting_after_missing_remote_list'
+		sessions.some(
+			(session) =>
+				session.toolInventoryStatus === 'empty_local_registry' ||
+				session.toolInventoryStatus ===
+					'reconnecting_after_missing_remote_list',
+		)
 	) {
 		return 'bad'
 	}
+	if (connectedCount < sessions.length) return 'warn'
 	if (
-		state.connection.toolInventoryStatus === 'pending_remote_list' ||
-		state.connection.toolInventoryStatus === 'refresh_requested' ||
-		state.connection.toolInventoryStatus === 'remote_list_missing'
+		sessions.some(
+			(session) =>
+				session.toolInventoryStatus === 'pending_remote_list' ||
+				session.toolInventoryStatus === 'refresh_requested' ||
+				session.toolInventoryStatus === 'remote_list_missing',
+		)
 	) {
 		return 'warn'
 	}
-	if (!state.connection.sharedSecret) return 'warn'
+	if (sessions.some((session) => !session.sharedSecret)) return 'warn'
 	return 'good'
 }
 
 function getConnectionLabel(state: HomeConnectorState) {
+	const sessions = getWorkerSessions(state)
+	const connectedCount = sessions.filter((session) => session.connected).length
+	if (sessions.length > 1) {
+		if (connectedCount === 0) {
+			return `Disconnected (${sessions.length} Worker sessions)`
+		}
+		if (connectedCount < sessions.length) {
+			return `Partially connected (${connectedCount}/${sessions.length} Worker sessions)`
+		}
+		const allRegistered = sessions.every(
+			(session) => session.toolInventoryStatus === 'registered',
+		)
+		return allRegistered
+			? `Connected (${sessions.length} Worker sessions, tools registered)`
+			: `Connected (${sessions.length} Worker sessions)`
+	}
 	if (!state.connection.connected) return 'Disconnected'
 	if (state.connection.toolInventoryStatus === 'registered') {
 		return 'Connected with tools registered'
@@ -188,22 +230,30 @@ function getConnectionLabel(state: HomeConnectorState) {
 
 function getConnectionIssues(state: HomeConnectorState) {
 	const issues: Array<string> = []
-	if (!state.connection.connected) {
+	const sessions = getWorkerSessions(state)
+	const connectedCount = getConnectedSessionCount(state)
+	if (connectedCount === 0) {
 		issues.push('Worker connector is not currently connected.')
-	}
-	if (!state.connection.sharedSecret) {
+	} else if (connectedCount < sessions.length) {
 		issues.push(
-			'Shared secret is missing, so authenticated worker sync is degraded.',
+			`${sessions.length - connectedCount} of ${sessions.length} Worker sessions are disconnected.`,
 		)
 	}
-	if (state.connection.lastError) {
-		issues.push(`Last connector error: ${state.connection.lastError}`)
-	}
-	if (
-		state.connection.connected &&
-		state.connection.toolInventoryStatus !== 'registered'
-	) {
-		issues.push(`Tool inventory: ${state.connection.toolInventoryStatusReason}`)
+	for (const session of sessions) {
+		const identity = `${session.kodyUsername ?? 'local'}/${session.connectorId || 'unknown'}`
+		if (!session.sharedSecret) {
+			issues.push(
+				`Shared secret is missing for ${identity}, so authenticated worker sync is degraded.`,
+			)
+		}
+		if (session.lastError) {
+			issues.push(`Last connector error (${identity}): ${session.lastError}`)
+		}
+		if (session.connected && session.toolInventoryStatus !== 'registered') {
+			issues.push(
+				`Tool inventory (${identity}): ${session.toolInventoryStatusReason}`,
+			)
+		}
 	}
 	return issues
 }
@@ -444,24 +494,47 @@ function getIntegrationStatusLabel(input: {
 	return 'No recent data'
 }
 
+function renderWorkerSessionsNote(state: HomeConnectorState) {
+	const sessions = getWorkerSessions(state)
+	if (sessions.length <= 1) return null
+	return html`<ul class="compact-list">
+		${sessions.map((session) => {
+			const identity = `${session.kodyUsername ?? 'local'}/${session.connectorId || 'unknown'}`
+			const status = session.connected ? 'connected' : 'disconnected'
+			return html`<li>
+				${identity}: ${status} · inventory ${session.toolInventoryStatus}
+			</li>`
+		})}
+	</ul>`
+}
+
 function renderConnectionSummary(
 	state: HomeConnectorState,
 	snapshot: DashboardSnapshot,
 ) {
+	const sessions = getWorkerSessions(state)
+	const connectedCount = getConnectedSessionCount(state)
+	const sessionNote = renderWorkerSessionsNote(state)
 	return renderSummaryCard({
-		title: 'Connector session',
+		title: sessions.length > 1 ? 'Connector sessions' : 'Connector session',
 		description:
 			'Worker connectivity, identity, sync timing, and shared secret readiness.',
 		status: snapshot.connectionLabel,
 		tone: snapshot.connectionTone,
 		metrics: [
 			{
-				label: 'Connector ID',
-				value: state.connection.connectorId || 'not registered',
+				label: sessions.length > 1 ? 'Sessions' : 'Connector ID',
+				value:
+					sessions.length > 1
+						? `${connectedCount}/${sessions.length} connected`
+						: state.connection.connectorId || 'not registered',
 			},
 			{
-				label: 'Last sync',
-				value: state.connection.lastSyncAt ?? 'never',
+				label: sessions.length > 1 ? 'Primary target' : 'Last sync',
+				value:
+					sessions.length > 1
+						? `${state.connection.kodyUsername ?? 'local'}/${state.connection.connectorId || 'not registered'}`
+						: (state.connection.lastSyncAt ?? 'never'),
 			},
 			{
 				label: 'Tool inventory',
@@ -485,9 +558,14 @@ function renderConnectionSummary(
 		note:
 			snapshot.connectionIssues.length > 0
 				? html`<ul class="compact-list">
-						${snapshot.connectionIssues.map((issue) => html`<li>${issue}</li>`)}
-					</ul>`
-				: 'Connection prerequisites look healthy from the local connector state.',
+							${snapshot.connectionIssues.map(
+								(issue) => html`<li>${issue}</li>`,
+							)}
+						</ul>
+						${sessionNote ?? ''}`
+				: sessionNote
+					? html`${sessionNote}`
+					: 'Connection prerequisites look healthy from the local connector state.',
 	})
 }
 

@@ -37,7 +37,10 @@ describe('buildHomeConnectorRuntimeMetadata', () => {
 			sentryEnabled: true,
 			sentryEnvironment: 'production',
 			sharedSecretConfigured: Boolean(config.sharedSecret),
+			workerSessionCount: 1,
+			connectedWorkerSessionCount: 0,
 		})
+		expect(metadata.workerSessions).toHaveLength(1)
 		expect(metadata.nodeVersion).toMatch(/^v\d+/)
 		expect(metadata.processUptimeSeconds).toBeGreaterThanOrEqual(0)
 	})
@@ -66,12 +69,22 @@ describe('buildHomeConnectorRuntimeMetadata', () => {
 			connectorId: 'default',
 			metadata: expect.objectContaining({
 				appCommitSha: 'abc123',
+				workerSessionCount: 1,
+				connectedWorkerSessionCount: 1,
 			}),
 			connection: {
 				connected: true,
 				lastSyncAt: '2026-06-25T17:00:00.000Z',
 				lastError: null,
+				connectedSessionCount: 1,
+				sessionCount: 1,
 			},
+			workerSessions: expect.arrayContaining([
+				expect.objectContaining({
+					connectorId: 'default',
+					connected: true,
+				}),
+			]),
 			toolInventory: {
 				status: 'registered',
 				reason: 'Registered with worker.',

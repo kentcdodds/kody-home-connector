@@ -1,6 +1,25 @@
 import { type HomeConnectorConfig } from './config.ts'
 import { type HomeConnectorState } from './state.ts'
 
+export type HomeConnectorWorkerSessionMetadata = {
+	sessionKey: string
+	kodyUsername: string | null
+	connectorId: string
+	workerBaseUrl: string
+	workerSessionUrl: string
+	workerWebSocketUrl: string
+	connected: boolean
+	lastSyncAt: string | null
+	lastError: string | null
+	sharedSecretConfigured: boolean
+	toolInventoryStatus: HomeConnectorState['connection']['toolInventoryStatus']
+	toolInventoryStatusReason: string
+	localToolCount: number
+	lastToolsChangedNotificationAt: string | null
+	lastToolsListRequestAt: string | null
+	toolInventoryRecoveryCount: number
+}
+
 export type HomeConnectorRuntimeMetadata = {
 	service: 'home-connector'
 	appCommitSha: string | null
@@ -15,6 +34,9 @@ export type HomeConnectorRuntimeMetadata = {
 	port: number
 	processUptimeSeconds: number
 	sharedSecretConfigured: boolean
+	workerSessionCount: number
+	connectedWorkerSessionCount: number
+	workerSessions: Array<HomeConnectorWorkerSessionMetadata>
 }
 
 export type HomeConnectorHealthPayload = {
@@ -26,7 +48,10 @@ export type HomeConnectorHealthPayload = {
 		connected: boolean
 		lastSyncAt: string | null
 		lastError: string | null
+		connectedSessionCount: number
+		sessionCount: number
 	}
+	workerSessions: Array<HomeConnectorWorkerSessionMetadata>
 	toolInventory: {
 		status: HomeConnectorState['connection']['toolInventoryStatus']
 		reason: string
@@ -45,6 +70,56 @@ function readOptionalEnvString(
 	return value ? value : null
 }
 
+function buildWorkerSessionMetadata(
+	state: HomeConnectorState,
+	config: HomeConnectorConfig,
+): Array<HomeConnectorWorkerSessionMetadata> {
+	if (state.workerSessions.length > 0) {
+		return state.workerSessions.map((session) => ({
+			sessionKey: session.sessionKey,
+			kodyUsername: session.kodyUsername,
+			connectorId: session.connectorId,
+			workerBaseUrl: session.workerUrl,
+			workerSessionUrl: session.workerSessionUrl,
+			workerWebSocketUrl: session.workerWebSocketUrl,
+			connected: session.connected,
+			lastSyncAt: session.lastSyncAt,
+			lastError: session.lastError,
+			sharedSecretConfigured: Boolean(session.sharedSecret),
+			toolInventoryStatus: session.toolInventoryStatus,
+			toolInventoryStatusReason: session.toolInventoryStatusReason,
+			localToolCount: session.localToolCount,
+			lastToolsChangedNotificationAt: session.lastToolsChangedNotificationAt,
+			lastToolsListRequestAt: session.lastToolsListRequestAt,
+			toolInventoryRecoveryCount: session.toolInventoryRecoveryCount,
+		}))
+	}
+
+	return [
+		{
+			sessionKey: `${config.kodyUsername ?? 'local'}/${config.homeConnectorId}`,
+			kodyUsername: config.kodyUsername,
+			connectorId: config.homeConnectorId,
+			workerBaseUrl: config.workerBaseUrl,
+			workerSessionUrl: config.workerSessionUrl,
+			workerWebSocketUrl: config.workerWebSocketUrl,
+			connected: state.connection.connected,
+			lastSyncAt: state.connection.lastSyncAt,
+			lastError: state.connection.lastError,
+			sharedSecretConfigured: Boolean(
+				state.connection.sharedSecret ?? config.sharedSecret,
+			),
+			toolInventoryStatus: state.connection.toolInventoryStatus,
+			toolInventoryStatusReason: state.connection.toolInventoryStatusReason,
+			localToolCount: state.connection.localToolCount,
+			lastToolsChangedNotificationAt:
+				state.connection.lastToolsChangedNotificationAt,
+			lastToolsListRequestAt: state.connection.lastToolsListRequestAt,
+			toolInventoryRecoveryCount: state.connection.toolInventoryRecoveryCount,
+		},
+	]
+}
+
 export function buildHomeConnectorRuntimeMetadata(input: {
 	config: HomeConnectorConfig
 	state: HomeConnectorState
@@ -52,11 +127,16 @@ export function buildHomeConnectorRuntimeMetadata(input: {
 }): HomeConnectorRuntimeMetadata {
 	const env = input.env ?? process.env
 	const sentryDsn = readOptionalEnvString(env, 'SENTRY_DSN')
+	const workerSessions = buildWorkerSessionMetadata(input.state, input.config)
+	const connectedWorkerSessionCount = workerSessions.filter(
+		(session) => session.connected,
+	).length
 	return {
 		service: 'home-connector',
 		appCommitSha: readOptionalEnvString(env, 'APP_COMMIT_SHA'),
 		connectorId: input.config.homeConnectorId,
-		kodyUsername: readOptionalEnvString(env, 'KODY_USERNAME'),
+		kodyUsername:
+			input.config.kodyUsername ?? readOptionalEnvString(env, 'KODY_USERNAME'),
 		workerBaseUrl: input.config.workerBaseUrl,
 		nodeVersion: process.version,
 		nodeEnv: readOptionalEnvString(env, 'NODE_ENV'),
@@ -66,6 +146,9 @@ export function buildHomeConnectorRuntimeMetadata(input: {
 		port: input.config.port,
 		processUptimeSeconds: Math.floor(process.uptime()),
 		sharedSecretConfigured: Boolean(input.config.sharedSecret),
+		workerSessionCount: workerSessions.length,
+		connectedWorkerSessionCount,
+		workerSessions,
 	}
 }
 
@@ -75,16 +158,20 @@ export function buildHomeConnectorHealthPayload(input: {
 	env?: NodeJS.ProcessEnv
 }): HomeConnectorHealthPayload {
 	const { connection } = input.state
+	const metadata = buildHomeConnectorRuntimeMetadata(input)
 	return {
 		ok: true,
 		service: 'home-connector',
 		connectorId: connection.connectorId,
-		metadata: buildHomeConnectorRuntimeMetadata(input),
+		metadata,
 		connection: {
-			connected: connection.connected,
+			connected: metadata.connectedWorkerSessionCount > 0,
 			lastSyncAt: connection.lastSyncAt,
 			lastError: connection.lastError,
+			connectedSessionCount: metadata.connectedWorkerSessionCount,
+			sessionCount: metadata.workerSessionCount,
 		},
+		workerSessions: metadata.workerSessions,
 		toolInventory: {
 			status: connection.toolInventoryStatus,
 			reason: connection.toolInventoryStatusReason,
