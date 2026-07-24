@@ -45,14 +45,63 @@ export class LutronLeapResponseError extends Error {
 		this.action = input.action
 		this.statusCode = input.statusCode
 		this.responseBody = input.responseBody
-		if (isUnsupportedGoToLevelResponse(input)) {
+		const failureCode = classifyExpectedLeapFailure(input)
+		if (failureCode) {
 			this.homeConnectorCaptureContext = {
 				shouldCapture: false,
 				tags: {
 					connector_vendor: 'lutron',
-					lutron_failure_code: 'unsupported_zone_level',
+					lutron_failure_code: failureCode,
 				},
 			}
+		}
+	}
+}
+
+export class LutronInvalidZoneIdError extends Error {
+	readonly zoneId: string
+	homeConnectorCaptureContext?: HomeConnectorErrorCaptureContext
+
+	constructor(zoneId: string) {
+		super(
+			`Lutron zone id "${zoneId}" is invalid. Pass a numeric zone id from lutron_get_inventory (for example "495"), not a button/device href.`,
+		)
+		this.name = 'LutronInvalidZoneIdError'
+		this.zoneId = zoneId
+		this.homeConnectorCaptureContext = {
+			shouldCapture: false,
+			tags: {
+				connector_vendor: 'lutron',
+				lutron_failure_code: 'invalid_zone_id',
+			},
+		}
+	}
+}
+
+export class LutronUnsupportedZoneCommandError extends Error {
+	readonly zoneId: string
+	readonly controlType: string
+	readonly command: string
+	homeConnectorCaptureContext?: HomeConnectorErrorCaptureContext
+
+	constructor(input: {
+		zoneId: string
+		controlType: string
+		command: string
+		message: string
+	}) {
+		super(input.message)
+		this.name = 'LutronUnsupportedZoneCommandError'
+		this.zoneId = input.zoneId
+		this.controlType = input.controlType
+		this.command = input.command
+		this.homeConnectorCaptureContext = {
+			shouldCapture: false,
+			tags: {
+				connector_vendor: 'lutron',
+				lutron_failure_code: 'unsupported_zone_command',
+				lutron_control_type: input.controlType,
+			},
 		}
 	}
 }
@@ -71,13 +120,198 @@ function isUnsupportedGoToLevelResponse(input: {
 	)
 }
 
+function isUnsupportedRequestResponse(input: {
+	statusCode: string
+	responseBody: Record<string, unknown> | undefined
+}) {
+	return (
+		input.statusCode.startsWith('400') &&
+		input.responseBody?.['Message'] === 'This request is not supported'
+	)
+}
+
+function isInvalidCredentialsResponse(input: {
+	action: string
+	statusCode: string
+}) {
+	return input.action === 'login' && input.statusCode.startsWith('401')
+}
+
+function classifyExpectedLeapFailure(input: {
+	action: string
+	statusCode: string
+	responseBody: Record<string, unknown> | undefined
+}): string | null {
+	if (isUnsupportedGoToLevelResponse(input)) {
+		return 'unsupported_zone_level'
+	}
+	if (isUnsupportedRequestResponse(input)) {
+		return 'unsupported_request'
+	}
+	if (isInvalidCredentialsResponse(input)) {
+		return 'invalid_credentials'
+	}
+	return null
+}
+
 export function isLutronUnsupportedZoneLevelError(
+	error: unknown,
+): error is LutronLeapResponseError | LutronUnsupportedZoneCommandError {
+	return (
+		(error instanceof LutronLeapResponseError &&
+			isUnsupportedGoToLevelResponse(error)) ||
+		error instanceof LutronUnsupportedZoneCommandError
+	)
+}
+
+export function isLutronUnsupportedRequestError(
 	error: unknown,
 ): error is LutronLeapResponseError {
 	return (
 		error instanceof LutronLeapResponseError &&
-		isUnsupportedGoToLevelResponse(error)
+		isUnsupportedRequestResponse(error)
 	)
+}
+
+export function isLutronInvalidCredentialsError(
+	error: unknown,
+): error is LutronLeapResponseError {
+	return (
+		error instanceof LutronLeapResponseError &&
+		isInvalidCredentialsResponse(error)
+	)
+}
+
+export function isLutronInvalidZoneIdError(
+	error: unknown,
+): error is LutronInvalidZoneIdError {
+	return error instanceof LutronInvalidZoneIdError
+}
+
+export function isLutronExpectedClientError(error: unknown): boolean {
+	return (
+		isLutronUnsupportedZoneLevelError(error) ||
+		isLutronUnsupportedRequestError(error) ||
+		isLutronInvalidZoneIdError(error) ||
+		isLutronInvalidCredentialsError(error)
+	)
+}
+
+export function normalizeLutronZoneId(zoneId: string): string {
+	const trimmed = zoneId.trim()
+	const hrefMatch = /^\/zone\/([^/]+)\/?$/i.exec(trimmed)
+	const candidate = hrefMatch?.[1] ?? trimmed
+	if (!/^\d+$/.test(candidate)) {
+		throw new LutronInvalidZoneIdError(zoneId)
+	}
+	return candidate
+}
+
+type LutronZoneLevelCommand = {
+	commandType: string
+	body: Record<string, unknown>
+}
+
+export function buildLutronZoneLevelCommand(input: {
+	zoneId: string
+	controlType: string
+	level: number
+	status: LutronZoneStatus | null
+}): LutronZoneLevelCommand {
+	const controlType = input.controlType.trim() || 'Unknown'
+	const level = Math.max(0, Math.min(100, input.level))
+
+	switch (controlType) {
+		case 'Dimmed':
+			return {
+				commandType: 'GoToLevel',
+				body: {
+					Command: {
+						CommandType: 'GoToLevel',
+						Parameter: [
+							{
+								Type: 'Level',
+								Value: level,
+							},
+						],
+					},
+				},
+			}
+		case 'SpectrumTune':
+		case 'ColorTune': {
+			const spectrumParameters: Record<string, unknown> = {
+				Level: level,
+			}
+			if (typeof input.status?.vibrancy === 'number') {
+				spectrumParameters['Vibrancy'] = input.status.vibrancy
+			}
+			return {
+				commandType: 'GoToSpectrumTuningLevel',
+				body: {
+					Command: {
+						CommandType: 'GoToSpectrumTuningLevel',
+						SpectrumTuningLevelParameters: spectrumParameters,
+					},
+				},
+			}
+		}
+		case 'WhiteTune': {
+			const kelvin = input.status?.whiteTuningKelvin
+			if (typeof kelvin !== 'number') {
+				throw new LutronUnsupportedZoneCommandError({
+					zoneId: input.zoneId,
+					controlType,
+					command: 'GoToLevel',
+					message: `Lutron zone ${input.zoneId} is WhiteTune and cannot use GoToLevel. Use lutron_set_zone_white_tuning with an explicit Kelvin value.`,
+				})
+			}
+			return {
+				commandType: 'GoToWhiteTuningLevel',
+				body: {
+					Command: {
+						CommandType: 'GoToWhiteTuningLevel',
+						WhiteTuningLevelParameters: {
+							Level: level,
+							WhiteTuningLevel: {
+								Kelvin: kelvin,
+							},
+						},
+					},
+				},
+			}
+		}
+		case 'Switched':
+			return {
+				commandType: 'GoToSwitchedLevel',
+				body: {
+					Command: {
+						CommandType: 'GoToSwitchedLevel',
+						SwitchedLevelParameters: {
+							SwitchedLevel: level > 0 ? 'On' : 'Off',
+						},
+					},
+				},
+			}
+		case 'Shade':
+			return {
+				commandType: 'GoToShadeLevel',
+				body: {
+					Command: {
+						CommandType: 'GoToShadeLevel',
+						ShadeLevelParameters: {
+							Level: level,
+						},
+					},
+				},
+			}
+		default:
+			throw new LutronUnsupportedZoneCommandError({
+				zoneId: input.zoneId,
+				controlType,
+				command: 'GoToLevel',
+				message: `Lutron zone ${input.zoneId} has ControlType "${controlType}", which does not support level-set via lutron_set_zone_level.`,
+			})
+	}
 }
 
 const LEAP_SOCKET_TIMEOUT_MS = 5_000
@@ -397,6 +631,15 @@ async function fetchLedState(client: LeapClient, ledHref: string | null) {
 	if (!ledHref) return null
 	const response = await client.read(`${ledHref}/status`)
 	if (isNoContent(response)) return null
+	const statusCode = getStatusCode(response)
+	if (
+		isUnsupportedRequestResponse({
+			statusCode,
+			responseBody: response.Body,
+		})
+	) {
+		return null
+	}
 	assertSuccessfulResponse(response, `${ledHref} status read`)
 	return mapLedState(response)
 }
@@ -813,33 +1056,30 @@ export async function pressLutronButton(input: {
 	}
 }
 
-export async function setLutronZoneLevel(input: {
-	processor: LutronPersistedProcessor
-	credentials: LutronCredentials
-	zoneId: string
-	level: number
-}) {
-	const client = await createLutronLeapClient(input.processor)
-	try {
-		await client.login(input.credentials)
-		const response = await client.create(
-			`/zone/${input.zoneId}/commandprocessor`,
-			{
-				Command: {
-					CommandType: 'GoToLevel',
-					Parameter: [
-						{
-							Type: 'Level',
-							Value: input.level,
-						},
-					],
-				},
-			},
+async function readZoneDefinition(
+	client: LeapClient,
+	zoneId: string,
+): Promise<{
+	controlType: string
+	availableControlTypes: Array<string>
+}> {
+	const response = await client.read(`/zone/${zoneId}`)
+	assertSuccessfulResponse(response, `zone ${zoneId} definition read`)
+	const zone =
+		(response.Body?.['Zone'] as Record<string, unknown> | undefined) ?? null
+	if (!zone) {
+		throw new Error(
+			`Lutron zone ${zoneId} definition response did not include a Zone payload.`,
 		)
-		assertSuccessfulResponse(response, `zone ${input.zoneId} level set`)
-		return response
-	} finally {
-		await client.close()
+	}
+	return {
+		controlType:
+			typeof zone['ControlType'] === 'string' ? zone['ControlType'] : 'Unknown',
+		availableControlTypes: Array.isArray(zone['AvailableControlTypes'])
+			? zone['AvailableControlTypes'].filter(
+					(entry): entry is string => typeof entry === 'string',
+				)
+			: [],
 	}
 }
 
@@ -852,6 +1092,45 @@ async function readZoneStatus(
 	return mapZoneStatus(response)
 }
 
+function zoneLevelNeedsStatus(controlType: string) {
+	return (
+		controlType === 'SpectrumTune' ||
+		controlType === 'ColorTune' ||
+		controlType === 'WhiteTune'
+	)
+}
+
+export async function setLutronZoneLevel(input: {
+	processor: LutronPersistedProcessor
+	credentials: LutronCredentials
+	zoneId: string
+	level: number
+}) {
+	const zoneId = normalizeLutronZoneId(input.zoneId)
+	const client = await createLutronLeapClient(input.processor)
+	try {
+		await client.login(input.credentials)
+		const definition = await readZoneDefinition(client, zoneId)
+		const status = zoneLevelNeedsStatus(definition.controlType)
+			? await readZoneStatus(client, zoneId)
+			: null
+		const command = buildLutronZoneLevelCommand({
+			zoneId,
+			controlType: definition.controlType,
+			level: input.level,
+			status,
+		})
+		const response = await client.create(
+			`/zone/${zoneId}/commandprocessor`,
+			command.body,
+		)
+		assertSuccessfulResponse(response, `zone ${zoneId} level set`)
+		return response
+	} finally {
+		await client.close()
+	}
+}
+
 export async function setLutronZoneColor(input: {
 	processor: LutronPersistedProcessor
 	credentials: LutronCredentials
@@ -861,29 +1140,39 @@ export async function setLutronZoneColor(input: {
 	level?: number
 	vibrancy?: number
 }) {
+	const zoneId = normalizeLutronZoneId(input.zoneId)
 	const client = await createLutronLeapClient(input.processor)
 	try {
 		await client.login(input.credentials)
-		const currentStatus = await readZoneStatus(client, input.zoneId)
-		const response = await client.create(
-			`/zone/${input.zoneId}/commandprocessor`,
-			{
-				Command: {
-					CommandType: 'GoToSpectrumTuningLevel',
-					SpectrumTuningLevelParameters: {
-						Level: input.level ?? currentStatus?.level ?? 100,
-						Vibrancy: input.vibrancy ?? currentStatus?.vibrancy ?? 50,
-						ColorTuningStatus: {
-							HSVTuningLevel: {
-								Hue: input.hue,
-								Saturation: input.saturation,
-							},
+		const definition = await readZoneDefinition(client, zoneId)
+		if (
+			definition.controlType !== 'SpectrumTune' &&
+			definition.controlType !== 'ColorTune'
+		) {
+			throw new LutronUnsupportedZoneCommandError({
+				zoneId,
+				controlType: definition.controlType,
+				command: 'GoToSpectrumTuningLevel',
+				message: `Lutron zone ${zoneId} has ControlType "${definition.controlType}", which does not support lutron_set_zone_color.`,
+			})
+		}
+		const currentStatus = await readZoneStatus(client, zoneId)
+		const response = await client.create(`/zone/${zoneId}/commandprocessor`, {
+			Command: {
+				CommandType: 'GoToSpectrumTuningLevel',
+				SpectrumTuningLevelParameters: {
+					Level: input.level ?? currentStatus?.level ?? 100,
+					Vibrancy: input.vibrancy ?? currentStatus?.vibrancy ?? 50,
+					ColorTuningStatus: {
+						HSVTuningLevel: {
+							Hue: input.hue,
+							Saturation: input.saturation,
 						},
 					},
 				},
 			},
-		)
-		assertSuccessfulResponse(response, `zone ${input.zoneId} color set`)
+		})
+		assertSuccessfulResponse(response, `zone ${zoneId} color set`)
 		return response
 	} finally {
 		await client.close()
@@ -897,25 +1186,36 @@ export async function setLutronZoneWhiteTuning(input: {
 	kelvin: number
 	level?: number
 }) {
+	const zoneId = normalizeLutronZoneId(input.zoneId)
 	const client = await createLutronLeapClient(input.processor)
 	try {
 		await client.login(input.credentials)
-		const currentStatus = await readZoneStatus(client, input.zoneId)
-		const response = await client.create(
-			`/zone/${input.zoneId}/commandprocessor`,
-			{
-				Command: {
-					CommandType: 'GoToWhiteTuningLevel',
-					WhiteTuningLevelParameters: {
-						Level: input.level ?? currentStatus?.level ?? 100,
-						WhiteTuningLevel: {
-							Kelvin: input.kelvin,
-						},
+		const definition = await readZoneDefinition(client, zoneId)
+		if (
+			definition.controlType !== 'WhiteTune' &&
+			definition.controlType !== 'SpectrumTune' &&
+			definition.controlType !== 'ColorTune'
+		) {
+			throw new LutronUnsupportedZoneCommandError({
+				zoneId,
+				controlType: definition.controlType,
+				command: 'GoToWhiteTuningLevel',
+				message: `Lutron zone ${zoneId} has ControlType "${definition.controlType}", which does not support lutron_set_zone_white_tuning.`,
+			})
+		}
+		const currentStatus = await readZoneStatus(client, zoneId)
+		const response = await client.create(`/zone/${zoneId}/commandprocessor`, {
+			Command: {
+				CommandType: 'GoToWhiteTuningLevel',
+				WhiteTuningLevelParameters: {
+					Level: input.level ?? currentStatus?.level ?? 100,
+					WhiteTuningLevel: {
+						Kelvin: input.kelvin,
 					},
 				},
 			},
-		)
-		assertSuccessfulResponse(response, `zone ${input.zoneId} white tuning set`)
+		})
+		assertSuccessfulResponse(response, `zone ${zoneId} white tuning set`)
 		return response
 	} finally {
 		await client.close()
@@ -928,24 +1228,19 @@ export async function setLutronZoneSwitchedLevel(input: {
 	zoneId: string
 	state: 'On' | 'Off'
 }) {
+	const zoneId = normalizeLutronZoneId(input.zoneId)
 	const client = await createLutronLeapClient(input.processor)
 	try {
 		await client.login(input.credentials)
-		const response = await client.create(
-			`/zone/${input.zoneId}/commandprocessor`,
-			{
-				Command: {
-					CommandType: 'GoToSwitchedLevel',
-					SwitchedLevelParameters: {
-						SwitchedLevel: input.state,
-					},
+		const response = await client.create(`/zone/${zoneId}/commandprocessor`, {
+			Command: {
+				CommandType: 'GoToSwitchedLevel',
+				SwitchedLevelParameters: {
+					SwitchedLevel: input.state,
 				},
 			},
-		)
-		assertSuccessfulResponse(
-			response,
-			`zone ${input.zoneId} switched level set`,
-		)
+		})
+		assertSuccessfulResponse(response, `zone ${zoneId} switched level set`)
 		return response
 	} finally {
 		await client.close()
@@ -958,21 +1253,19 @@ export async function setLutronShadeLevel(input: {
 	zoneId: string
 	level: number
 }) {
+	const zoneId = normalizeLutronZoneId(input.zoneId)
 	const client = await createLutronLeapClient(input.processor)
 	try {
 		await client.login(input.credentials)
-		const response = await client.create(
-			`/zone/${input.zoneId}/commandprocessor`,
-			{
-				Command: {
-					CommandType: 'GoToShadeLevel',
-					ShadeLevelParameters: {
-						Level: input.level,
-					},
+		const response = await client.create(`/zone/${zoneId}/commandprocessor`, {
+			Command: {
+				CommandType: 'GoToShadeLevel',
+				ShadeLevelParameters: {
+					Level: input.level,
 				},
 			},
-		)
-		assertSuccessfulResponse(response, `zone ${input.zoneId} shade level set`)
+		})
+		assertSuccessfulResponse(response, `zone ${zoneId} shade level set`)
 		return response
 	} finally {
 		await client.close()
