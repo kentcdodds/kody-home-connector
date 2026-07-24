@@ -17,7 +17,13 @@ import {
 import { type createKasaAdapter } from '../adapters/kasa/index.ts'
 import { isLutronProcessorNotFoundError } from '../adapters/lutron/errors.ts'
 import { type createLutronAdapter } from '../adapters/lutron/index.ts'
-import { isLutronUnsupportedZoneLevelError } from '../adapters/lutron/leap-client.ts'
+import {
+	isLutronInvalidCredentialsError,
+	isLutronInvalidZoneIdError,
+	isLutronUnsupportedRequestError,
+	isLutronUnsupportedZoneLevelError,
+	LutronUnsupportedZoneCommandError,
+} from '../adapters/lutron/leap-client.ts'
 import { createRokuAdapter } from '../adapters/roku/index.ts'
 import { type createSonosAdapter } from '../adapters/sonos/index.ts'
 import { type createSamsungTvAdapter } from '../adapters/samsung-tv/index.ts'
@@ -368,6 +374,26 @@ export function createHomeConnectorMcpServer(input: {
 		if (!isLutronUnsupportedZoneLevelError(error)) {
 			return null
 		}
+		if (error instanceof LutronUnsupportedZoneCommandError) {
+			return {
+				isError: true,
+				content: [
+					{
+						type: 'text',
+						text: error.message,
+					},
+				],
+				structuredContent: {
+					error: {
+						code: 'lutron_zone_command_not_supported',
+						message: error.message,
+						zoneId: error.zoneId,
+						controlType: error.controlType,
+						command: error.command,
+					},
+				},
+			}
+		}
 		return {
 			isError: true,
 			content: [
@@ -388,6 +414,80 @@ export function createHomeConnectorMcpServer(input: {
 		}
 	}
 
+	function lutronInvalidZoneIdResult(error: unknown): CallToolResult | null {
+		if (!isLutronInvalidZoneIdError(error)) {
+			return null
+		}
+		return {
+			isError: true,
+			content: [
+				{
+					type: 'text',
+					text: error.message,
+				},
+			],
+			structuredContent: {
+				error: {
+					code: 'lutron_invalid_zone_id',
+					message: error.message,
+					zoneId: error.zoneId,
+				},
+			},
+		}
+	}
+
+	function lutronUnsupportedRequestResult(
+		error: unknown,
+	): CallToolResult | null {
+		if (!isLutronUnsupportedRequestError(error)) {
+			return null
+		}
+		return {
+			isError: true,
+			content: [
+				{
+					type: 'text',
+					text: error.message,
+				},
+			],
+			structuredContent: {
+				error: {
+					code: 'lutron_request_not_supported',
+					message: error.message,
+					action: error.action,
+					statusCode: error.statusCode,
+					responseBody: error.responseBody ?? null,
+				},
+			},
+		}
+	}
+
+	function lutronInvalidCredentialsResult(
+		error: unknown,
+	): CallToolResult | null {
+		if (!isLutronInvalidCredentialsError(error)) {
+			return null
+		}
+		return {
+			isError: true,
+			content: [
+				{
+					type: 'text',
+					text: `${error.message} Update credentials with lutron_set_credentials for this processor, then retry.`,
+				},
+			],
+			structuredContent: {
+				error: {
+					code: 'lutron_invalid_credentials',
+					message: error.message,
+					action: error.action,
+					statusCode: error.statusCode,
+					responseBody: error.responseBody ?? null,
+				},
+			},
+		}
+	}
+
 	async function handleExpectedLutronError(
 		handler: () => Promise<CallToolResult> | CallToolResult,
 	) {
@@ -396,7 +496,10 @@ export function createHomeConnectorMcpServer(input: {
 		} catch (error) {
 			const result =
 				lutronProcessorNotFoundResult(error) ??
-				lutronUnsupportedZoneLevelResult(error)
+				lutronInvalidZoneIdResult(error) ??
+				lutronUnsupportedZoneLevelResult(error) ??
+				lutronUnsupportedRequestResult(error) ??
+				lutronInvalidCredentialsResult(error)
 			if (result) return result
 			throw error
 		}
@@ -1748,7 +1851,8 @@ export function createHomeConnectorMcpServer(input: {
 		{
 			name: 'lutron_set_zone_level',
 			title: 'Set Lutron Zone Level',
-			description: 'Set a Lutron zone level using LEAP GoToLevel.',
+			description:
+				'Set a Lutron zone level. Reads the zone ControlType first and routes to the matching LEAP command (GoToLevel, GoToSpectrumTuningLevel, GoToSwitchedLevel, or GoToShadeLevel). Pass a numeric zone id from lutron_get_inventory.',
 			...buildToolInputSchema({
 				processorId: z.string().min(1),
 				zoneId: z.string().min(1),
