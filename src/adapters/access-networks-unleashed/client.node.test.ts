@@ -1,5 +1,6 @@
 import { afterEach, expect, test, vi } from 'vitest'
 import { createAccessNetworksUnleashedAjaxClient } from './client.ts'
+import { AccessNetworksUnleashedRequestError } from './errors.ts'
 import { loadHomeConnectorConfig } from '../../config.ts'
 
 const originalFetch = globalThis.fetch
@@ -41,12 +42,13 @@ function response(
 	return output
 }
 
-function createConfig() {
+function createConfig(envOverrides: Record<string, string | undefined> = {}) {
 	using _env = createTemporaryEnv({
 		HOME_CONNECTOR_ID: 'default',
 		WORKER_BASE_URL: 'http://localhost:3742',
 		ACCESS_NETWORKS_UNLEASHED_SCAN_CIDRS: '192.168.10.88/32',
 		ACCESS_NETWORKS_UNLEASHED_ALLOW_INSECURE_TLS: 'true',
+		...envOverrides,
 	})
 	return loadHomeConnectorConfig()
 }
@@ -391,4 +393,41 @@ test('request rejects xmsg error responses', async () => {
 			xmlBody: '<bogus/>',
 		}),
 	).rejects.toThrow('rejected the command')
+})
+
+test('request wraps certificate fetch failures as AccessNetworksUnleashedRequestError', async () => {
+	const config = createConfig({
+		ACCESS_NETWORKS_UNLEASHED_ALLOW_INSECURE_TLS: 'false',
+	})
+	const fetchMock = vi.fn(async () => {
+		throw new TypeError('fetch failed', {
+			cause: new Error(
+				'unable to verify the first certificate; if the root CA is installed locally, try running Node.js with --use-system-ca',
+			),
+		})
+	})
+	globalThis.fetch = fetchMock as typeof fetch
+
+	const client = createAccessNetworksUnleashedAjaxClient({
+		config,
+		controller: createController(),
+	})
+
+	let thrown: unknown
+	try {
+		await client.request({
+			action: 'getstat',
+			comp: 'system',
+			xmlBody: '<sysinfo/>',
+		})
+	} catch (error) {
+		thrown = error
+	}
+
+	expect(thrown).toBeInstanceOf(AccessNetworksUnleashedRequestError)
+	expect((thrown as Error).name).toBe('AccessNetworksUnleashedRequestError')
+	expect((thrown as Error).message).toContain(
+		'ACCESS_NETWORKS_UNLEASHED_ALLOW_INSECURE_TLS',
+	)
+	expect((thrown as Error).message).toContain('establish a session')
 })
