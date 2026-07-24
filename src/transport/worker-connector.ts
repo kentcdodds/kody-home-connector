@@ -9,8 +9,12 @@ import {
 	type KodyToConnectorMessage,
 	stringifyConnectorMessage,
 } from '@kody-bot/connector-kit/protocol'
-import { type HomeConnectorConfig } from '../config.ts'
-import { type HomeConnectorState, updateConnectionState } from '../state.ts'
+import {
+	type HomeConnectorState,
+	type HomeConnectorToolInventoryStatus,
+	updateConnectionState,
+	updateWorkerSessionState,
+} from '../state.ts'
 import { type HomeConnectorToolRegistry } from '../mcp/server.ts'
 import {
 	addHomeConnectorSentryBreadcrumb,
@@ -18,6 +22,14 @@ import {
 	captureHomeConnectorMessage,
 } from '../sentry.ts'
 import { type HomeConnectorLogger } from '../logging/index.ts'
+
+export type WorkerConnectorTransportConfig = {
+	homeConnectorId: string
+	workerBaseUrl: string
+	workerWebSocketUrl: string
+	sharedSecret: string | null
+	kodyUsername?: string | null
+}
 
 const heartbeatIntervalMs = 10_000
 const initialReconnectDelayMs = 2_000
@@ -67,7 +79,7 @@ function getReconnectDelayMs(consecutiveReconnects: number) {
 }
 
 function createSocketEventContext(input: {
-	config: HomeConnectorConfig
+	config: WorkerConnectorTransportConfig
 	connectionAttempt: number
 	consecutiveReconnects: number
 }) {
@@ -75,6 +87,7 @@ function createSocketEventContext(input: {
 		attempt: input.connectionAttempt,
 		consecutiveReconnects: input.consecutiveReconnects,
 		connectorId: input.config.homeConnectorId,
+		kodyUsername: input.config.kodyUsername ?? null,
 		url: input.config.workerWebSocketUrl,
 	}
 }
@@ -232,10 +245,22 @@ async function handleJsonRpcRequest(
 }
 
 export function createWorkerConnector(input: {
-	config: HomeConnectorConfig
+	config: WorkerConnectorTransportConfig
 	state: HomeConnectorState
+	/**
+	 * When set, connection/tool-inventory updates write to
+	 * `state.workerSessions[sessionIndex]` (and mirror primary onto
+	 * `state.connection` when index is 0). When omitted, updates write only to
+	 * `state.connection` for single-session callers/tests.
+	 */
+	sessionIndex?: number
 	logger: HomeConnectorLogger
 	toolRegistry: HomeConnectorToolRegistry
+	/**
+	 * Multi-session manager hook: when this session needs a tools/list_changed
+	 * refresh, ask the manager to notify every connected session.
+	 */
+	requestToolsListChangedFanout?: (reason: string) => void
 }) {
 	let started = false
 	let stopped = false
@@ -270,15 +295,35 @@ export function createWorkerConnector(input: {
 		toolInventoryTimer = null
 	}
 
+	function readConnectionState() {
+		if (input.sessionIndex == null) {
+			return input.state.connection
+		}
+		const session = input.state.workerSessions[input.sessionIndex]
+		if (!session) {
+			return input.state.connection
+		}
+		return session
+	}
+
+	function patchConnectionState(
+		patch: Partial<HomeConnectorState['connection']>,
+	) {
+		if (input.sessionIndex == null) {
+			return updateConnectionState(input.state, patch)
+		}
+		return updateWorkerSessionState(input.state, input.sessionIndex, patch)
+	}
+
 	function updateToolInventoryStatus(inputStatus: {
 		localToolCount: number
-		status: HomeConnectorState['connection']['toolInventoryStatus']
+		status: HomeConnectorToolInventoryStatus
 		reason: string
 		lastToolsChangedNotificationAt?: string
 		lastToolsListRequestAt?: string
 		recoveryCount?: number
 	}) {
-		updateConnectionState(input.state, {
+		patchConnectionState({
 			localToolCount: inputStatus.localToolCount,
 			toolInventoryStatus: inputStatus.status,
 			toolInventoryStatusReason: inputStatus.reason,
@@ -301,22 +346,33 @@ export function createWorkerConnector(input: {
 		return input.toolRegistry.list()
 	}
 
-	function sendToolsChangedNotification(reason: string) {
+	function deliverToolsChangedNotification(
+		reason: string,
+		options: { updateInventoryStatus: boolean },
+	) {
 		const localToolCount = listLocalTools().length
 		const sentAt = new Date().toISOString()
-		updateToolInventoryStatus({
-			localToolCount,
-			status: localToolCount > 0 ? 'refresh_requested' : 'empty_local_registry',
-			reason:
-				localToolCount > 0
-					? `Sent tools/list_changed notification to refresh remote registry (${reason}).`
-					: `Local registry is empty while trying to refresh remote registry (${reason}).`,
-			lastToolsChangedNotificationAt: sentAt,
-			recoveryCount: input.state.connection.toolInventoryRecoveryCount,
-		})
+		if (options.updateInventoryStatus) {
+			updateToolInventoryStatus({
+				localToolCount,
+				status:
+					localToolCount > 0 ? 'refresh_requested' : 'empty_local_registry',
+				reason:
+					localToolCount > 0
+						? `Sent tools/list_changed notification to refresh remote registry (${reason}).`
+						: `Local registry is empty while trying to refresh remote registry (${reason}).`,
+				lastToolsChangedNotificationAt: sentAt,
+				recoveryCount: readConnectionState().toolInventoryRecoveryCount,
+			})
+		} else {
+			patchConnectionState({
+				localToolCount,
+				lastToolsChangedNotificationAt: sentAt,
+			})
+		}
 		input.logger.info(
 			'worker.tools.list_changed_sent',
-			`Sending home connector tools changed notification reason=${reason} localToolCount=${localToolCount}`,
+			`Sending home connector tools changed notification reason=${reason} localToolCount=${localToolCount} connectorId=${input.config.homeConnectorId} kodyUsername=${input.config.kodyUsername ?? 'local'} updateInventoryStatus=${options.updateInventoryStatus}`,
 			{
 				...createSocketEventContext({
 					config: input.config,
@@ -325,6 +381,7 @@ export function createWorkerConnector(input: {
 				}),
 				reason,
 				localToolCount,
+				updateInventoryStatus: options.updateInventoryStatus,
 			},
 		)
 		if (socket?.readyState !== WebSocket.OPEN) {
@@ -342,6 +399,7 @@ export function createWorkerConnector(input: {
 				}),
 				reason,
 				localToolCount,
+				updateInventoryStatus: options.updateInventoryStatus,
 			},
 		})
 		socket.send(
@@ -351,6 +409,31 @@ export function createWorkerConnector(input: {
 			}),
 		)
 		return localToolCount
+	}
+
+	function sendToolsChangedNotification(reason: string) {
+		if (input.requestToolsListChangedFanout) {
+			// Only the initiating session updates its inventory state machine.
+			// Fan-out peers get a wire notification without regressing a
+			// previously registered inventory status.
+			const localToolCount = listLocalTools().length
+			updateToolInventoryStatus({
+				localToolCount,
+				status:
+					localToolCount > 0 ? 'refresh_requested' : 'empty_local_registry',
+				reason:
+					localToolCount > 0
+						? `Sent tools/list_changed notification to refresh remote registry (${reason}).`
+						: `Local registry is empty while trying to refresh remote registry (${reason}).`,
+				lastToolsChangedNotificationAt: new Date().toISOString(),
+				recoveryCount: readConnectionState().toolInventoryRecoveryCount,
+			})
+			input.requestToolsListChangedFanout(reason)
+			return localToolCount
+		}
+		return deliverToolsChangedNotification(reason, {
+			updateInventoryStatus: true,
+		})
 	}
 
 	function handleToolsListRequest(toolCount: number) {
@@ -364,7 +447,7 @@ export function createWorkerConnector(input: {
 				status: 'registered',
 				reason: `Kody requested tools/list and the connector returned ${toolCount} local tool(s).`,
 				lastToolsListRequestAt: listedAt,
-				recoveryCount: input.state.connection.toolInventoryRecoveryCount,
+				recoveryCount: readConnectionState().toolInventoryRecoveryCount,
 			})
 			input.logger.info(
 				'worker.tools.listed',
@@ -387,7 +470,7 @@ export function createWorkerConnector(input: {
 			reason:
 				'Kody requested tools/list, but the connector local tool registry was empty.',
 			lastToolsListRequestAt: listedAt,
-			recoveryCount: input.state.connection.toolInventoryRecoveryCount,
+			recoveryCount: readConnectionState().toolInventoryRecoveryCount,
 		})
 		input.logger.warn(
 			'worker.tools.empty_registry',
@@ -423,7 +506,7 @@ export function createWorkerConnector(input: {
 				localToolCount,
 				status: 'empty_local_registry',
 				reason: `Local registry is still empty after grace period; refresh attempt ${toolInventoryRefreshAttempts}.`,
-				recoveryCount: input.state.connection.toolInventoryRecoveryCount,
+				recoveryCount: readConnectionState().toolInventoryRecoveryCount,
 			})
 			input.logger.warn(
 				'worker.tools.empty_registry_recovery',
@@ -448,7 +531,7 @@ export function createWorkerConnector(input: {
 				localToolCount,
 				status: 'refresh_requested',
 				reason: missingListReason,
-				recoveryCount: input.state.connection.toolInventoryRecoveryCount,
+				recoveryCount: readConnectionState().toolInventoryRecoveryCount,
 			})
 			input.logger.warn(
 				'worker.tools.remote_list_missing',
@@ -483,7 +566,7 @@ export function createWorkerConnector(input: {
 				localToolCount,
 				status: 'empty_local_registry',
 				reason: emptyRegistryReason,
-				recoveryCount: input.state.connection.toolInventoryRecoveryCount,
+				recoveryCount: readConnectionState().toolInventoryRecoveryCount,
 			})
 			input.logger.error(
 				'worker.tools.empty_registry_persistent',
@@ -529,7 +612,7 @@ export function createWorkerConnector(input: {
 			reason: toolsListRequestedForConnection
 				? 'Local registry recovered after Kody received an empty tools/list response, but Kody did not request a follow-up tools/list after refresh retries.'
 				: 'Kody did not request tools/list after retries; leaving websocket connected and awaiting a remote registry refresh.',
-			recoveryCount: input.state.connection.toolInventoryRecoveryCount,
+			recoveryCount: readConnectionState().toolInventoryRecoveryCount,
 		})
 		input.logger.warn(
 			'worker.tools.remote_list_still_missing',
@@ -602,7 +685,7 @@ export function createWorkerConnector(input: {
 		toolsListRequestedForConnection = false
 		toolInventoryRefreshAttempts = 0
 		connectionAttempt += 1
-		updateConnectionState(input.state, {
+		patchConnectionState({
 			connected: false,
 			lastError: null,
 			toolInventoryStatus: 'not_connected',
@@ -611,7 +694,7 @@ export function createWorkerConnector(input: {
 		})
 		input.logger.info(
 			'worker.websocket.connecting',
-			`Opening home connector websocket attempt=${connectionAttempt} url=${input.config.workerWebSocketUrl}`,
+			`Opening home connector websocket attempt=${connectionAttempt} connectorId=${input.config.homeConnectorId} kodyUsername=${input.config.kodyUsername ?? 'local'} url=${input.config.workerWebSocketUrl}`,
 			createSocketEventContext({
 				config: input.config,
 				connectionAttempt,
@@ -633,7 +716,7 @@ export function createWorkerConnector(input: {
 		socket.addEventListener('open', () => {
 			input.logger.info(
 				'worker.websocket.opened',
-				`Home connector websocket opened attempt=${connectionAttempt} connectorId=${input.config.homeConnectorId}`,
+				`Home connector websocket opened attempt=${connectionAttempt} connectorId=${input.config.homeConnectorId} kodyUsername=${input.config.kodyUsername ?? 'local'}`,
 				createSocketEventContext({
 					config: input.config,
 					connectionAttempt,
@@ -678,14 +761,14 @@ export function createWorkerConnector(input: {
 					case 'server.ping':
 						hasReportedSocketIssue = false
 						consecutiveReconnects = 0
-						updateConnectionState(input.state, {
+						patchConnectionState({
 							lastSyncAt: new Date().toISOString(),
 							lastError: null,
 						})
 						return
 					case 'server.error':
 						clearToolInventoryTimer()
-						updateConnectionState(input.state, {
+						patchConnectionState({
 							connected: false,
 							lastError: value.message,
 							toolInventoryStatus: 'not_connected',
@@ -723,13 +806,13 @@ export function createWorkerConnector(input: {
 						const localToolCount = listLocalTools().length
 						const alreadyListedTools =
 							toolsListRequestedForConnection &&
-							input.state.connection.toolInventoryStatus === 'registered' &&
+							readConnectionState().toolInventoryStatus === 'registered' &&
 							localToolCount > 0
 						if (!alreadyListedTools) {
 							toolsListRequestedForConnection = false
 							toolInventoryRefreshAttempts = 0
 						}
-						updateConnectionState(input.state, {
+						patchConnectionState({
 							connected: true,
 							lastSyncAt: new Date().toISOString(),
 							lastError: null,
@@ -781,7 +864,7 @@ export function createWorkerConnector(input: {
 					case 'connector.jsonrpc': {
 						const message = value.message
 						if (isJsonRpcResponse(message)) {
-							updateConnectionState(input.state, {
+							patchConnectionState({
 								lastSyncAt: new Date().toISOString(),
 								lastError: null,
 							})
@@ -825,7 +908,7 @@ export function createWorkerConnector(input: {
 									message: response,
 								}),
 							)
-							updateConnectionState(input.state, {
+							patchConnectionState({
 								lastSyncAt: new Date().toISOString(),
 								lastError: null,
 							})
@@ -834,7 +917,7 @@ export function createWorkerConnector(input: {
 					}
 				}
 			} catch (error) {
-				updateConnectionState(input.state, {
+				patchConnectionState({
 					lastError:
 						error instanceof Error
 							? error.message
@@ -882,9 +965,9 @@ export function createWorkerConnector(input: {
 				? consecutiveReconnects
 				: consecutiveReconnects + 1
 			const isToolInventoryRecoveryClose =
-				input.state.connection.toolInventoryStatus ===
+				readConnectionState().toolInventoryStatus ===
 				'reconnecting_after_missing_remote_list'
-			updateConnectionState(input.state, {
+			patchConnectionState({
 				connected: false,
 				lastError: closeMessage,
 				...(isToolInventoryRecoveryClose
@@ -964,7 +1047,7 @@ export function createWorkerConnector(input: {
 
 		socket.addEventListener('error', (event) => {
 			clearToolInventoryTimer()
-			updateConnectionState(input.state, {
+			patchConnectionState({
 				connected: false,
 				lastError: 'Home connector websocket error.',
 				toolInventoryStatus: 'not_connected',
@@ -1004,8 +1087,8 @@ export function createWorkerConnector(input: {
 			started = true
 			if (!input.config.sharedSecret) {
 				const message =
-					'Connector registration is disabled because HOME_CONNECTOR_SHARED_SECRET is not set. Start from the repo root with `npm run dev` or provide the secret manually.'
-				updateConnectionState(input.state, {
+					'Connector registration is disabled because no shared secret is configured for this Worker target. Set HOME_CONNECTOR_SHARED_SECRET (single-target) or sharedSecret on the target in HOME_CONNECTOR_TARGETS / HOME_CONNECTOR_TARGETS_FILE.'
+				patchConnectionState({
 					connected: false,
 					lastError: message,
 					toolInventoryStatus: 'not_connected',
@@ -1014,6 +1097,7 @@ export function createWorkerConnector(input: {
 				})
 				input.logger.warn('worker.registration.disabled', message, {
 					connectorId: input.config.homeConnectorId,
+					kodyUsername: input.config.kodyUsername ?? null,
 					workerUrl: input.config.workerBaseUrl,
 				})
 				return
@@ -1027,6 +1111,7 @@ export function createWorkerConnector(input: {
 				'Stopping home connector websocket.',
 				{
 					connectorId: input.config.homeConnectorId,
+					kodyUsername: input.config.kodyUsername ?? null,
 					readyState: socket?.readyState ?? null,
 				},
 			)
@@ -1035,6 +1120,11 @@ export function createWorkerConnector(input: {
 			clearInterval(heartbeat)
 			socket?.close()
 			socket = null
+		},
+		notifyToolsListChanged(reason: string) {
+			return deliverToolsChangedNotification(reason, {
+				updateInventoryStatus: false,
+			})
 		},
 	}
 }

@@ -13,10 +13,21 @@ const silentConsole = {
 function createConfig(): HomeConnectorConfig {
 	return {
 		homeConnectorId: 'default',
+		kodyUsername: null,
 		workerBaseUrl: 'http://localhost:3742',
 		workerSessionUrl: 'http://localhost:3742/connectors/default',
 		workerWebSocketUrl: 'ws://localhost:3742/connectors/default',
 		sharedSecret: 'secret',
+		workerTargets: [
+			{
+				kodyUsername: null,
+				homeConnectorId: 'default',
+				sharedSecret: 'secret',
+				workerBaseUrl: 'http://localhost:3742',
+				workerSessionUrl: 'http://localhost:3742/connectors/default',
+				workerWebSocketUrl: 'ws://localhost:3742/connectors/default',
+			},
+		],
 		islandRouterHost: null,
 		islandRouterPort: 22,
 		islandRouterUsername: null,

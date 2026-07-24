@@ -24,10 +24,21 @@ import { createHomeConnectorRouter } from './router.ts'
 function createConfig(dataPath = '/tmp'): HomeConnectorConfig {
 	return {
 		homeConnectorId: 'default',
+		kodyUsername: null,
 		workerBaseUrl: 'http://localhost:3742',
 		workerSessionUrl: 'http://localhost:3742/@test-user/connectors/default',
 		workerWebSocketUrl: 'ws://localhost:3742/@test-user/connectors/default',
 		sharedSecret: 'secret',
+		workerTargets: [
+			{
+				kodyUsername: null,
+				homeConnectorId: 'default',
+				sharedSecret: 'secret',
+				workerBaseUrl: 'http://localhost:3742',
+				workerSessionUrl: 'http://localhost:3742/@test-user/connectors/default',
+				workerWebSocketUrl: 'ws://localhost:3742/@test-user/connectors/default',
+			},
+		],
 		islandRouterHost: null,
 		islandRouterPort: 22,
 		islandRouterUsername: null,
@@ -940,12 +951,24 @@ test('health route returns ok json', async () => {
 				appCommitSha: null,
 				workerBaseUrl: config.workerBaseUrl,
 				mocksEnabled: false,
+				workerSessionCount: 1,
+				connectedWorkerSessionCount: 0,
 			}),
 			connection: {
 				connected: false,
 				lastSyncAt: null,
 				lastError: null,
+				connectedSessionCount: 0,
+				sessionCount: 1,
 			},
+			workerSessions: [
+				expect.objectContaining({
+					sessionKey: 'local/default',
+					connectorId: config.homeConnectorId,
+					connected: false,
+					sharedSecretConfigured: true,
+				}),
+			],
 			toolInventory: {
 				status: 'not_connected',
 				reason: 'Worker transport is not connected yet.',

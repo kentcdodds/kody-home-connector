@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'vitest'
 import { loadHomeConnectorConfig } from './config.ts'
-import { createAppState, updateConnectionState } from './state.ts'
+import {
+	createAppState,
+	initializeWorkerSessionStates,
+	updateConnectionState,
+	updateWorkerSessionState,
+} from './state.ts'
 import {
 	buildHomeConnectorHealthPayload,
 	buildHomeConnectorRuntimeMetadata,
@@ -37,7 +42,10 @@ describe('buildHomeConnectorRuntimeMetadata', () => {
 			sentryEnabled: true,
 			sentryEnvironment: 'production',
 			sharedSecretConfigured: Boolean(config.sharedSecret),
+			workerSessionCount: 1,
+			connectedWorkerSessionCount: 0,
 		})
+		expect(metadata.workerSessions).toHaveLength(1)
 		expect(metadata.nodeVersion).toMatch(/^v\d+/)
 		expect(metadata.processUptimeSeconds).toBeGreaterThanOrEqual(0)
 	})
@@ -66,12 +74,22 @@ describe('buildHomeConnectorRuntimeMetadata', () => {
 			connectorId: 'default',
 			metadata: expect.objectContaining({
 				appCommitSha: 'abc123',
+				workerSessionCount: 1,
+				connectedWorkerSessionCount: 1,
 			}),
 			connection: {
 				connected: true,
 				lastSyncAt: '2026-06-25T17:00:00.000Z',
 				lastError: null,
+				connectedSessionCount: 1,
+				sessionCount: 1,
 			},
+			workerSessions: expect.arrayContaining([
+				expect.objectContaining({
+					connectorId: 'default',
+					connected: true,
+				}),
+			]),
 			toolInventory: {
 				status: 'registered',
 				reason: 'Registered with worker.',
@@ -80,6 +98,57 @@ describe('buildHomeConnectorRuntimeMetadata', () => {
 				lastToolsListRequestAt: null,
 				recoveryCount: 0,
 			},
+		})
+	})
+
+	test('health tool inventory prefers a healthy non-primary session', () => {
+		const config = loadHomeConnectorConfig()
+		const state = createAppState()
+		initializeWorkerSessionStates(state, [
+			{
+				kodyUsername: 'alice',
+				homeConnectorId: 'home',
+				workerBaseUrl: 'https://heykody.dev',
+				workerSessionUrl: 'https://heykody.dev/@alice/connectors/home',
+				workerWebSocketUrl: 'wss://heykody.dev/@alice/connectors/home',
+				sharedSecret: 'secret-a',
+				mocksEnabled: false,
+			},
+			{
+				kodyUsername: 'bob',
+				homeConnectorId: 'home',
+				workerBaseUrl: 'https://heykody.dev',
+				workerSessionUrl: 'https://heykody.dev/@bob/connectors/home',
+				workerWebSocketUrl: 'wss://heykody.dev/@bob/connectors/home',
+				sharedSecret: 'secret-b',
+				mocksEnabled: false,
+			},
+		])
+		updateWorkerSessionState(state, 0, {
+			connected: false,
+			toolInventoryStatus: 'not_connected',
+			toolInventoryStatusReason: 'Primary session is down.',
+			localToolCount: 0,
+		})
+		updateWorkerSessionState(state, 1, {
+			connected: true,
+			toolInventoryStatus: 'registered',
+			toolInventoryStatusReason: 'Secondary session registered tools.',
+			localToolCount: 42,
+			lastSyncAt: '2026-06-25T18:00:00.000Z',
+		})
+
+		const health = buildHomeConnectorHealthPayload({
+			config,
+			state,
+			env: { APP_COMMIT_SHA: 'abc123' },
+		})
+		expect(health.connection.connected).toBe(true)
+		expect(health.connection.connectedSessionCount).toBe(1)
+		expect(health.toolInventory).toMatchObject({
+			status: 'registered',
+			reason: 'Secondary session registered tools.',
+			localToolCount: 42,
 		})
 	})
 })

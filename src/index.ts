@@ -11,9 +11,9 @@ import { createVenstarAdapter } from './adapters/venstar/index.ts'
 import { createHomeConnectorMcpServer } from './mcp/server.ts'
 import { loadHomeConnectorConfig } from './config.ts'
 import { createHomeConnectorLogger } from './logging/index.ts'
-import { createAppState, updateConnectionState } from './state.ts'
+import { createAppState } from './state.ts'
 import { createHomeConnectorStorage } from './storage/index.ts'
-import { createWorkerConnector } from './transport/worker-connector.ts'
+import { createWorkerConnectorSessions } from './transport/worker-connector-sessions.ts'
 
 export function createHomeConnectorApp() {
 	const config = loadHomeConnectorConfig()
@@ -22,12 +22,6 @@ export function createHomeConnectorApp() {
 	const logger = createHomeConnectorLogger({
 		config,
 		storage,
-	})
-	updateConnectionState(state, {
-		workerUrl: config.workerBaseUrl,
-		connectorId: config.homeConnectorId,
-		sharedSecret: config.sharedSecret,
-		mocksEnabled: config.mocksEnabled,
 	})
 	const samsungTv = createSamsungTvAdapter({
 		config,
@@ -87,7 +81,7 @@ export function createHomeConnectorApp() {
 		accessNetworksUnleashed,
 		kasa,
 	})
-	const workerConnector = createWorkerConnector({
+	const workerConnector = createWorkerConnectorSessions({
 		config,
 		state,
 		logger,
