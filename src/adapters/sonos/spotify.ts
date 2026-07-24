@@ -1,3 +1,4 @@
+import { type HomeConnectorErrorCaptureContext } from '../../sentry.ts'
 import { decodeXmlEntities, encodeXml } from './soap-client.ts'
 import { type SonosFavorite } from './types.ts'
 
@@ -142,9 +143,20 @@ export function buildSonosSpotifyUri(input: {
 	if (!spotify) return null
 	const serviceInfo = getSpotifyFavoriteServiceInfo(input.favorites)
 	if (!serviceInfo) {
-		throw new Error(
+		const error = new Error(
 			'Unable to build Sonos Spotify metadata because no existing Spotify favorite with service metadata was found. Pass a Sonos content URI and DIDL metadata explicitly.',
-		)
+		) as Error & {
+			homeConnectorCaptureContext: HomeConnectorErrorCaptureContext
+		}
+		error.name = 'SonosCallerError'
+		error.homeConnectorCaptureContext = {
+			shouldCapture: false,
+			tags: {
+				connector_vendor: 'sonos',
+				sonos_caller_error: 'spotify_metadata_unavailable',
+			},
+		}
+		throw error
 	}
 	const encodedSpotifyUri = encodeURIComponent(spotify.spotifyUri)
 	if (spotify.kind === 'track') {

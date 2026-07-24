@@ -1528,3 +1528,51 @@ test('bond bridge cooldown backoff is capped at fifteen minutes', async () => {
 		storage.close()
 	}
 })
+
+test('bond missing token errors are marked as expected operator noise', async () => {
+	const config = createConfig()
+	const state = createAppState()
+	const storage = createHomeConnectorStorage(config)
+	const bond = createBondAdapter({
+		config,
+		state,
+		storage,
+	})
+
+	try {
+		upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
+			{
+				bridgeId: 'ZPGI01117',
+				bondid: 'ZPGI01117',
+				instanceName: 'Missing Token Bond',
+				host: '10.0.0.22',
+				port: 80,
+				address: null,
+				model: 'BD-TEST',
+				fwVer: 'v1.0.0',
+				lastSeenAt: '2026-07-06T03:10:00.000Z',
+				rawDiscovery: {},
+			},
+		])
+		adoptBondBridge(storage, config.homeConnectorId, 'ZPGI01117')
+
+		const error = await bond
+			.getDeviceState('ZPGI01117', 'mockdev1')
+			.catch((caught: unknown) => caught)
+
+		expect(error).toMatchObject({
+			name: 'BondOperatorError',
+			message: expect.stringContaining('missing a stored token'),
+			homeConnectorCaptureContext: {
+				shouldCapture: false,
+				tags: {
+					connector_vendor: 'bond',
+					bond_operator_error: 'missing_token',
+					bond_bridge_id: 'ZPGI01117',
+				},
+			},
+		})
+	} finally {
+		storage.close()
+	}
+})

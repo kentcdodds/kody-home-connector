@@ -1,4 +1,5 @@
 import { type HomeConnectorConfig } from '../../config.ts'
+import { type HomeConnectorErrorCaptureContext } from '../../sentry.ts'
 import { type HomeConnectorState } from '../../state.ts'
 import { type HomeConnectorStorage } from '../../storage/index.ts'
 import { sendJellyfishCommand } from './client.ts'
@@ -392,22 +393,83 @@ function validateScheduleZones(input: {
 	}
 }
 
-function parseScheduleResponse(
+function describeSchedulePayloadShape(response: Record<string, unknown>) {
+	return Object.fromEntries(
+		Object.entries(response).map(([key, value]) => [
+			key,
+			Array.isArray(value)
+				? `array(${String(value.length)})`
+				: value === null
+					? 'null'
+					: typeof value,
+		]),
+	)
+}
+
+function extractScheduleEvents(
+	response: Record<string, unknown>,
+	scheduleType: JellyfishScheduleType,
+): Array<unknown> | null {
+	const key = getScheduleResponseKey(scheduleType)
+	const direct = response[key]
+	if (Array.isArray(direct)) return direct
+	// Explicit null means an empty schedule on some firmware builds.
+	if (direct === null) return []
+	// Some controllers reply with the same shape used by schedule writes.
+	if (
+		response['schedule'] === scheduleType &&
+		Array.isArray(response['events'])
+	) {
+		return response['events']
+	}
+	return null
+}
+
+export function parseScheduleResponse(
 	response: Record<string, unknown>,
 	scheduleType: JellyfishScheduleType,
 ) {
 	const key = getScheduleResponseKey(scheduleType)
-	const events = response[key]
-	if (!Array.isArray(events)) {
-		throw new Error(
-			`JellyFish controller did not return a valid ${key} payload.`,
-		)
+	const events = extractScheduleEvents(response, scheduleType)
+	if (!events) {
+		const payloadShape = describeSchedulePayloadShape(response)
+		const error = new Error(
+			`JellyFish controller did not return a valid ${key} payload. Response shape: ${JSON.stringify(payloadShape)}.`,
+		) as Error & {
+			homeConnectorCaptureContext: HomeConnectorErrorCaptureContext
+		}
+		error.name = 'JellyfishSchedulePayloadError'
+		error.homeConnectorCaptureContext = {
+			shouldCapture: false,
+			tags: {
+				connector_vendor: 'jellyfish',
+				jellyfish_schedule_type: scheduleType,
+				jellyfish_failure_code: 'invalid_schedule_payload',
+			},
+			extra: {
+				jellyfishScheduleKey: key,
+				jellyfishResponseShape: payloadShape,
+			},
+		}
+		throw error
 	}
 	return events.map((event, index) => {
 		if (!isRecord(event)) {
-			throw new Error(
+			const error = new Error(
 				`JellyFish controller returned invalid ${key} event ${String(index)}.`,
-			)
+			) as Error & {
+				homeConnectorCaptureContext: HomeConnectorErrorCaptureContext
+			}
+			error.name = 'JellyfishSchedulePayloadError'
+			error.homeConnectorCaptureContext = {
+				shouldCapture: false,
+				tags: {
+					connector_vendor: 'jellyfish',
+					jellyfish_schedule_type: scheduleType,
+					jellyfish_failure_code: 'invalid_schedule_event',
+				},
+			}
+			throw error
 		}
 		return structuredClone(event) as Record<string, unknown>
 	})

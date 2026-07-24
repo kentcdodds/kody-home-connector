@@ -1,3 +1,4 @@
+import { type HomeConnectorErrorCaptureContext } from '../../sentry.ts'
 import {
 	type SonosAudioInputStatus,
 	type SonosCreatedFavorite,
@@ -11,6 +12,9 @@ import {
 } from './types.ts'
 
 const sonosSoapTimeoutMs = 10_000
+const sonosSoapRetryDelayMs = 250
+const sonosSoapDedupeWindowMs = 60 * 60 * 1000
+const expectedSonosUpnpErrorCodes = new Set(['501', '714', '800'])
 
 function buildSoapEnvelope(body: string) {
 	return `<?xml version="1.0" encoding="utf-8"?>
@@ -24,6 +28,85 @@ function isTimeoutError(error: unknown) {
 		error instanceof Error &&
 		(error.name === 'TimeoutError' || error.name === 'AbortError')
 	)
+}
+
+function extractSonosUpnpErrorCode(text: string) {
+	return text.match(/<errorCode>(\d+)<\/errorCode>/i)?.[1] ?? null
+}
+
+function getSonosSoapOutageWindow(timestampMs = Date.now()) {
+	return new Date(
+		Math.floor(timestampMs / sonosSoapDedupeWindowMs) * sonosSoapDedupeWindowMs,
+	).toISOString()
+}
+
+async function wait(ms: number) {
+	await new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function createSonosSoapError(input: {
+	action: string
+	host: string
+	url: string
+	message: string
+	causeClass: 'timeout' | 'http_error' | 'network'
+	status?: number
+	responseBody?: string
+}) {
+	const upnpErrorCode = input.responseBody
+		? extractSonosUpnpErrorCode(input.responseBody)
+		: null
+	const isExpectedDeviceFault =
+		upnpErrorCode != null && expectedSonosUpnpErrorCodes.has(upnpErrorCode)
+	const outageWindow = getSonosSoapOutageWindow()
+	const fingerprint = [
+		'home-connector',
+		'sonos-soap',
+		input.host,
+		input.action,
+		input.causeClass,
+		upnpErrorCode ?? 'none',
+		outageWindow,
+	]
+	const error = new Error(input.message) as Error & {
+		homeConnectorCaptureContext: HomeConnectorErrorCaptureContext
+	}
+	error.name = 'SonosSoapError'
+	error.homeConnectorCaptureContext = {
+		tags: {
+			connector_vendor: 'sonos',
+			sonos_soap_action: input.action,
+			sonos_host: input.host,
+			sonos_failure_cause_class: input.causeClass,
+			...(typeof input.status === 'number'
+				? { sonos_http_status: String(input.status) }
+				: {}),
+			...(upnpErrorCode ? { sonos_upnp_error: upnpErrorCode } : {}),
+			sonos_outage_window: outageWindow,
+		},
+		contexts: {
+			sonos_soap: {
+				action: input.action,
+				host: input.host,
+				url: input.url,
+				causeClass: input.causeClass,
+				status: input.status ?? null,
+				upnpErrorCode,
+				outageWindow,
+			},
+		},
+		fingerprint,
+		level: 'error',
+		...(isExpectedDeviceFault
+			? { shouldCapture: false }
+			: {
+					dedupe: {
+						key: fingerprint.join(':'),
+						ttlMs: sonosSoapDedupeWindowMs,
+					},
+				}),
+	}
+	return error
 }
 
 export function stripSonosUuidPrefix(udn: string) {
@@ -82,17 +165,17 @@ function extractAlbumFromMetadata(metadata: string | null) {
 	)
 }
 
-async function soapRequest(input: {
+async function soapRequestOnce(input: {
 	host: string
 	path: string
 	serviceType: string
 	action: string
 	body: string
+	url: string
 }) {
-	const url = `http://${input.host}:1400${input.path}`
 	let response: Response
 	try {
-		response = await fetch(url, {
+		response = await fetch(input.url, {
 			method: 'POST',
 			headers: {
 				'Content-Type': 'text/xml; charset="utf-8"',
@@ -103,19 +186,78 @@ async function soapRequest(input: {
 		})
 	} catch (error) {
 		if (isTimeoutError(error)) {
-			throw new Error(
-				`Sonos ${input.action} timed out after ${sonosSoapTimeoutMs}ms for ${url}`,
-			)
+			throw createSonosSoapError({
+				action: input.action,
+				host: input.host,
+				url: input.url,
+				message: `Sonos ${input.action} timed out after ${sonosSoapTimeoutMs}ms for ${input.url}`,
+				causeClass: 'timeout',
+			})
 		}
-		throw error
+		const message =
+			error instanceof Error
+				? `Sonos ${input.action} network failure for ${input.url}: ${error.message}`
+				: `Sonos ${input.action} network failure for ${input.url}: ${String(error)}`
+		throw createSonosSoapError({
+			action: input.action,
+			host: input.host,
+			url: input.url,
+			message,
+			causeClass: 'network',
+		})
 	}
 	const text = await response.text()
 	if (!response.ok) {
-		throw new Error(
-			`Sonos ${input.action} failed (${response.status}) for ${url}: ${text}`,
-		)
+		throw createSonosSoapError({
+			action: input.action,
+			host: input.host,
+			url: input.url,
+			message: `Sonos ${input.action} failed (${response.status}) for ${input.url}: ${text}`,
+			causeClass: 'http_error',
+			status: response.status,
+			responseBody: text,
+		})
 	}
 	return text
+}
+
+function isRetriableSonosSoapError(error: unknown) {
+	if (!(error instanceof Error)) return false
+	const captureContext = (
+		error as Error & {
+			homeConnectorCaptureContext?: HomeConnectorErrorCaptureContext
+		}
+	).homeConnectorCaptureContext
+	const causeClass = captureContext?.tags?.sonos_failure_cause_class
+	if (causeClass === 'timeout' || causeClass === 'network') return true
+	if (causeClass !== 'http_error') return false
+	const status = Number(captureContext?.tags?.sonos_http_status ?? Number.NaN)
+	const upnpError = captureContext?.tags?.sonos_upnp_error
+	// Retry transient transport/server failures, not deterministic UPnP client faults.
+	return (
+		Number.isFinite(status) &&
+		status >= 500 &&
+		(!upnpError || !expectedSonosUpnpErrorCodes.has(upnpError))
+	)
+}
+
+async function soapRequest(input: {
+	host: string
+	path: string
+	serviceType: string
+	action: string
+	body: string
+}) {
+	const url = `http://${input.host}:1400${input.path}`
+	try {
+		return await soapRequestOnce({ ...input, url })
+	} catch (error) {
+		if (!isRetriableSonosSoapError(error)) {
+			throw error
+		}
+		await wait(sonosSoapRetryDelayMs)
+		return await soapRequestOnce({ ...input, url })
+	}
 }
 
 function avTransport(host: string, action: string, body: string) {

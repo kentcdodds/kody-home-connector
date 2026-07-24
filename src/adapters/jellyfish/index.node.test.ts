@@ -3,7 +3,7 @@ import { installHomeConnectorMockServer } from '../../../mocks/test-server.ts'
 import { loadHomeConnectorConfig } from '../../config.ts'
 import { createAppState } from '../../state.ts'
 import { createHomeConnectorStorage } from '../../storage/index.ts'
-import { createJellyfishAdapter } from './index.ts'
+import { createJellyfishAdapter, parseScheduleResponse } from './index.ts'
 import {
 	resetMockJellyfishState,
 	setMockJellyfishScheduleState,
@@ -220,6 +220,80 @@ test('jellyfish schedule methods read and replace daily and calendar schedules',
 	} finally {
 		storage.close()
 	}
+})
+
+test('parseScheduleResponse tolerates null and write-shaped payloads', () => {
+	expect(
+		parseScheduleResponse(
+			{
+				cmd: 'fromCtlr',
+				scheduleDaily: null,
+			},
+			'daily',
+		),
+	).toEqual([])
+	expect(
+		parseScheduleResponse(
+			{
+				cmd: 'fromCtlr',
+				schedule: 'calendar',
+				events: [{ label: 'New Years', days: ['20260101'] }],
+			},
+			'calendar',
+		),
+	).toEqual([{ label: 'New Years', days: ['20260101'] }])
+
+	const missing = (() => {
+		try {
+			parseScheduleResponse({ cmd: 'fromCtlr' }, 'daily')
+			return null
+		} catch (error) {
+			return error
+		}
+	})()
+	expect(missing).toMatchObject({
+		name: 'JellyfishSchedulePayloadError',
+		homeConnectorCaptureContext: {
+			shouldCapture: false,
+			tags: {
+				connector_vendor: 'jellyfish',
+				jellyfish_schedule_type: 'daily',
+				jellyfish_failure_code: 'invalid_schedule_payload',
+			},
+			extra: {
+				jellyfishResponseShape: {
+					cmd: 'string',
+				},
+			},
+		},
+	})
+
+	const invalid = (() => {
+		try {
+			parseScheduleResponse(
+				{
+					cmd: 'fromCtlr',
+					scheduleDaily: { unexpected: true },
+				},
+				'daily',
+			)
+			return null
+		} catch (error) {
+			return error
+		}
+	})()
+	expect(invalid).toMatchObject({
+		name: 'JellyfishSchedulePayloadError',
+		homeConnectorCaptureContext: {
+			shouldCapture: false,
+			extra: {
+				jellyfishResponseShape: {
+					cmd: 'string',
+					scheduleDaily: 'object',
+				},
+			},
+		},
+	})
 })
 
 test('jellyfish schedule reads preserve existing controller payloads', async () => {

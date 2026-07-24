@@ -154,7 +154,26 @@ export function requireSonosPlayer(
 ) {
 	const player = getSonosPlayer(storage, connectorId, playerId)
 	if (!player) {
-		throw new Error(`Sonos player "${playerId}" was not found.`)
+		const error = new Error(
+			`Sonos player "${playerId}" was not found.`,
+		) as Error & {
+			homeConnectorCaptureContext: {
+				shouldCapture: false
+				tags: {
+					connector_vendor: 'sonos'
+					sonos_caller_error: 'player_not_found'
+				}
+			}
+		}
+		error.name = 'SonosCallerError'
+		error.homeConnectorCaptureContext = {
+			shouldCapture: false,
+			tags: {
+				connector_vendor: 'sonos',
+				sonos_caller_error: 'player_not_found',
+			},
+		}
+		throw error
 	}
 	return player
 }
