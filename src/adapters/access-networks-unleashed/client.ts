@@ -1,4 +1,5 @@
 import { type HomeConnectorConfig } from '../../config.ts'
+import { createAccessNetworksUnleashedRequestError } from './errors.ts'
 import { fetchAccessNetworksUnleashed } from './http.ts'
 import { parseAccessNetworksUnleashedXml } from './xml.ts'
 import {
@@ -109,21 +110,32 @@ export function createAccessNetworksUnleashedAjaxClient(input: {
 		url: string,
 		init: RequestInit,
 		allowInsecureTls: boolean,
+		operation: string,
 		timeoutMs = config.accessNetworksUnleashedRequestTimeoutMs,
 	) {
 		const headers = new Headers(init.headers)
 		if (state.cookie) headers.set('Cookie', state.cookie)
 		if (state.csrfToken) headers.set('X-CSRF-Token', state.csrfToken)
-		const response = await fetchAccessNetworksUnleashed({
-			url,
-			timeoutMs,
-			allowInsecureTls,
-			init: {
-				...init,
-				headers,
-				redirect: 'manual',
-			} as RequestInit,
-		})
+		let response: Response
+		try {
+			response = await fetchAccessNetworksUnleashed({
+				url,
+				timeoutMs,
+				allowInsecureTls,
+				init: {
+					...init,
+					headers,
+					redirect: 'manual',
+				} as RequestInit,
+			})
+		} catch (error) {
+			throw createAccessNetworksUnleashedRequestError({
+				url,
+				operation,
+				allowInsecureTls,
+				error,
+			})
+		}
 		state.cookie = collectCookies(response.headers, state.cookie)
 		return response
 	}
@@ -141,6 +153,7 @@ export function createAccessNetworksUnleashedAjaxClient(input: {
 			credentials.host,
 			{ method: 'GET' },
 			allowInsecureTls,
+			'establish a session',
 			3_000,
 		)
 		const location = head.headers.get('location')
@@ -158,6 +171,7 @@ export function createAccessNetworksUnleashedAjaxClient(input: {
 				headers: { Accept: '*/*' },
 			},
 			allowInsecureTls,
+			'establish a session',
 		)
 		const loginWithParams = new URL(loginPage.url || loginUrl)
 		loginWithParams.searchParams.set('username', credentials.username)
@@ -167,6 +181,7 @@ export function createAccessNetworksUnleashedAjaxClient(input: {
 			loginWithParams.toString(),
 			{ method: 'GET' },
 			allowInsecureTls,
+			'establish a session',
 		)
 		if (loginResult.status === 200) {
 			throw new Error('Access Networks Unleashed login was rejected.')
@@ -181,6 +196,7 @@ export function createAccessNetworksUnleashedAjaxClient(input: {
 				`${baseUrl}/_csrfTokenVar.jsp`,
 				{ method: 'GET' },
 				allowInsecureTls,
+				'establish a session',
 			)
 			if (tokenResponse.ok) {
 				csrfToken = extractCsrfToken(await tokenResponse.text())
@@ -231,6 +247,7 @@ export function createAccessNetworksUnleashedAjaxClient(input: {
 				body: `request=${encodeURIComponent(xml)}`,
 			},
 			allowInsecureTls,
+			'post _cmdstat.jsp',
 		)
 		if (response.status === 302) {
 			resetSession()

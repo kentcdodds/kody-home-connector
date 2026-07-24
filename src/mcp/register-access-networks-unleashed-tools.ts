@@ -54,7 +54,7 @@ Inputs:
 - comp: Unleashed component name such as 'system', 'stamgr', 'apStat', 'eventd'.
 - xmlBody: inner XML appended inside <ajax-request action='...' comp='...' updater='...'>...</ajax-request>.
 - updater: optional updater string. When omitted the connector generates a "<comp>.<timestamp>.<rand>" updater.
-- allowInsecureTls: optional boolean. Defaults to true since Unleashed controllers ship with self-signed LAN certificates. Only applies to the actual _cmdstat.jsp post; the connector-wide ACCESS_NETWORKS_UNLEASHED_ALLOW_INSECURE_TLS setting governs session establishment so concurrent callers cannot disagree about login-time TLS.
+- allowInsecureTls: optional boolean. When omitted, falls back to the connector-wide ACCESS_NETWORKS_UNLEASHED_ALLOW_INSECURE_TLS setting (off unless explicitly enabled). Only applies to the actual _cmdstat.jsp post; the connector-wide setting also governs session establishment so concurrent callers cannot disagree about login-time TLS.
 
 Returns the raw XML response and a best-effort parsed object.`
 
@@ -253,7 +253,7 @@ export function registerAccessNetworksUnleashedHomeConnectorTools(input: {
 			.boolean()
 			.optional()
 			.describe(
-				'Optional override for accepting self-signed LAN certificates. Defaults to true.',
+				'Optional override for accepting self-signed LAN certificates. When omitted, falls back to ACCESS_NETWORKS_UNLEASHED_ALLOW_INSECURE_TLS (off unless explicitly enabled).',
 			),
 		acknowledgeHighRisk: z
 			.literal(true)
