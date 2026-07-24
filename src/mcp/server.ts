@@ -1852,7 +1852,7 @@ export function createHomeConnectorMcpServer(input: {
 			name: 'lutron_set_zone_level',
 			title: 'Set Lutron Zone Level',
 			description:
-				'Set a Lutron zone level. Reads the zone ControlType first and routes to the matching LEAP command (GoToLevel, GoToSpectrumTuningLevel, GoToSwitchedLevel, or GoToShadeLevel). Pass a numeric zone id from lutron_get_inventory.',
+				'Set a Lutron zone level. Reads the zone ControlType first and routes to the matching LEAP command (GoToLevel, GoToSpectrumTuningLevel, GoToWhiteTuningLevel, GoToSwitchedLevel, or GoToShadeLevel). WhiteTune zones without a reported Kelvin are rejected; use lutron_set_zone_white_tuning for those. Pass a numeric zone id from lutron_get_inventory.',
 			...buildToolInputSchema({
 				processorId: z.string().min(1),
 				zoneId: z.string().min(1),

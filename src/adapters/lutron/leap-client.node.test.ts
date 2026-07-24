@@ -152,10 +152,54 @@ test('routes zone level commands by ControlType', () => {
 				SpectrumTuningLevelParameters: {
 					Level: 70,
 					Vibrancy: 25,
+					ColorTuningStatus: {
+						HSVTuningLevel: {
+							Hue: 32,
+							Saturation: 81,
+						},
+					},
 				},
 			},
 		},
 	})
+
+	expect(
+		buildLutronZoneLevelCommand({
+			zoneId: '612',
+			controlType: 'WhiteTune',
+			level: 140,
+			status: {
+				level: 10,
+				switchedLevel: null,
+				vibrancy: null,
+				whiteTuningKelvin: 2700,
+				hue: null,
+				saturation: null,
+				statusAccuracy: 'Good',
+				zoneLockState: null,
+			},
+		}),
+	).toMatchObject({
+		commandType: 'GoToWhiteTuningLevel',
+		body: {
+			Command: {
+				CommandType: 'GoToWhiteTuningLevel',
+				WhiteTuningLevelParameters: {
+					Level: 100,
+					WhiteTuningLevel: { Kelvin: 2700 },
+				},
+			},
+		},
+	})
+
+	expect(() =>
+		buildLutronZoneLevelCommand({
+			zoneId: '612',
+			controlType: 'WhiteTune',
+			level: 40,
+			status: null,
+		}),
+	).toThrowError(LutronUnsupportedZoneCommandError)
 
 	expect(
 		buildLutronZoneLevelCommand({

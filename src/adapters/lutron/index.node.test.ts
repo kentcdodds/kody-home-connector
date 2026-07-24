@@ -97,12 +97,21 @@ test('lutron inventory and commands work in mock mode with stored credentials', 
 		expect(spectrumResult.ok).toBe(true)
 		expect(spectrumResult.zoneId).toBe(spectrumZone!.zoneId)
 
+		const authenticatedBeforeInvalidZone =
+			await lutron.authenticate(processorId)
 		await expect(
 			lutron.setZoneColor(processorId, '/button/337', {
 				hue: 120,
 				saturation: 50,
 			}),
 		).rejects.toBeInstanceOf(LutronInvalidZoneIdError)
+		const statusAfterInvalidZone = lutron
+			.getStatus()
+			.processors.find((processor) => processor.processorId === processorId)
+		expect(statusAfterInvalidZone?.lastAuthenticatedAt).toBe(
+			authenticatedBeforeInvalidZone.lastAuthenticatedAt,
+		)
+		expect(statusAfterInvalidZone?.lastAuthError).toBeNull()
 
 		const updatedInventory = await lutron.getInventory(processorId)
 		const updatedZone = updatedInventory.zones.find(

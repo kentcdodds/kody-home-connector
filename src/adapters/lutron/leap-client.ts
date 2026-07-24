@@ -245,6 +245,23 @@ export function buildLutronZoneLevelCommand(input: {
 			if (typeof input.status?.vibrancy === 'number') {
 				spectrumParameters['Vibrancy'] = input.status.vibrancy
 			}
+			if (
+				typeof input.status?.hue === 'number' &&
+				typeof input.status?.saturation === 'number'
+			) {
+				spectrumParameters['ColorTuningStatus'] = {
+					HSVTuningLevel: {
+						Hue: input.status.hue,
+						Saturation: input.status.saturation,
+					},
+				}
+			} else if (typeof input.status?.whiteTuningKelvin === 'number') {
+				spectrumParameters['ColorTuningStatus'] = {
+					WhiteTuningLevel: {
+						Kelvin: input.status.whiteTuningKelvin,
+					},
+				}
+			}
 			return {
 				commandType: 'GoToSpectrumTuningLevel',
 				body: {
