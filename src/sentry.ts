@@ -148,6 +148,7 @@ export function buildHomeConnectorSentryOptions(env: EnvRecord = process.env) {
 			env.SENTRY_TRACES_SAMPLE_RATE,
 		),
 		sendDefaultPii: false,
+		attachStacktrace: true,
 	}
 }
 
@@ -217,22 +218,31 @@ export function resetHomeConnectorSentryDedupeForTests() {
 	exceptionDedupeExpirations.clear()
 }
 
+export type HomeConnectorMessageCaptureContext = Exclude<
+	Parameters<typeof Sentry.captureMessage>[1],
+	string
+> & {
+	dedupe?: { key: string; ttlMs: number }
+}
+
 export function captureHomeConnectorMessage(
 	message: string,
-	captureContext: Exclude<
-		Parameters<typeof Sentry.captureMessage>[1],
-		string
-	> = {},
+	captureContext: HomeConnectorMessageCaptureContext = {},
 ) {
 	if (!Sentry.isEnabled()) {
 		return
 	}
 
+	const { dedupe, ...sentryCaptureContext } = captureContext
+	if (shouldSkipForDedupe(dedupe)) {
+		return
+	}
+
 	Sentry.captureMessage(message, {
-		...captureContext,
+		...sentryCaptureContext,
 		tags: {
 			service: 'home-connector',
-			...captureContext.tags,
+			...sentryCaptureContext.tags,
 		},
 	})
 }

@@ -18,6 +18,7 @@ const {
 	buildHomeConnectorSentryOptions,
 	addHomeConnectorSentryBreadcrumb,
 	captureHomeConnectorException,
+	captureHomeConnectorMessage,
 	closeHomeConnectorSentry,
 	flushHomeConnectorSentry,
 	getHomeConnectorErrorCaptureContext,
@@ -81,6 +82,7 @@ test('buildHomeConnectorSentryOptions builds Node Sentry options from env', () =
 		release: 'abc123',
 		tracesSampleRate: 0.25,
 		sendDefaultPii: false,
+		attachStacktrace: true,
 	})
 })
 
@@ -96,6 +98,7 @@ test('buildHomeConnectorSentryOptions falls back to defaults for invalid sample 
 		environment: 'production',
 		tracesSampleRate: 1,
 		sendDefaultPii: false,
+		attachStacktrace: true,
 	})
 })
 
@@ -304,4 +307,86 @@ test('captureHomeConnectorException dedupes repeated errors within a TTL', () =>
 	} finally {
 		vi.useRealTimers()
 	}
+})
+
+test('buildHomeConnectorSentryOptions enables attachStacktrace', () => {
+	const options = buildHomeConnectorSentryOptions({
+		SENTRY_DSN: 'https://public@example.ingest.sentry.io/1',
+	})
+
+	expect(options?.attachStacktrace).toBe(true)
+})
+
+test('captureHomeConnectorMessage captures every call without dedupe', () => {
+	sentryMock.isEnabled.mockReturnValue(true)
+	sentryMock.captureMessage.mockReset()
+
+	captureHomeConnectorMessage('Invalid connector shared secret.')
+	captureHomeConnectorMessage('Invalid connector shared secret.')
+
+	expect(sentryMock.captureMessage).toHaveBeenCalledTimes(2)
+})
+
+test('captureHomeConnectorMessage dedupes repeated messages within a TTL', () => {
+	sentryMock.isEnabled.mockReturnValue(true)
+	sentryMock.captureMessage.mockReset()
+	vi.useFakeTimers()
+	vi.setSystemTime(new Date('2026-06-12T02:54:08.000Z'))
+
+	const captureContext = {
+		tags: {
+			connector_event: 'auth.failure',
+		},
+		dedupe: {
+			key: 'auth:invalid-shared-secret',
+			ttlMs: 60_000,
+		},
+	}
+
+	try {
+		captureHomeConnectorMessage(
+			'Invalid connector shared secret.',
+			captureContext,
+		)
+		captureHomeConnectorMessage(
+			'Invalid connector shared secret.',
+			captureContext,
+		)
+		vi.advanceTimersByTime(60_000)
+		captureHomeConnectorMessage(
+			'Invalid connector shared secret.',
+			captureContext,
+		)
+
+		expect(sentryMock.captureMessage).toHaveBeenCalledTimes(2)
+	} finally {
+		vi.useRealTimers()
+	}
+})
+
+test('captureHomeConnectorMessage does not forward dedupe to Sentry', () => {
+	sentryMock.isEnabled.mockReturnValue(true)
+	sentryMock.captureMessage.mockReset()
+
+	captureHomeConnectorMessage('Invalid connector shared secret.', {
+		tags: {
+			connector_event: 'auth.failure',
+		},
+		dedupe: {
+			key: 'auth:invalid-shared-secret',
+			ttlMs: 60_000,
+		},
+	})
+
+	expect(sentryMock.captureMessage).toHaveBeenCalledTimes(1)
+	const [message, captureContext] =
+		sentryMock.captureMessage.mock.calls[0] ?? []
+	expect(message).toBe('Invalid connector shared secret.')
+	expect(captureContext).toEqual({
+		tags: {
+			service: 'home-connector',
+			connector_event: 'auth.failure',
+		},
+	})
+	expect(captureContext).not.toHaveProperty('dedupe')
 })
