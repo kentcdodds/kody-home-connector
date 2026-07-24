@@ -346,22 +346,33 @@ export function createWorkerConnector(input: {
 		return input.toolRegistry.list()
 	}
 
-	function applyToolsChangedNotification(reason: string) {
+	function deliverToolsChangedNotification(
+		reason: string,
+		options: { updateInventoryStatus: boolean },
+	) {
 		const localToolCount = listLocalTools().length
 		const sentAt = new Date().toISOString()
-		updateToolInventoryStatus({
-			localToolCount,
-			status: localToolCount > 0 ? 'refresh_requested' : 'empty_local_registry',
-			reason:
-				localToolCount > 0
-					? `Sent tools/list_changed notification to refresh remote registry (${reason}).`
-					: `Local registry is empty while trying to refresh remote registry (${reason}).`,
-			lastToolsChangedNotificationAt: sentAt,
-			recoveryCount: readConnectionState().toolInventoryRecoveryCount,
-		})
+		if (options.updateInventoryStatus) {
+			updateToolInventoryStatus({
+				localToolCount,
+				status:
+					localToolCount > 0 ? 'refresh_requested' : 'empty_local_registry',
+				reason:
+					localToolCount > 0
+						? `Sent tools/list_changed notification to refresh remote registry (${reason}).`
+						: `Local registry is empty while trying to refresh remote registry (${reason}).`,
+				lastToolsChangedNotificationAt: sentAt,
+				recoveryCount: readConnectionState().toolInventoryRecoveryCount,
+			})
+		} else {
+			patchConnectionState({
+				localToolCount,
+				lastToolsChangedNotificationAt: sentAt,
+			})
+		}
 		input.logger.info(
 			'worker.tools.list_changed_sent',
-			`Sending home connector tools changed notification reason=${reason} localToolCount=${localToolCount} connectorId=${input.config.homeConnectorId} kodyUsername=${input.config.kodyUsername ?? 'local'}`,
+			`Sending home connector tools changed notification reason=${reason} localToolCount=${localToolCount} connectorId=${input.config.homeConnectorId} kodyUsername=${input.config.kodyUsername ?? 'local'} updateInventoryStatus=${options.updateInventoryStatus}`,
 			{
 				...createSocketEventContext({
 					config: input.config,
@@ -370,6 +381,7 @@ export function createWorkerConnector(input: {
 				}),
 				reason,
 				localToolCount,
+				updateInventoryStatus: options.updateInventoryStatus,
 			},
 		)
 		if (socket?.readyState !== WebSocket.OPEN) {
@@ -387,6 +399,7 @@ export function createWorkerConnector(input: {
 				}),
 				reason,
 				localToolCount,
+				updateInventoryStatus: options.updateInventoryStatus,
 			},
 		})
 		socket.send(
@@ -400,10 +413,27 @@ export function createWorkerConnector(input: {
 
 	function sendToolsChangedNotification(reason: string) {
 		if (input.requestToolsListChangedFanout) {
+			// Only the initiating session updates its inventory state machine.
+			// Fan-out peers get a wire notification without regressing a
+			// previously registered inventory status.
+			const localToolCount = listLocalTools().length
+			updateToolInventoryStatus({
+				localToolCount,
+				status:
+					localToolCount > 0 ? 'refresh_requested' : 'empty_local_registry',
+				reason:
+					localToolCount > 0
+						? `Sent tools/list_changed notification to refresh remote registry (${reason}).`
+						: `Local registry is empty while trying to refresh remote registry (${reason}).`,
+				lastToolsChangedNotificationAt: new Date().toISOString(),
+				recoveryCount: readConnectionState().toolInventoryRecoveryCount,
+			})
 			input.requestToolsListChangedFanout(reason)
-			return listLocalTools().length
+			return localToolCount
 		}
-		return applyToolsChangedNotification(reason)
+		return deliverToolsChangedNotification(reason, {
+			updateInventoryStatus: true,
+		})
 	}
 
 	function handleToolsListRequest(toolCount: number) {
@@ -1092,7 +1122,9 @@ export function createWorkerConnector(input: {
 			socket = null
 		},
 		notifyToolsListChanged(reason: string) {
-			return applyToolsChangedNotification(reason)
+			return deliverToolsChangedNotification(reason, {
+				updateInventoryStatus: false,
+			})
 		},
 	}
 }

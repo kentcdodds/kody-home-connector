@@ -152,6 +152,37 @@ export function buildHomeConnectorRuntimeMetadata(input: {
 	}
 }
 
+function selectHealthToolInventorySummary(
+	sessions: Array<HomeConnectorWorkerSessionMetadata>,
+	connection: HomeConnectorState['connection'],
+) {
+	const preferred =
+		sessions.find(
+			(session) =>
+				session.connected && session.toolInventoryStatus === 'registered',
+		) ??
+		sessions.find((session) => session.connected) ??
+		sessions[0]
+	if (preferred) {
+		return {
+			status: preferred.toolInventoryStatus,
+			reason: preferred.toolInventoryStatusReason,
+			localToolCount: preferred.localToolCount,
+			lastToolsChangedNotificationAt: preferred.lastToolsChangedNotificationAt,
+			lastToolsListRequestAt: preferred.lastToolsListRequestAt,
+			recoveryCount: preferred.toolInventoryRecoveryCount,
+		}
+	}
+	return {
+		status: connection.toolInventoryStatus,
+		reason: connection.toolInventoryStatusReason,
+		localToolCount: connection.localToolCount,
+		lastToolsChangedNotificationAt: connection.lastToolsChangedNotificationAt,
+		lastToolsListRequestAt: connection.lastToolsListRequestAt,
+		recoveryCount: connection.toolInventoryRecoveryCount,
+	}
+}
+
 export function buildHomeConnectorHealthPayload(input: {
 	config: HomeConnectorConfig
 	state: HomeConnectorState
@@ -159,6 +190,14 @@ export function buildHomeConnectorHealthPayload(input: {
 }): HomeConnectorHealthPayload {
 	const { connection } = input.state
 	const metadata = buildHomeConnectorRuntimeMetadata(input)
+	const latestSyncAt = metadata.workerSessions.reduce<string | null>(
+		(latest, session) => {
+			if (!session.lastSyncAt) return latest
+			if (!latest || session.lastSyncAt > latest) return session.lastSyncAt
+			return latest
+		},
+		connection.lastSyncAt,
+	)
 	return {
 		ok: true,
 		service: 'home-connector',
@@ -166,19 +205,15 @@ export function buildHomeConnectorHealthPayload(input: {
 		metadata,
 		connection: {
 			connected: metadata.connectedWorkerSessionCount > 0,
-			lastSyncAt: connection.lastSyncAt,
+			lastSyncAt: latestSyncAt,
 			lastError: connection.lastError,
 			connectedSessionCount: metadata.connectedWorkerSessionCount,
 			sessionCount: metadata.workerSessionCount,
 		},
 		workerSessions: metadata.workerSessions,
-		toolInventory: {
-			status: connection.toolInventoryStatus,
-			reason: connection.toolInventoryStatusReason,
-			localToolCount: connection.localToolCount,
-			lastToolsChangedNotificationAt: connection.lastToolsChangedNotificationAt,
-			lastToolsListRequestAt: connection.lastToolsListRequestAt,
-			recoveryCount: connection.toolInventoryRecoveryCount,
-		},
+		toolInventory: selectHealthToolInventorySummary(
+			metadata.workerSessions,
+			connection,
+		),
 	}
 }

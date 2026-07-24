@@ -240,6 +240,45 @@ test('starts one websocket session per target and fans out tools/list_changed', 
 			}),
 		)
 		expect(state.workerSessions[1]?.connected).toBe(true)
+
+		await bobSocket.dispatchMessage(
+			JSON.stringify({
+				type: 'connector.jsonrpc',
+				message: {
+					jsonrpc: '2.0',
+					id: 1,
+					method: 'tools/list',
+				},
+			}),
+		)
+		expect(state.workerSessions[1]?.toolInventoryStatus).toBe('registered')
+
+		const bobListChangedBefore = bobSocket.sentMessages.filter((raw) => {
+			const message = JSON.parse(raw) as {
+				type?: string
+				message?: { method?: string }
+			}
+			return (
+				message.type === 'connector.jsonrpc' &&
+				message.message?.method === 'notifications/tools/list_changed'
+			)
+		}).length
+
+		// A later alice refresh must fan out on the wire without regressing bob.
+		sessions.notifyToolsListChanged('manual-refresh')
+		expect(state.workerSessions[1]?.toolInventoryStatus).toBe('registered')
+		expect(
+			bobSocket.sentMessages.filter((raw) => {
+				const message = JSON.parse(raw) as {
+					type?: string
+					message?: { method?: string }
+				}
+				return (
+					message.type === 'connector.jsonrpc' &&
+					message.message?.method === 'notifications/tools/list_changed'
+				)
+			}).length,
+		).toBeGreaterThan(bobListChangedBefore)
 	} finally {
 		sessions.stop()
 	}
