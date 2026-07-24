@@ -189,6 +189,55 @@ test('sonos create and delete favorite update mock favorites', async () => {
 	}
 })
 
+test('sonos caller selection errors are marked as expected Sentry noise', async () => {
+	const config = createConfig()
+	const state = createAppState()
+	const storage = createHomeConnectorStorage(config)
+	const sonos = createSonosAdapter({
+		config,
+		state,
+		storage,
+	})
+
+	try {
+		const players = await sonos.scan()
+		for (const player of players) {
+			sonos.adoptPlayer(player.playerId)
+		}
+
+		const multiplePlayersError = await sonos
+			.getPlayerStatus()
+			.catch((error: unknown) => error)
+		expect(multiplePlayersError).toMatchObject({
+			name: 'SonosCallerError',
+			message: 'Multiple Sonos players are available. Specify a playerId.',
+			homeConnectorCaptureContext: {
+				shouldCapture: false,
+				tags: {
+					connector_vendor: 'sonos',
+					sonos_caller_error: 'multiple_players',
+				},
+			},
+		})
+
+		expect(() => sonos.adoptPlayer('missing-player')).toThrowError(
+			expect.objectContaining({
+				name: 'SonosCallerError',
+				message: 'Sonos player "missing-player" was not found.',
+				homeConnectorCaptureContext: {
+					shouldCapture: false,
+					tags: {
+						connector_vendor: 'sonos',
+						sonos_caller_error: 'player_not_found',
+					},
+				},
+			}),
+		)
+	} finally {
+		storage.close()
+	}
+})
+
 test('sonos grouping and audio input commands work in mock mode', async () => {
 	const config = createConfig()
 	const state = createAppState()

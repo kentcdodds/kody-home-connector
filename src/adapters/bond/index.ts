@@ -408,6 +408,26 @@ function getBondCircuitBreakerCooldownMs(input: {
 	return Math.min(maxBondCircuitBreakerCooldownMs, baseCooldownMs * multiplier)
 }
 
+function createBondOperatorError(
+	message: string,
+	code: string,
+	tags: Record<string, string> = {},
+) {
+	const error = new Error(message) as Error & {
+		homeConnectorCaptureContext: HomeConnectorErrorCaptureContext
+	}
+	error.name = 'BondOperatorError'
+	error.homeConnectorCaptureContext = {
+		shouldCapture: false,
+		tags: {
+			connector_vendor: 'bond',
+			bond_operator_error: code,
+			...tags,
+		},
+	}
+	return error
+}
+
 function createBondCooldownError(input: {
 	connectorId: string
 	bridge: BondPersistedBridge
@@ -864,20 +884,24 @@ export function createBondAdapter(input: {
 		const all = listPublicBridges()
 		if (all.length === 1) return all[0]
 		if (adopted.length > 1 || all.length > 1) {
-			throw new Error(
+			throw createBondOperatorError(
 				'Multiple Bond bridges are available. Specify a bridgeId.',
+				'multiple_bridges',
 			)
 		}
-		throw new Error(
+		throw createBondOperatorError(
 			'No Bond bridges are currently known. Run bond_scan_bridges first.',
+			'no_bridges',
 		)
 	}
 
 	function requireAdoptedBridge(bridgeId?: string): BondPersistedBridge {
 		const bridge = resolveBridge(bridgeId)
 		if (!bridge.adopted) {
-			throw new Error(
+			throw createBondOperatorError(
 				`Bond bridge "${bridge.bridgeId}" must be adopted before control.`,
+				'bridge_not_adopted',
+				{ bond_bridge_id: bridge.bridgeId },
 			)
 		}
 		return bridge
@@ -890,8 +914,10 @@ export function createBondAdapter(input: {
 			bridge.bridgeId,
 		)
 		if (!token) {
-			throw new Error(
+			throw createBondOperatorError(
 				`Bond bridge "${bridge.bridgeId}" is missing a stored token. Save one in the home connector admin UI (/bond/setup), or call bond_authentication_guide for full steps.`,
+				'missing_token',
+				{ bond_bridge_id: bridge.bridgeId },
 			)
 		}
 		return token
@@ -905,7 +931,11 @@ export function createBondAdapter(input: {
 	) {
 		if (deviceId) return deviceId
 		if (!deviceName) {
-			throw new Error('Specify deviceId or deviceName.')
+			throw createBondOperatorError(
+				'Specify deviceId or deviceName.',
+				'device_selector_required',
+				{ bond_bridge_id: bridge.bridgeId },
+			)
 		}
 		const devices = await listDeviceSummaries(bridge, token)
 		const normalized = normalizeQuery(deviceName)
@@ -929,11 +959,17 @@ export function createBondAdapter(input: {
 				substringMatches.length > 12
 					? ` (+${String(substringMatches.length - 12)} more)`
 					: ''
-			throw new Error(
+			throw createBondOperatorError(
 				`Multiple Bond devices matched "${deviceName}": ${sample}${extra}. Pass deviceId.`,
+				'multiple_devices',
+				{ bond_bridge_id: bridge.bridgeId },
 			)
 		}
-		throw new Error(`No Bond device matched name "${deviceName}".`)
+		throw createBondOperatorError(
+			`No Bond device matched name "${deviceName}".`,
+			'device_not_found',
+			{ bond_bridge_id: bridge.bridgeId },
+		)
 	}
 
 	async function listDeviceSummaries(
@@ -1129,8 +1165,10 @@ export function createBondAdapter(input: {
 			const token =
 				typeof raw['token'] === 'string' ? (raw['token'] as string) : null
 			if (!token) {
-				throw new Error(
+				throw createBondOperatorError(
 					'Bond did not return a token (endpoint may be locked). Unlock in the Bond app or power-cycle the bridge and retry.',
+					'token_endpoint_locked',
+					{ bond_bridge_id: bridge.bridgeId },
 				)
 			}
 			saveBondToken({
@@ -1200,14 +1238,18 @@ export function createBondAdapter(input: {
 			})
 			const rawActions = doc['actions']
 			if (!Array.isArray(rawActions) || rawActions.length === 0) {
-				throw new Error(
+				throw createBondOperatorError(
 					`Bond device "${deviceId}" returned no usable actions list; refusing unvalidated invoke. Use bond_get_device to inspect this device.`,
+					'device_actions_unavailable',
+					{ bond_bridge_id: bridge.bridgeId },
 				)
 			}
 			const actions = new Set(rawActions.map((entry) => String(entry)))
 			if (!actions.has(input.action)) {
-				throw new Error(
+				throw createBondOperatorError(
 					`Device "${deviceId}" does not advertise action "${input.action}".`,
+					'device_action_unsupported',
+					{ bond_bridge_id: bridge.bridgeId },
 				)
 			}
 			const operation = `invoke device ${deviceId} action ${input.action}`
@@ -1362,14 +1404,18 @@ export function createBondAdapter(input: {
 			})
 			const rawActions = doc['actions']
 			if (!Array.isArray(rawActions) || rawActions.length === 0) {
-				throw new Error(
+				throw createBondOperatorError(
 					`Bond group "${input.groupId}" returned no usable actions list; refusing unvalidated invoke. Use bond_get_group to inspect this group.`,
+					'group_actions_unavailable',
+					{ bond_bridge_id: bridge.bridgeId },
 				)
 			}
 			const actions = new Set(rawActions.map((entry) => String(entry)))
 			if (!actions.has(input.action)) {
-				throw new Error(
+				throw createBondOperatorError(
 					`Group "${input.groupId}" does not advertise action "${input.action}".`,
+					'group_action_unsupported',
+					{ bond_bridge_id: bridge.bridgeId },
 				)
 			}
 			return await withTrackedBondBridgeRequest({

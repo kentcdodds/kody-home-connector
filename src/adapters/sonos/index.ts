@@ -1,4 +1,5 @@
 import { type HomeConnectorConfig } from '../../config.ts'
+import { type HomeConnectorErrorCaptureContext } from '../../sentry.ts'
 import { type HomeConnectorState } from '../../state.ts'
 import { type HomeConnectorStorage } from '../../storage/index.ts'
 import {
@@ -113,6 +114,26 @@ function isMockSonosHost(host: string) {
 	return host.endsWith('.mock.local')
 }
 
+function createSonosCallerError(
+	message: string,
+	code: string,
+): Error & {
+	homeConnectorCaptureContext: HomeConnectorErrorCaptureContext
+} {
+	const error = new Error(message) as Error & {
+		homeConnectorCaptureContext: HomeConnectorErrorCaptureContext
+	}
+	error.name = 'SonosCallerError'
+	error.homeConnectorCaptureContext = {
+		shouldCapture: false,
+		tags: {
+			connector_vendor: 'sonos',
+			sonos_caller_error: code,
+		},
+	}
+	return error
+}
+
 function normalizeQuery(value: string) {
 	return value.trim().toLowerCase()
 }
@@ -173,12 +194,14 @@ export function createSonosAdapter(input: {
 		const allPlayers = getKnownPlayers()
 		if (allPlayers.length === 1) return allPlayers[0]
 		if (adoptedPlayers.length > 1 || allPlayers.length > 1) {
-			throw new Error(
+			throw createSonosCallerError(
 				'Multiple Sonos players are available. Specify a playerId.',
+				'multiple_players',
 			)
 		}
-		throw new Error(
+		throw createSonosCallerError(
 			'No Sonos players are currently known. Run sonos_scan_players first.',
+			'no_players',
 		)
 	}
 
@@ -193,8 +216,9 @@ export function createSonosAdapter(input: {
 		if (adoptedPlayers[0]) return adoptedPlayers[0]
 		const allPlayers = getKnownPlayers()
 		if (allPlayers[0]) return allPlayers[0]
-		throw new Error(
+		throw createSonosCallerError(
 			'No Sonos players are currently known. Run sonos_scan_players first.',
+			'no_players',
 		)
 	}
 
@@ -286,7 +310,10 @@ export function createSonosAdapter(input: {
 		const groups = await listGroups(playerId)
 		const group = groups.find((entry) => entry.groupId === groupId)
 		if (!group) {
-			throw new Error(`Sonos group "${groupId}" was not found.`)
+			throw createSonosCallerError(
+				`Sonos group "${groupId}" was not found.`,
+				'group_not_found',
+			)
 		}
 		if (
 			input.config.mocksEnabled &&
@@ -401,8 +428,9 @@ export function createSonosAdapter(input: {
 					?.queueItemId ?? null
 		}
 		if (!queueItemId) {
-			throw new Error(
+			throw createSonosCallerError(
 				'Specify a queueItemId or a valid 1-based queue position.',
+				'queue_item_required',
 			)
 		}
 		await removeSonosQueueTrackLive(queuePlayer.host, queueItemId)
@@ -420,7 +448,10 @@ export function createSonosAdapter(input: {
 			title: inputArgs.title,
 		})
 		if (!favorite) {
-			throw new Error('Sonos favorite was not found.')
+			throw createSonosCallerError(
+				'Sonos favorite was not found.',
+				'favorite_not_found',
+			)
 		}
 		return favorite as SonosFavorite
 	}
@@ -437,7 +468,10 @@ export function createSonosAdapter(input: {
 			title: inputArgs.title,
 		})
 		if (!savedQueue) {
-			throw new Error('Sonos saved queue was not found.')
+			throw createSonosCallerError(
+				'Sonos saved queue was not found.',
+				'saved_queue_not_found',
+			)
 		}
 		return savedQueue as SonosSavedQueue
 	}
@@ -528,7 +562,10 @@ export function createSonosAdapter(input: {
 			favorites: await listFavorites(inputArgs.playerId),
 		})
 		if (!spotify) {
-			throw new Error(`Unsupported Spotify URI "${inputArgs.uri}".`)
+			throw createSonosCallerError(
+				`Unsupported Spotify URI "${inputArgs.uri}".`,
+				'unsupported_spotify_uri',
+			)
 		}
 		return {
 			uri: spotify.uri,
@@ -1038,7 +1075,10 @@ export function createSonosAdapter(input: {
 				playerId,
 			)
 			if (!player) {
-				throw new Error(`Sonos player "${playerId}" was not found.`)
+				throw createSonosCallerError(
+					`Sonos player "${playerId}" was not found.`,
+					'player_not_found',
+				)
 			}
 			return player
 		},
