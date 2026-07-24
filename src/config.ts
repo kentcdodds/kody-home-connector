@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { homedir, networkInterfaces } from 'node:os'
 import path from 'node:path'
 import {
@@ -9,12 +10,38 @@ import {
 	userScopedConnectorWebSocketUrl,
 } from '@kody-bot/connector-kit/urls'
 
-export type HomeConnectorConfig = {
+/**
+ * One outbound Worker WebSocket session target. Household deployments can dial
+ * any number of independent Kody accounts from a single process.
+ */
+export type HomeConnectorWorkerTarget = {
+	kodyUsername: string | null
 	homeConnectorId: string
+	sharedSecret: string | null
+	workerBaseUrl: string
+	workerSessionUrl: string
+	workerWebSocketUrl: string
+}
+
+export type HomeConnectorConfig = {
+	/**
+	 * Primary / legacy connector id (first worker target). Kept for local
+	 * persistence namespaces, logging, and single-session callers.
+	 */
+	homeConnectorId: string
+	/**
+	 * Primary / legacy Kody username (first worker target).
+	 */
+	kodyUsername: string | null
 	workerBaseUrl: string
 	workerSessionUrl: string
 	workerWebSocketUrl: string
 	sharedSecret: string | null
+	/**
+	 * All Worker connection targets for this process. Length is 1 for legacy
+	 * single-target env configuration.
+	 */
+	workerTargets: Array<HomeConnectorWorkerTarget>
 	/**
 	 * Access Networks / RUCKUS Unleashed discovery probes these CIDRs over HTTPS.
 	 * When unset, the connector derives private `/24` networks from local IPv4
@@ -77,13 +104,19 @@ function trimTrailingSlash(value: string) {
 	return trimmed
 }
 
-function resolveHomeConnectorId() {
+const remoteConnectorNameRulesMessage =
+	'lowercase letters, numbers, and dashes; start and end with a letter or number; max 64 characters'
+
+function resolveHomeConnectorId(
+	rawValue: string | null | undefined,
+	fieldName = 'HOME_CONNECTOR_ID',
+) {
 	const homeConnectorId = normalizeRemoteConnectorInstanceId(
-		process.env.HOME_CONNECTOR_ID ?? 'default',
+		rawValue ?? 'default',
 	)
 	if (!isValidRemoteConnectorName(homeConnectorId)) {
 		throw new Error(
-			'HOME_CONNECTOR_ID must match Kody remote connector name rules: lowercase letters, numbers, and dashes; start and end with a letter or number; max 64 characters.',
+			`${fieldName} must match Kody remote connector name rules: ${remoteConnectorNameRulesMessage}.`,
 		)
 	}
 	return homeConnectorId
@@ -136,18 +169,185 @@ function isLocalWorkerBaseUrl(workerBaseUrl: string) {
 	}
 }
 
-function resolveKodyUsername(workerBaseUrl: string) {
-	const kodyUsername = process.env.KODY_USERNAME?.trim() || null
-	if (kodyUsername) return kodyUsername
+function requireKodyUsernameForProductionWorker(input: {
+	kodyUsername: string | null
+	workerBaseUrl: string
+	fieldName: string
+}) {
+	if (input.kodyUsername) return input.kodyUsername
 	if (
 		process.env.NODE_ENV === 'production' &&
-		!isLocalWorkerBaseUrl(workerBaseUrl)
+		!isLocalWorkerBaseUrl(input.workerBaseUrl)
 	) {
 		throw new Error(
-			'KODY_USERNAME is required when connecting the home connector to a production Kody Worker.',
+			`${input.fieldName} is required when connecting the home connector to a production Kody Worker.`,
 		)
 	}
 	return null
+}
+
+function resolveLegacyKodyUsername(workerBaseUrl: string) {
+	return requireKodyUsernameForProductionWorker({
+		kodyUsername: process.env.KODY_USERNAME?.trim() || null,
+		workerBaseUrl,
+		fieldName: 'KODY_USERNAME',
+	})
+}
+
+function readOptionalStringField(
+	record: Record<string, unknown>,
+	keys: Array<string>,
+) {
+	for (const key of keys) {
+		const value = record[key]
+		if (typeof value === 'string') {
+			const trimmed = value.trim()
+			if (trimmed) return trimmed
+		}
+	}
+	return null
+}
+
+function parseWorkerTargetsJson(raw: string, sourceLabel: string) {
+	let parsed: unknown
+	try {
+		parsed = JSON.parse(raw)
+	} catch (error) {
+		const detail = error instanceof Error ? error.message : String(error)
+		throw new Error(
+			`${sourceLabel} must be valid JSON (${detail}). Expected an array of worker targets.`,
+		)
+	}
+	if (!Array.isArray(parsed)) {
+		throw new Error(
+			`${sourceLabel} must be a JSON array of worker targets. Received ${typeof parsed}.`,
+		)
+	}
+	return parsed
+}
+
+function resolveWorkerTargetFromRecord(input: {
+	record: Record<string, unknown>
+	index: number
+	defaultWorkerBaseUrl: string
+	sourceLabel: string
+}): HomeConnectorWorkerTarget {
+	const label = `${input.sourceLabel}[${input.index}]`
+	const workerBaseUrl =
+		readOptionalStringField(input.record, [
+			'workerBaseUrl',
+			'WORKER_BASE_URL',
+		]) || input.defaultWorkerBaseUrl
+	const homeConnectorId = resolveHomeConnectorId(
+		readOptionalStringField(input.record, [
+			'connectorId',
+			'homeConnectorId',
+			'HOME_CONNECTOR_ID',
+		]),
+		`${label}.connectorId`,
+	)
+	const kodyUsername = requireKodyUsernameForProductionWorker({
+		kodyUsername: readOptionalStringField(input.record, [
+			'kodyUsername',
+			'KODY_USERNAME',
+		]),
+		workerBaseUrl,
+		fieldName: `${label}.kodyUsername`,
+	})
+	const sharedSecret = readOptionalStringField(input.record, [
+		'sharedSecret',
+		'HOME_CONNECTOR_SHARED_SECRET',
+	])
+	const { workerSessionUrl, workerWebSocketUrl } = resolveWorkerConnectorUrls({
+		workerBaseUrl,
+		homeConnectorId,
+		kodyUsername,
+	})
+	return {
+		kodyUsername,
+		homeConnectorId,
+		sharedSecret,
+		workerBaseUrl,
+		workerSessionUrl,
+		workerWebSocketUrl,
+	}
+}
+
+function resolveConfiguredWorkerTargets(defaultWorkerBaseUrl: string) {
+	const targetsJson = process.env.HOME_CONNECTOR_TARGETS?.trim()
+	const targetsFile = process.env.HOME_CONNECTOR_TARGETS_FILE?.trim()
+	if (targetsJson && targetsFile) {
+		throw new Error(
+			'Set only one of HOME_CONNECTOR_TARGETS or HOME_CONNECTOR_TARGETS_FILE, not both.',
+		)
+	}
+	if (!targetsJson && !targetsFile) {
+		return null
+	}
+
+	const sourceLabel = targetsJson
+		? 'HOME_CONNECTOR_TARGETS'
+		: 'HOME_CONNECTOR_TARGETS_FILE'
+	let raw = targetsJson ?? ''
+	if (targetsFile) {
+		try {
+			raw = readFileSync(targetsFile, 'utf8')
+		} catch (error) {
+			const detail = error instanceof Error ? error.message : String(error)
+			throw new Error(
+				`Failed to read HOME_CONNECTOR_TARGETS_FILE (${targetsFile}): ${detail}`,
+			)
+		}
+	}
+
+	const parsed = parseWorkerTargetsJson(raw, sourceLabel)
+	if (parsed.length === 0) {
+		throw new Error(
+			`${sourceLabel} must include at least one worker target. For a single account, omit multi-target config and use KODY_USERNAME + HOME_CONNECTOR_SHARED_SECRET instead.`,
+		)
+	}
+
+	return parsed.map((entry, index) => {
+		if (entry == null || typeof entry !== 'object' || Array.isArray(entry)) {
+			throw new Error(
+				`${sourceLabel}[${index}] must be a JSON object with kodyUsername, sharedSecret, and optional connectorId / workerBaseUrl.`,
+			)
+		}
+		return resolveWorkerTargetFromRecord({
+			record: entry as Record<string, unknown>,
+			index,
+			defaultWorkerBaseUrl,
+			sourceLabel,
+		})
+	})
+}
+
+function resolveLegacyWorkerTarget(defaultWorkerBaseUrl: string) {
+	const homeConnectorId = resolveHomeConnectorId(process.env.HOME_CONNECTOR_ID)
+	const kodyUsername = resolveLegacyKodyUsername(defaultWorkerBaseUrl)
+	const { workerSessionUrl, workerWebSocketUrl } = resolveWorkerConnectorUrls({
+		workerBaseUrl: defaultWorkerBaseUrl,
+		homeConnectorId,
+		kodyUsername,
+	})
+	return {
+		kodyUsername,
+		homeConnectorId,
+		sharedSecret: process.env.HOME_CONNECTOR_SHARED_SECRET?.trim() || null,
+		workerBaseUrl: defaultWorkerBaseUrl,
+		workerSessionUrl,
+		workerWebSocketUrl,
+	} satisfies HomeConnectorWorkerTarget
+}
+
+function resolveWorkerTargets(): Array<HomeConnectorWorkerTarget> {
+	const defaultWorkerBaseUrl =
+		process.env.WORKER_BASE_URL?.trim() || 'http://localhost:3742'
+	const configuredTargets = resolveConfiguredWorkerTargets(defaultWorkerBaseUrl)
+	if (configuredTargets) {
+		return configuredTargets
+	}
+	return [resolveLegacyWorkerTarget(defaultWorkerBaseUrl)]
 }
 
 function resolveHomeConnectorDataPath() {
@@ -339,15 +539,23 @@ export function loadHomeConnectorConfig(): HomeConnectorConfig {
 		process.env.ISLAND_ROUTER_API_REQUEST_TIMEOUT_MS ?? '8000',
 		10,
 	)
-	const homeConnectorId = resolveHomeConnectorId()
-	const workerBaseUrl =
-		process.env.WORKER_BASE_URL?.trim() || 'http://localhost:3742'
-	const kodyUsername = resolveKodyUsername(workerBaseUrl)
-	const { workerSessionUrl, workerWebSocketUrl } = resolveWorkerConnectorUrls({
-		workerBaseUrl,
-		homeConnectorId,
-		kodyUsername,
-	})
+	const workerTargets = resolveWorkerTargets()
+	const primaryTarget = workerTargets[0]
+	if (!primaryTarget) {
+		throw new Error(
+			'Home connector requires at least one Worker target. Configure HOME_CONNECTOR_TARGETS / HOME_CONNECTOR_TARGETS_FILE, or the legacy KODY_USERNAME + HOME_CONNECTOR_SHARED_SECRET env vars.',
+		)
+	}
+	const homeConnectorId = primaryTarget.homeConnectorId
+	const kodyUsername = primaryTarget.kodyUsername
+	const workerBaseUrl = primaryTarget.workerBaseUrl
+	const workerSessionUrl = primaryTarget.workerSessionUrl
+	const workerWebSocketUrl = primaryTarget.workerWebSocketUrl
+	// Local SQLite secret encryption uses the process-level secret when set,
+	// otherwise the first worker target's shared secret.
+	const sharedSecret =
+		process.env.HOME_CONNECTOR_SHARED_SECRET?.trim() ||
+		primaryTarget.sharedSecret
 	const mocksEnabled = process.env.MOCKS === 'true'
 	const dataPath = resolveHomeConnectorDataPath()
 	const explicitAccessNetworksUnleashedCidrs = resolveScanCidrsFromEnv(
@@ -372,10 +580,12 @@ export function loadHomeConnectorConfig(): HomeConnectorConfig {
 			: deriveJellyfishAutoscanCidrs()
 	return {
 		homeConnectorId,
+		kodyUsername,
 		workerBaseUrl,
 		workerSessionUrl,
 		workerWebSocketUrl,
-		sharedSecret: process.env.HOME_CONNECTOR_SHARED_SECRET?.trim() || null,
+		sharedSecret,
+		workerTargets,
 		accessNetworksUnleashedScanCidrs,
 		accessNetworksUnleashedAllowInsecureTls:
 			process.env.ACCESS_NETWORKS_UNLEASHED_ALLOW_INSECURE_TLS === 'true',

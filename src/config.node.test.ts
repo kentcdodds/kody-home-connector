@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { expect, test } from 'vitest'
 import {
 	deriveAccessNetworksUnleashedAutoscanCidrsFromInterfaces,
@@ -129,6 +132,136 @@ test('production Kody worker URLs require KODY_USERNAME', () => {
 	})
 
 	expect(() => loadHomeConnectorConfig()).toThrow('KODY_USERNAME')
+})
+
+test('legacy single-target env vars produce one workerTargets entry', () => {
+	using _env = createTemporaryEnv({
+		HOME_CONNECTOR_ID: 'home',
+		WORKER_BASE_URL: 'https://heykody.dev',
+		KODY_USERNAME: 'alice',
+		HOME_CONNECTOR_SHARED_SECRET: 'legacy-secret',
+		HOME_CONNECTOR_TARGETS: undefined,
+		HOME_CONNECTOR_TARGETS_FILE: undefined,
+		NODE_ENV: 'production',
+	})
+
+	const config = loadHomeConnectorConfig()
+	expect(config.workerTargets).toHaveLength(1)
+	expect(config.workerTargets[0]).toMatchObject({
+		kodyUsername: 'alice',
+		homeConnectorId: 'home',
+		sharedSecret: 'legacy-secret',
+		workerBaseUrl: 'https://heykody.dev',
+		workerSessionUrl: 'https://heykody.dev/@alice/connectors/home',
+		workerWebSocketUrl: 'wss://heykody.dev/@alice/connectors/home',
+	})
+	expect(config.kodyUsername).toBe('alice')
+	expect(config.homeConnectorId).toBe('home')
+	expect(config.sharedSecret).toBe('legacy-secret')
+})
+
+test('HOME_CONNECTOR_TARGETS parses N independent worker targets', () => {
+	using _env = createTemporaryEnv({
+		WORKER_BASE_URL: 'https://heykody.dev',
+		HOME_CONNECTOR_TARGETS: JSON.stringify([
+			{
+				kodyUsername: 'alice',
+				sharedSecret: 'secret-a',
+				connectorId: 'home',
+			},
+			{
+				kodyUsername: 'bob',
+				sharedSecret: 'secret-b',
+				connectorId: 'Living-Room',
+				workerBaseUrl: 'https://heykody.dev/',
+			},
+		]),
+		HOME_CONNECTOR_TARGETS_FILE: undefined,
+		KODY_USERNAME: undefined,
+		HOME_CONNECTOR_SHARED_SECRET: undefined,
+		NODE_ENV: 'production',
+	})
+
+	const config = loadHomeConnectorConfig()
+	expect(config.workerTargets).toHaveLength(2)
+	expect(config.workerTargets[0]).toMatchObject({
+		kodyUsername: 'alice',
+		homeConnectorId: 'home',
+		sharedSecret: 'secret-a',
+		workerWebSocketUrl: 'wss://heykody.dev/@alice/connectors/home',
+	})
+	expect(config.workerTargets[1]).toMatchObject({
+		kodyUsername: 'bob',
+		homeConnectorId: 'living-room',
+		sharedSecret: 'secret-b',
+		workerWebSocketUrl: 'wss://heykody.dev/@bob/connectors/living-room',
+	})
+	expect(config.homeConnectorId).toBe('home')
+	expect(config.kodyUsername).toBe('alice')
+	expect(config.sharedSecret).toBe('secret-a')
+})
+
+test('HOME_CONNECTOR_TARGETS_FILE loads targets and rejects empty arrays', () => {
+	const dir = mkdtempSync(join(tmpdir(), 'home-connector-targets-'))
+	const filePath = join(dir, 'targets.json')
+	try {
+		writeFileSync(
+			filePath,
+			JSON.stringify([
+				{
+					kodyUsername: 'carol',
+					sharedSecret: 'secret-c',
+					connectorId: 'home',
+				},
+			]),
+		)
+		using _env = createTemporaryEnv({
+			WORKER_BASE_URL: 'https://heykody.dev',
+			HOME_CONNECTOR_TARGETS: undefined,
+			HOME_CONNECTOR_TARGETS_FILE: filePath,
+			NODE_ENV: 'production',
+		})
+		const config = loadHomeConnectorConfig()
+		expect(config.workerTargets).toHaveLength(1)
+		expect(config.workerTargets[0]?.kodyUsername).toBe('carol')
+
+		writeFileSync(filePath, '[]')
+		expect(() => loadHomeConnectorConfig()).toThrow(
+			'at least one worker target',
+		)
+	} finally {
+		rmSync(dir, { recursive: true, force: true })
+	}
+})
+
+test('rejects malformed multi-target config and both sources at once', () => {
+	using _both = createTemporaryEnv({
+		HOME_CONNECTOR_TARGETS: '[]',
+		HOME_CONNECTOR_TARGETS_FILE: '/tmp/targets.json',
+	})
+	expect(() => loadHomeConnectorConfig()).toThrow(
+		'Set only one of HOME_CONNECTOR_TARGETS or HOME_CONNECTOR_TARGETS_FILE',
+	)
+
+	using _malformed = createTemporaryEnv({
+		HOME_CONNECTOR_TARGETS: '{not-json',
+		HOME_CONNECTOR_TARGETS_FILE: undefined,
+	})
+	expect(() => loadHomeConnectorConfig()).toThrow('must be valid JSON')
+
+	using _invalidName = createTemporaryEnv({
+		WORKER_BASE_URL: 'https://heykody.dev',
+		HOME_CONNECTOR_TARGETS: JSON.stringify([
+			{
+				kodyUsername: 'alice',
+				sharedSecret: 'secret',
+				connectorId: '-bad',
+			},
+		]),
+		HOME_CONNECTOR_TARGETS_FILE: undefined,
+		NODE_ENV: 'production',
+	})
+	expect(() => loadHomeConnectorConfig()).toThrow('connectorId')
 })
 
 test('scan CIDR env vars override derived autoscan CIDRs', () => {
