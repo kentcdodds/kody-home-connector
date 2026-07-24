@@ -289,7 +289,7 @@ test('websocket shutdown close does not trigger sustained reconnect reporting', 
 	expect(sentryMock.captureHomeConnectorMessage).not.toHaveBeenCalled()
 })
 
-test('websocket ping resets sustained reconnect threshold', async () => {
+test('websocket ack resets sustained reconnect threshold', async () => {
 	vi.useFakeTimers()
 	globalThis.WebSocket = FakeWorkerWebSocket as unknown as typeof WebSocket
 	const connector = createWorkerConnector({
@@ -321,18 +321,517 @@ test('websocket ping resets sustained reconnect threshold', async () => {
 
 		expect(sentryMock.captureHomeConnectorMessage).toHaveBeenCalledTimes(1)
 		await vi.advanceTimersByTimeAsync(8_000)
-		fakeWebSocketInstances[3]?.dispatchMessage(
+		const socket = fakeWebSocketInstances[3]
+		if (!socket) throw new Error('Expected websocket instance')
+		await socket.dispatchOpen()
+		await socket.dispatchMessage(
+			JSON.stringify({
+				type: 'server.ack',
+				connectorId: 'default',
+			}),
+		)
+		await socket.dispatchMessage(
 			JSON.stringify({
 				type: 'server.ping',
 			}),
 		)
-		fakeWebSocketInstances[3]?.dispatchClose({
+		socket.dispatchClose({
 			code: 1006,
 			reason: '',
 			wasClean: false,
 		})
 
 		expect(sentryMock.captureHomeConnectorMessage).toHaveBeenCalledTimes(1)
+	} finally {
+		connector.stop()
+	}
+})
+
+test('pre-ack server.ping does not reset reconnect backoff', async () => {
+	vi.useFakeTimers()
+	globalThis.WebSocket = FakeWorkerWebSocket as unknown as typeof WebSocket
+	const logger = createLogger()
+	const connector = createWorkerConnector({
+		config: createConfig(),
+		state: createAppState(),
+		logger,
+		toolRegistry: createToolRegistry(),
+	})
+
+	try {
+		await connector.start()
+		expect(fakeWebSocketInstances).toHaveLength(1)
+		fakeWebSocketInstances[0]?.dispatchClose({
+			code: 1006,
+			reason: '',
+			wasClean: false,
+		})
+		expect(logger.info).toHaveBeenCalledWith(
+			'worker.websocket.reconnect_scheduled',
+			expect.stringContaining('2000ms'),
+			expect.objectContaining({
+				reconnectDelayMs: 2_000,
+				consecutiveReconnects: 1,
+			}),
+		)
+
+		await vi.advanceTimersByTimeAsync(2_000)
+		expect(fakeWebSocketInstances).toHaveLength(2)
+		const secondSocket = fakeWebSocketInstances[1]
+		if (!secondSocket) throw new Error('Expected websocket instance')
+		await secondSocket.dispatchOpen()
+		await secondSocket.dispatchMessage(
+			JSON.stringify({
+				type: 'server.ping',
+			}),
+		)
+		secondSocket.dispatchClose({
+			code: 1006,
+			reason: '',
+			wasClean: false,
+		})
+		expect(logger.info).toHaveBeenCalledWith(
+			'worker.websocket.reconnect_scheduled',
+			expect.stringContaining('4000ms'),
+			expect.objectContaining({
+				reconnectDelayMs: 4_000,
+				consecutiveReconnects: 2,
+			}),
+		)
+
+		await vi.advanceTimersByTimeAsync(2_000)
+		expect(fakeWebSocketInstances).toHaveLength(2)
+		await vi.advanceTimersByTimeAsync(2_000)
+		expect(fakeWebSocketInstances).toHaveLength(3)
+	} finally {
+		connector.stop()
+	}
+})
+
+test('pre-ack server.ping does not re-arm the sustained reconnect alarm', async () => {
+	vi.useFakeTimers()
+	globalThis.WebSocket = FakeWorkerWebSocket as unknown as typeof WebSocket
+	const connector = createWorkerConnector({
+		config: createConfig(),
+		state: createAppState(),
+		logger: createLogger(),
+		toolRegistry: createToolRegistry(),
+	})
+
+	async function closeCurrentSocket(index: number, advanceMs: number) {
+		const socket = fakeWebSocketInstances[index]
+		if (!socket) throw new Error('Expected websocket instance')
+		socket.dispatchClose({ code: 1006, reason: '', wasClean: false })
+		await vi.advanceTimersByTimeAsync(advanceMs)
+	}
+
+	try {
+		await connector.start()
+		await closeCurrentSocket(0, 2_000)
+		await closeCurrentSocket(1, 4_000)
+		await closeCurrentSocket(2, 8_000)
+		expect(sentryMock.captureHomeConnectorMessage).toHaveBeenCalledTimes(1)
+
+		const socket = fakeWebSocketInstances[3]
+		if (!socket) throw new Error('Expected websocket instance')
+		await socket.dispatchOpen()
+		await socket.dispatchMessage(JSON.stringify({ type: 'server.ping' }))
+		await closeCurrentSocket(3, 16_000)
+		await closeCurrentSocket(4, 30_000)
+		await closeCurrentSocket(5, 30_000)
+
+		expect(sentryMock.captureHomeConnectorMessage).toHaveBeenCalledTimes(1)
+	} finally {
+		connector.stop()
+	}
+})
+
+test('pre-ack server.ping leaves a reported error in place', async () => {
+	vi.useFakeTimers()
+	globalThis.WebSocket = FakeWorkerWebSocket as unknown as typeof WebSocket
+	const state = createAppState()
+	const connector = createWorkerConnector({
+		config: createConfig(),
+		state,
+		logger: createLogger(),
+		toolRegistry: createToolRegistry(),
+	})
+
+	try {
+		await connector.start()
+		const socket = fakeWebSocketInstances[0]
+		if (!socket) throw new Error('Expected websocket instance')
+		await socket.dispatchOpen()
+		await socket.dispatchMessage(
+			JSON.stringify({
+				type: 'server.error',
+				message: 'Invalid connector shared secret.',
+			}),
+		)
+		await socket.dispatchMessage(JSON.stringify({ type: 'server.ping' }))
+
+		expect(state.connection.lastError).toBe('Invalid connector shared secret.')
+		expect(state.connection.connected).toBe(false)
+	} finally {
+		connector.stop()
+	}
+})
+
+test('pre-ack server.error escalates reconnect delay to handshake rejection backoff', async () => {
+	vi.useFakeTimers()
+	globalThis.WebSocket = FakeWorkerWebSocket as unknown as typeof WebSocket
+	const logger = createLogger()
+	const connector = createWorkerConnector({
+		config: createConfig(),
+		state: createAppState(),
+		logger,
+		toolRegistry: createToolRegistry(),
+	})
+
+	try {
+		await connector.start()
+		const socket = fakeWebSocketInstances[0]
+		if (!socket) throw new Error('Expected websocket instance')
+		await socket.dispatchOpen()
+		await socket.dispatchMessage(
+			JSON.stringify({
+				type: 'server.error',
+				message: 'Invalid connector shared secret.',
+			}),
+		)
+		socket.dispatchClose({
+			code: 1006,
+			reason: '',
+			wasClean: false,
+		})
+
+		expect(logger.info).toHaveBeenCalledWith(
+			'worker.websocket.reconnect_scheduled',
+			expect.stringContaining('30000ms'),
+			expect.objectContaining({
+				reconnectDelayMs: 30_000,
+				consecutiveHandshakeRejections: 1,
+			}),
+		)
+
+		await vi.advanceTimersByTimeAsync(29_999)
+		expect(fakeWebSocketInstances).toHaveLength(1)
+		await vi.advanceTimersByTimeAsync(1)
+		expect(fakeWebSocketInstances).toHaveLength(2)
+	} finally {
+		connector.stop()
+	}
+})
+
+test('server.ack resets handshake rejection escalation to short reconnect backoff', async () => {
+	vi.useFakeTimers()
+	globalThis.WebSocket = FakeWorkerWebSocket as unknown as typeof WebSocket
+	const logger = createLogger()
+	const connector = createWorkerConnector({
+		config: createConfig(),
+		state: createAppState(),
+		logger,
+		toolRegistry: createToolRegistry(),
+	})
+
+	try {
+		await connector.start()
+		const firstSocket = fakeWebSocketInstances[0]
+		if (!firstSocket) throw new Error('Expected websocket instance')
+		await firstSocket.dispatchOpen()
+		await firstSocket.dispatchMessage(
+			JSON.stringify({
+				type: 'server.error',
+				message: 'Invalid connector shared secret.',
+			}),
+		)
+		firstSocket.dispatchClose({
+			code: 1006,
+			reason: '',
+			wasClean: false,
+		})
+
+		await vi.advanceTimersByTimeAsync(30_000)
+		expect(fakeWebSocketInstances).toHaveLength(2)
+		const secondSocket = fakeWebSocketInstances[1]
+		if (!secondSocket) throw new Error('Expected websocket instance')
+		await secondSocket.dispatchOpen()
+		await secondSocket.dispatchMessage(
+			JSON.stringify({
+				type: 'server.ack',
+				connectorId: 'default',
+			}),
+		)
+		secondSocket.dispatchClose({
+			code: 1006,
+			reason: '',
+			wasClean: false,
+		})
+
+		expect(logger.info).toHaveBeenCalledWith(
+			'worker.websocket.reconnect_scheduled',
+			expect.stringContaining('2000ms'),
+			expect.objectContaining({
+				reconnectDelayMs: 2_000,
+				consecutiveHandshakeRejections: 0,
+			}),
+		)
+
+		await vi.advanceTimersByTimeAsync(2_000)
+		expect(fakeWebSocketInstances).toHaveLength(3)
+	} finally {
+		connector.stop()
+	}
+})
+
+test('server.error capture includes dedupe key and fingerprint', async () => {
+	vi.useFakeTimers()
+	globalThis.WebSocket = FakeWorkerWebSocket as unknown as typeof WebSocket
+	const connector = createWorkerConnector({
+		config: createConfig(),
+		state: createAppState(),
+		logger: createLogger(),
+		toolRegistry: createToolRegistry(),
+	})
+
+	try {
+		await connector.start()
+		const socket = fakeWebSocketInstances[0]
+		if (!socket) throw new Error('Expected websocket instance')
+		await socket.dispatchOpen()
+		await socket.dispatchMessage(
+			JSON.stringify({
+				type: 'server.error',
+				message: 'Invalid connector shared secret.',
+			}),
+		)
+
+		expect(sentryMock.captureHomeConnectorMessage).toHaveBeenCalledWith(
+			'Invalid connector shared secret.',
+			expect.objectContaining({
+				level: 'error',
+				fingerprint: [
+					'home-connector',
+					'server-error',
+					'default',
+					'Invalid connector shared secret.',
+				],
+				dedupe: {
+					key: 'server-error:local:default:Invalid connector shared secret.',
+					ttlMs: 60 * 60_000,
+				},
+				tags: {
+					connector_event: 'server.error',
+					home_connector_id: 'default',
+				},
+			}),
+		)
+	} finally {
+		connector.stop()
+	}
+})
+
+test('server.error logger fires on every occurrence', async () => {
+	vi.useFakeTimers()
+	globalThis.WebSocket = FakeWorkerWebSocket as unknown as typeof WebSocket
+	const logger = createLogger()
+	const connector = createWorkerConnector({
+		config: createConfig(),
+		state: createAppState(),
+		logger,
+		toolRegistry: createToolRegistry(),
+	})
+
+	try {
+		await connector.start()
+		const firstSocket = fakeWebSocketInstances[0]
+		if (!firstSocket) throw new Error('Expected websocket instance')
+		await firstSocket.dispatchOpen()
+		await firstSocket.dispatchMessage(
+			JSON.stringify({
+				type: 'server.error',
+				message: 'Invalid connector shared secret.',
+			}),
+		)
+		firstSocket.dispatchClose({
+			code: 1006,
+			reason: '',
+			wasClean: false,
+		})
+
+		await vi.advanceTimersByTimeAsync(30_000)
+		const secondSocket = fakeWebSocketInstances[1]
+		if (!secondSocket) throw new Error('Expected websocket instance')
+		await secondSocket.dispatchOpen()
+		await secondSocket.dispatchMessage(
+			JSON.stringify({
+				type: 'server.error',
+				message: 'Invalid connector shared secret.',
+			}),
+		)
+
+		expect(logger.error).toHaveBeenCalledTimes(2)
+		expect(logger.error).toHaveBeenNthCalledWith(
+			1,
+			'worker.server.error',
+			'Home connector error: Invalid connector shared secret.',
+			expect.objectContaining({
+				handshakeAcknowledged: false,
+				consecutiveHandshakeRejections: 1,
+				serverMessage: 'Invalid connector shared secret.',
+			}),
+		)
+		expect(logger.error).toHaveBeenNthCalledWith(
+			2,
+			'worker.server.error',
+			'Home connector error: Invalid connector shared secret.',
+			expect.objectContaining({
+				handshakeAcknowledged: false,
+				consecutiveHandshakeRejections: 2,
+				serverMessage: 'Invalid connector shared secret.',
+			}),
+		)
+		expect(sentryMock.captureHomeConnectorMessage).toHaveBeenCalledTimes(2)
+	} finally {
+		connector.stop()
+	}
+})
+
+test('tool call between log and Sentry thresholds logs slow without Sentry capture', async () => {
+	vi.useFakeTimers()
+	vi.setSystemTime(new Date('2024-01-01T00:00:00.000Z'))
+	globalThis.WebSocket = FakeWorkerWebSocket as unknown as typeof WebSocket
+	const logger = createLogger()
+	const toolRegistry: HomeConnectorToolRegistry = {
+		list: vi.fn(() => []),
+		call: vi.fn(async () => {
+			vi.setSystemTime(new Date('2024-01-01T00:00:07.000Z'))
+			return {
+				content: [{ type: 'text', text: 'ok' }],
+			}
+		}),
+	}
+	const connector = createWorkerConnector({
+		config: createConfig(),
+		state: createAppState(),
+		logger,
+		toolRegistry,
+	})
+
+	try {
+		await connector.start()
+		const socket = fakeWebSocketInstances[0]
+		if (!socket) throw new Error('Expected websocket instance')
+		await socket.dispatchOpen()
+		await socket.dispatchMessage(
+			JSON.stringify({
+				type: 'server.ack',
+				connectorId: 'default',
+			}),
+		)
+		await socket.dispatchMessage(
+			JSON.stringify({
+				type: 'connector.jsonrpc',
+				message: {
+					jsonrpc: '2.0',
+					id: 'slow-tool',
+					method: 'tools/call',
+					params: {
+						name: 'jellyfish_list_zones',
+						arguments: {},
+					},
+				},
+			}),
+		)
+
+		expect(logger.warn).toHaveBeenCalledWith(
+			'tool.call.slow',
+			'Home connector tool call was slow.',
+			expect.objectContaining({
+				toolName: 'jellyfish_list_zones',
+				durationMs: 7_000,
+			}),
+		)
+		expect(sentryMock.captureHomeConnectorMessage).not.toHaveBeenCalled()
+	} finally {
+		connector.stop()
+	}
+})
+
+test('tool call at Sentry threshold captures with dedupe and fingerprint', async () => {
+	vi.useFakeTimers()
+	vi.setSystemTime(new Date('2024-01-01T00:00:00.000Z'))
+	globalThis.WebSocket = FakeWorkerWebSocket as unknown as typeof WebSocket
+	const logger = createLogger()
+	const toolRegistry: HomeConnectorToolRegistry = {
+		list: vi.fn(() => []),
+		call: vi.fn(async () => {
+			vi.setSystemTime(new Date('2024-01-01T00:00:35.000Z'))
+			return {
+				content: [{ type: 'text', text: 'ok' }],
+			}
+		}),
+	}
+	const connector = createWorkerConnector({
+		config: createConfig(),
+		state: createAppState(),
+		logger,
+		toolRegistry,
+	})
+
+	try {
+		await connector.start()
+		const socket = fakeWebSocketInstances[0]
+		if (!socket) throw new Error('Expected websocket instance')
+		await socket.dispatchOpen()
+		await socket.dispatchMessage(
+			JSON.stringify({
+				type: 'server.ack',
+				connectorId: 'default',
+			}),
+		)
+		await socket.dispatchMessage(
+			JSON.stringify({
+				type: 'connector.jsonrpc',
+				message: {
+					jsonrpc: '2.0',
+					id: 'very-slow-tool',
+					method: 'tools/call',
+					params: {
+						name: 'jellyfish_list_zones',
+						arguments: {},
+					},
+				},
+			}),
+		)
+
+		expect(logger.warn).toHaveBeenCalledWith(
+			'tool.call.slow',
+			'Home connector tool call was slow.',
+			expect.objectContaining({
+				toolName: 'jellyfish_list_zones',
+				durationMs: 35_000,
+			}),
+		)
+		expect(sentryMock.captureHomeConnectorMessage).toHaveBeenCalledWith(
+			'Home connector tool call was slow.',
+			expect.objectContaining({
+				level: 'warning',
+				fingerprint: [
+					'home-connector',
+					'tool-call-slow',
+					'jellyfish_list_zones',
+				],
+				dedupe: {
+					key: 'tool-call-slow:jellyfish_list_zones',
+					ttlMs: 60 * 60_000,
+				},
+				extra: expect.objectContaining({
+					durationMs: 35_000,
+					thresholdMs: 30_000,
+				}),
+			}),
+		)
 	} finally {
 		connector.stop()
 	}

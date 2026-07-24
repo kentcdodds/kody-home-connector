@@ -28,7 +28,12 @@ Household deployments can run one LAN home-connector process that opens an
 independent Worker WebSocket session for each configured Kody account. All
 sessions share the same local tool registry, device adapters, and SQLite state.
 Heartbeat/reconnect are per session; stopping the process stops every session;
-one session failing does not permanently kill the others.
+one session failing does not permanently kill the others. Ordinary reconnect
+backoff grows from 2s to 30s. A Worker handshake rejection (invalid shared
+secret, session-key mismatch, or malformed hello) escalates that backoff from
+30s to 15 minutes and is reported to Sentry at most once per hour per distinct
+message and session. A `server.ping` no longer resets reconnect backoff, because
+the Worker can ping before it validates the connector hello.
 
 Configure targets with either:
 

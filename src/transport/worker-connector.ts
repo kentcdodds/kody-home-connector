@@ -34,7 +34,14 @@ export type WorkerConnectorTransportConfig = {
 const heartbeatIntervalMs = 10_000
 const initialReconnectDelayMs = 2_000
 const maxReconnectDelayMs = 30_000
+const initialHandshakeRejectionReconnectDelayMs = 30_000
+const maxHandshakeRejectionReconnectDelayMs = 900_000
+// Longer than maxHandshakeRejectionReconnectDelayMs so a sustained rejection
+// loop reports strictly fewer Sentry events than it makes reconnect attempts.
+const serverErrorDedupeTtlMs = 60 * 60_000
 const slowToolCallThresholdMs = 5_000
+const slowToolCallSentryThresholdMs = 30_000
+const slowToolCallDedupeTtlMs = 60 * 60_000
 const websocketSentryReconnectThreshold = 3
 const toolInventoryRegistrationGraceMs = 5_000
 const maxToolInventoryRefreshAttempts = 2
@@ -70,12 +77,26 @@ function formatCloseMessage(event: CloseEvent) {
 	return `Home connector websocket closed code=${event.code} wasClean=${event.wasClean}${reason}`
 }
 
-function getReconnectDelayMs(consecutiveReconnects: number) {
-	const backoffMultiplier = 2 ** Math.max(0, consecutiveReconnects - 1)
-	return Math.min(
-		initialReconnectDelayMs * backoffMultiplier,
+function getReconnectDelayMs(input: {
+	consecutiveReconnects: number
+	consecutiveHandshakeRejections: number
+}) {
+	const reconnectBackoffMultiplier =
+		2 ** Math.max(0, input.consecutiveReconnects - 1)
+	const reconnectDelayMs = Math.min(
+		initialReconnectDelayMs * reconnectBackoffMultiplier,
 		maxReconnectDelayMs,
 	)
+	if (input.consecutiveHandshakeRejections === 0) {
+		return reconnectDelayMs
+	}
+	const handshakeBackoffMultiplier =
+		2 ** Math.max(0, input.consecutiveHandshakeRejections - 1)
+	const handshakeRejectionDelayMs = Math.min(
+		initialHandshakeRejectionReconnectDelayMs * handshakeBackoffMultiplier,
+		maxHandshakeRejectionReconnectDelayMs,
+	)
+	return Math.max(reconnectDelayMs, handshakeRejectionDelayMs)
 }
 
 function createSocketEventContext(input: {
@@ -179,18 +200,26 @@ async function handleJsonRpcRequest(
 					durationMs,
 					argumentKeys,
 				})
-				captureHomeConnectorMessage('Home connector tool call was slow.', {
-					level: 'warning',
-					tags: {
-						connector_event: 'tool_call.slow',
-						connector_tool_name: name,
-					},
-					extra: {
-						durationMs,
-						requestId,
-						argumentKeys,
-					},
-				})
+				if (durationMs >= slowToolCallSentryThresholdMs) {
+					captureHomeConnectorMessage('Home connector tool call was slow.', {
+						level: 'warning',
+						fingerprint: ['home-connector', 'tool-call-slow', name],
+						dedupe: {
+							key: `tool-call-slow:${name}`,
+							ttlMs: slowToolCallDedupeTtlMs,
+						},
+						tags: {
+							connector_event: 'tool_call.slow',
+							connector_tool_name: name,
+						},
+						extra: {
+							durationMs,
+							requestId,
+							argumentKeys,
+							thresholdMs: slowToolCallSentryThresholdMs,
+						},
+					})
+				}
 			}
 			return {
 				jsonrpc: '2.0',
@@ -269,6 +298,8 @@ export function createWorkerConnector(input: {
 	let hasReportedSocketIssue = false
 	let connectionAttempt = 0
 	let consecutiveReconnects = 0
+	let consecutiveHandshakeRejections = 0
+	let sessionAcknowledged = false
 	let toolInventoryTimer: ReturnType<typeof setTimeout> | null = null
 	let toolsListRequestedForConnection = false
 	let toolInventoryRefreshAttempts = 0
@@ -641,7 +672,10 @@ export function createWorkerConnector(input: {
 	function scheduleReconnect() {
 		if (stopped || reconnectTimer) return
 		consecutiveReconnects += 1
-		const reconnectDelayMs = getReconnectDelayMs(consecutiveReconnects)
+		const reconnectDelayMs = getReconnectDelayMs({
+			consecutiveReconnects,
+			consecutiveHandshakeRejections,
+		})
 		input.logger.info(
 			'worker.websocket.reconnect_scheduled',
 			`Scheduling home connector websocket reconnect in ${reconnectDelayMs}ms consecutiveReconnects=${consecutiveReconnects}`,
@@ -651,6 +685,7 @@ export function createWorkerConnector(input: {
 					connectionAttempt,
 					consecutiveReconnects,
 				}),
+				consecutiveHandshakeRejections,
 				reconnectDelayMs,
 			},
 		)
@@ -664,6 +699,7 @@ export function createWorkerConnector(input: {
 					connectionAttempt,
 					consecutiveReconnects,
 				}),
+				consecutiveHandshakeRejections,
 				reconnectDelayMs,
 			},
 		})
@@ -684,6 +720,7 @@ export function createWorkerConnector(input: {
 		clearToolInventoryTimer()
 		toolsListRequestedForConnection = false
 		toolInventoryRefreshAttempts = 0
+		sessionAcknowledged = false
 		connectionAttempt += 1
 		patchConnectionState({
 			connected: false,
@@ -759,15 +796,19 @@ export function createWorkerConnector(input: {
 					| ConnectorJsonRpcEnvelope
 				switch (value.type) {
 					case 'server.ping':
-						hasReportedSocketIssue = false
-						consecutiveReconnects = 0
+						// A Worker ping only proves the socket is open: it arrives before
+						// the hello is validated, so it must not reset reconnect backoff
+						// or clear an error the Worker has already reported. connect() and
+						// server.ack are what clear lastError.
 						patchConnectionState({
 							lastSyncAt: new Date().toISOString(),
-							lastError: null,
 						})
 						return
 					case 'server.error':
 						clearToolInventoryTimer()
+						if (!sessionAcknowledged) {
+							consecutiveHandshakeRejections += 1
+						}
 						patchConnectionState({
 							connected: false,
 							lastError: value.message,
@@ -777,14 +818,30 @@ export function createWorkerConnector(input: {
 						})
 						captureHomeConnectorMessage(value.message, {
 							level: 'error',
+							fingerprint: [
+								'home-connector',
+								'server-error',
+								input.config.homeConnectorId,
+								value.message,
+							],
+							dedupe: {
+								key: `server-error:${input.config.kodyUsername ?? 'local'}:${input.config.homeConnectorId}:${value.message}`,
+								ttlMs: serverErrorDedupeTtlMs,
+							},
 							tags: {
 								connector_event: 'server.error',
+								home_connector_id: input.config.homeConnectorId,
 							},
-							extra: createSocketEventContext({
-								config: input.config,
-								connectionAttempt,
-								consecutiveReconnects,
-							}),
+							extra: {
+								...createSocketEventContext({
+									config: input.config,
+									connectionAttempt,
+									consecutiveReconnects,
+								}),
+								handshakeAcknowledged: sessionAcknowledged,
+								consecutiveHandshakeRejections,
+								workerBaseUrl: input.config.workerBaseUrl,
+							},
 						})
 						input.logger.error(
 							'worker.server.error',
@@ -795,12 +852,16 @@ export function createWorkerConnector(input: {
 									connectionAttempt,
 									consecutiveReconnects,
 								}),
+								handshakeAcknowledged: sessionAcknowledged,
+								consecutiveHandshakeRejections,
 								serverMessage: value.message,
 							},
 						)
 						return
 					case 'server.ack': {
 						hasReportedSocketIssue = false
+						sessionAcknowledged = true
+						consecutiveHandshakeRejections = 0
 						const previousConsecutiveReconnects = consecutiveReconnects
 						consecutiveReconnects = 0
 						const localToolCount = listLocalTools().length
