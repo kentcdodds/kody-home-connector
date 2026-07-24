@@ -1,8 +1,11 @@
+import { type HomeConnectorErrorCaptureContext } from '../../sentry.ts'
 import { isMockJellyfishHost, sendMockJellyfishCommand } from './mock-driver.ts'
 import {
 	type JellyfishDiscoveredController,
 	jellyfishDefaultPort,
 } from './types.ts'
+
+const jellyfishTransportDedupeWindowMs = 60 * 60 * 1000
 
 function normalizeControllerId(value: string) {
 	return value
@@ -59,6 +62,58 @@ async function websocketDataToString(data: unknown) {
 	return String(data)
 }
 
+function getJellyfishOutageWindow(timestampMs = Date.now()) {
+	return new Date(
+		Math.floor(timestampMs / jellyfishTransportDedupeWindowMs) *
+			jellyfishTransportDedupeWindowMs,
+	).toISOString()
+}
+
+function createJellyfishTransportError(input: {
+	message: string
+	host: string
+	port: number
+	causeClass: 'timeout' | 'connection_failed' | 'closed_before_response'
+}) {
+	const outageWindow = getJellyfishOutageWindow()
+	const fingerprint = [
+		'home-connector',
+		'jellyfish-transport',
+		input.host,
+		String(input.port),
+		input.causeClass,
+		outageWindow,
+	]
+	const error = new Error(input.message) as Error & {
+		homeConnectorCaptureContext: HomeConnectorErrorCaptureContext
+	}
+	error.name = 'JellyfishTransportError'
+	error.homeConnectorCaptureContext = {
+		tags: {
+			connector_vendor: 'jellyfish',
+			jellyfish_host: input.host,
+			jellyfish_port: String(input.port),
+			jellyfish_failure_cause_class: input.causeClass,
+			jellyfish_outage_window: outageWindow,
+		},
+		contexts: {
+			jellyfish_controller: {
+				host: input.host,
+				port: input.port,
+				failureCauseClass: input.causeClass,
+				outageWindow,
+			},
+		},
+		fingerprint,
+		level: 'error',
+		dedupe: {
+			key: fingerprint.join(':'),
+			ttlMs: jellyfishTransportDedupeWindowMs,
+		},
+	}
+	return error
+}
+
 export async function sendJellyfishCommand(input: {
 	host: string
 	port?: number
@@ -99,9 +154,12 @@ export async function sendJellyfishCommand(input: {
 		const timer = setTimeout(() => {
 			finish(() => {
 				reject(
-					new Error(
-						`JellyFish command timed out after ${timeoutMs}ms for ${input.host}:${String(port)}.`,
-					),
+					createJellyfishTransportError({
+						message: `JellyFish command timed out after ${timeoutMs}ms for ${input.host}:${String(port)}.`,
+						host: input.host,
+						port,
+						causeClass: 'timeout',
+					}),
 				)
 			})
 		}, timeoutMs)
@@ -130,9 +188,12 @@ export async function sendJellyfishCommand(input: {
 		ws.onerror = () => {
 			finish(() => {
 				reject(
-					new Error(
-						`JellyFish WebSocket connection failed for ${input.host}:${String(port)}.`,
-					),
+					createJellyfishTransportError({
+						message: `JellyFish WebSocket connection failed for ${input.host}:${String(port)}.`,
+						host: input.host,
+						port,
+						causeClass: 'connection_failed',
+					}),
 				)
 			})
 		}
@@ -141,9 +202,12 @@ export async function sendJellyfishCommand(input: {
 			if (settled) return
 			finish(() => {
 				reject(
-					new Error(
-						`JellyFish WebSocket closed before a response was received (code ${event.code}) for ${input.host}:${String(port)}.`,
-					),
+					createJellyfishTransportError({
+						message: `JellyFish WebSocket closed before a response was received (code ${event.code}) for ${input.host}:${String(port)}.`,
+						host: input.host,
+						port,
+						causeClass: 'closed_before_response',
+					}),
 				)
 			})
 		}
