@@ -4,6 +4,7 @@ import { loadHomeConnectorConfig } from '../../config.ts'
 import { createAppState } from '../../state.ts'
 import { createHomeConnectorStorage } from '../../storage/index.ts'
 import { createLutronAdapter } from './index.ts'
+import { LutronInvalidZoneIdError } from './leap-client.ts'
 
 function createConfig() {
 	process.env.MOCKS = 'true'
@@ -84,11 +85,43 @@ test('lutron inventory and commands work in mock mode with stored credentials', 
 		)
 		expect(zoneResult.ok).toBe(true)
 
+		const spectrumZone = inventory.zones.find(
+			(zone) => zone.controlType === 'SpectrumTune',
+		)
+		expect(spectrumZone).toBeDefined()
+		const spectrumResult = await lutron.setZoneLevel(
+			processorId,
+			`/zone/${spectrumZone!.zoneId}`,
+			42,
+		)
+		expect(spectrumResult.ok).toBe(true)
+		expect(spectrumResult.zoneId).toBe(spectrumZone!.zoneId)
+
+		const authenticatedBeforeInvalidZone =
+			await lutron.authenticate(processorId)
+		await expect(
+			lutron.setZoneColor(processorId, '/button/337', {
+				hue: 120,
+				saturation: 50,
+			}),
+		).rejects.toBeInstanceOf(LutronInvalidZoneIdError)
+		const statusAfterInvalidZone = lutron
+			.getStatus()
+			.processors.find((processor) => processor.processorId === processorId)
+		expect(statusAfterInvalidZone?.lastAuthenticatedAt).toBe(
+			authenticatedBeforeInvalidZone.lastAuthenticatedAt,
+		)
+		expect(statusAfterInvalidZone?.lastAuthError).toBeNull()
+
 		const updatedInventory = await lutron.getInventory(processorId)
 		const updatedZone = updatedInventory.zones.find(
 			(zone) => zone.zoneId === practicalZone!.zoneId,
 		)
+		const updatedSpectrum = updatedInventory.zones.find(
+			(zone) => zone.zoneId === spectrumZone!.zoneId,
+		)
 		expect(updatedZone?.status?.switchedLevel).toBe('Off')
+		expect(updatedSpectrum?.status?.level).toBe(42)
 	} finally {
 		storage.close()
 	}

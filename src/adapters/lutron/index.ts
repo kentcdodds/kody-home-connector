@@ -19,8 +19,10 @@ import { scanLutronProcessors } from './discovery.ts'
 import {
 	authenticateLutronProcessor,
 	loadLutronInventory,
+	normalizeLutronZoneId,
 	pressLutronButton,
-	isLutronUnsupportedZoneLevelError,
+	isLutronExpectedClientError,
+	isLutronInvalidCredentialsError,
 	setLutronShadeLevel,
 	setLutronZoneColor,
 	setLutronZoneLevel,
@@ -63,7 +65,12 @@ function updateLutronAuthFailure(input: {
 	processorId: string
 	error: unknown
 }) {
-	if (isLutronUnsupportedZoneLevelError(input.error)) {
+	// Invalid credentials must still update lastAuthError. Other expected LEAP
+	// client errors (unsupported commands, bad zone ids) are not auth failures.
+	if (
+		isLutronExpectedClientError(input.error) &&
+		!isLutronInvalidCredentialsError(input.error)
+	) {
 		return
 	}
 	updateLutronAuthStatus({
@@ -297,14 +304,15 @@ export function createLutronAdapter(input: {
 				processorId,
 			)
 			const credentials = requireLutronCredentials(processor)
+			const normalizedZoneId = normalizeLutronZoneId(zoneId)
 			try {
 				const response =
 					input.config.mocksEnabled && isMockLutronHost(processor.host)
-						? setMockLutronZoneLevel(zoneId, level)
+						? setMockLutronZoneLevel(normalizedZoneId, level)
 						: await setLutronZoneLevel({
 								processor,
 								credentials,
-								zoneId,
+								zoneId: normalizedZoneId,
 								level,
 							})
 				updateLutronAuthStatus({
@@ -317,7 +325,7 @@ export function createLutronAdapter(input: {
 				return {
 					ok: true,
 					processorId,
-					zoneId,
+					zoneId: normalizedZoneId,
 					level,
 					response,
 				}
@@ -347,11 +355,12 @@ export function createLutronAdapter(input: {
 				processorId,
 			)
 			const credentials = requireLutronCredentials(processor)
+			const normalizedZoneId = normalizeLutronZoneId(zoneId)
 			try {
 				const response =
 					input.config.mocksEnabled && isMockLutronHost(processor.host)
 						? setMockLutronZoneColor({
-								zoneId,
+								zoneId: normalizedZoneId,
 								hue: inputColor.hue,
 								saturation: inputColor.saturation,
 								level: inputColor.level,
@@ -360,7 +369,7 @@ export function createLutronAdapter(input: {
 						: await setLutronZoneColor({
 								processor,
 								credentials,
-								zoneId,
+								zoneId: normalizedZoneId,
 								hue: inputColor.hue,
 								saturation: inputColor.saturation,
 								level: inputColor.level,
@@ -376,7 +385,7 @@ export function createLutronAdapter(input: {
 				return {
 					ok: true,
 					processorId,
-					zoneId,
+					zoneId: normalizedZoneId,
 					hue: inputColor.hue,
 					saturation: inputColor.saturation,
 					level: inputColor.level ?? null,
@@ -407,18 +416,19 @@ export function createLutronAdapter(input: {
 				processorId,
 			)
 			const credentials = requireLutronCredentials(processor)
+			const normalizedZoneId = normalizeLutronZoneId(zoneId)
 			try {
 				const response =
 					input.config.mocksEnabled && isMockLutronHost(processor.host)
 						? setMockLutronZoneWhiteTuning({
-								zoneId,
+								zoneId: normalizedZoneId,
 								kelvin: inputWhiteTuning.kelvin,
 								level: inputWhiteTuning.level,
 							})
 						: await setLutronZoneWhiteTuning({
 								processor,
 								credentials,
-								zoneId,
+								zoneId: normalizedZoneId,
 								kelvin: inputWhiteTuning.kelvin,
 								level: inputWhiteTuning.level,
 							})
@@ -432,7 +442,7 @@ export function createLutronAdapter(input: {
 				return {
 					ok: true,
 					processorId,
-					zoneId,
+					zoneId: normalizedZoneId,
 					kelvin: inputWhiteTuning.kelvin,
 					level: inputWhiteTuning.level ?? null,
 					response,
@@ -458,14 +468,18 @@ export function createLutronAdapter(input: {
 				processorId,
 			)
 			const credentials = requireLutronCredentials(processor)
+			const normalizedZoneId = normalizeLutronZoneId(zoneId)
 			try {
 				const response =
 					input.config.mocksEnabled && isMockLutronHost(processor.host)
-						? setMockLutronZoneSwitchedLevel({ zoneId, state })
+						? setMockLutronZoneSwitchedLevel({
+								zoneId: normalizedZoneId,
+								state,
+							})
 						: await setLutronZoneSwitchedLevel({
 								processor,
 								credentials,
-								zoneId,
+								zoneId: normalizedZoneId,
 								state,
 							})
 				updateLutronAuthStatus({
@@ -478,7 +492,7 @@ export function createLutronAdapter(input: {
 				return {
 					ok: true,
 					processorId,
-					zoneId,
+					zoneId: normalizedZoneId,
 					state,
 					response,
 				}
@@ -499,14 +513,15 @@ export function createLutronAdapter(input: {
 				processorId,
 			)
 			const credentials = requireLutronCredentials(processor)
+			const normalizedZoneId = normalizeLutronZoneId(zoneId)
 			try {
 				const response =
 					input.config.mocksEnabled && isMockLutronHost(processor.host)
-						? setMockLutronShadeLevel({ zoneId, level })
+						? setMockLutronShadeLevel({ zoneId: normalizedZoneId, level })
 						: await setLutronShadeLevel({
 								processor,
 								credentials,
-								zoneId,
+								zoneId: normalizedZoneId,
 								level,
 							})
 				updateLutronAuthStatus({
@@ -519,7 +534,7 @@ export function createLutronAdapter(input: {
 				return {
 					ok: true,
 					processorId,
-					zoneId,
+					zoneId: normalizedZoneId,
 					level,
 					response,
 				}
