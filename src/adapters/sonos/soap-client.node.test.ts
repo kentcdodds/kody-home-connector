@@ -6,6 +6,7 @@ import {
 	removeSonosQueueTrackRangeLive,
 	seekSonosQueueTrackLive,
 	setSonosTransportUriLive,
+	setSonosVolumeLive,
 } from './soap-client.ts'
 
 type CapturedRequest = {
@@ -138,4 +139,62 @@ test('removeSonosQueueTrackRangeLive removes a 1-based queue range', async () =>
 	)
 	expect(requests[0]?.body).toContain('<StartingIndex>2</StartingIndex>')
 	expect(requests[0]?.body).toContain('<NumberOfTracks>3</NumberOfTracks>')
+})
+
+test('setSonosVolumeLive marks UPnP 501 Action Failed as expected noise', async () => {
+	let callCount = 0
+	vi.stubGlobal('fetch', async () => {
+		callCount += 1
+		return new Response(
+			'<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"><s:Body><s:Fault><faultcode>s:Client</faultcode><faultstring>UPnPError</faultstring><detail><UPnPError xmlns="urn:schemas-upnp-org:control-1-0"><errorCode>501</errorCode></UPnPError></detail></s:Fault></s:Body></s:Envelope>',
+			{ status: 500 },
+		)
+	})
+
+	const error = await setSonosVolumeLive('192.168.0.158', 12).catch(
+		(caught: unknown) => caught,
+	)
+
+	expect(callCount).toBe(1)
+	expect(error).toMatchObject({
+		name: 'SonosSoapError',
+		homeConnectorCaptureContext: {
+			shouldCapture: false,
+			tags: {
+				connector_vendor: 'sonos',
+				sonos_soap_action: 'SetVolume',
+				sonos_failure_cause_class: 'http_error',
+				sonos_http_status: '500',
+				sonos_upnp_error: '501',
+			},
+		},
+	})
+})
+
+test('sonos soap timeouts retry once and annotate dedupe metadata', async () => {
+	let callCount = 0
+	vi.stubGlobal('fetch', async () => {
+		callCount += 1
+		throw new DOMException('The operation timed out.', 'TimeoutError')
+	})
+
+	const error = await playSonosLive('192.168.1.115').catch(
+		(caught: unknown) => caught,
+	)
+
+	expect(callCount).toBe(2)
+	expect(error).toMatchObject({
+		name: 'SonosSoapError',
+		message: expect.stringContaining('timed out after 10000ms'),
+		homeConnectorCaptureContext: {
+			tags: {
+				connector_vendor: 'sonos',
+				sonos_soap_action: 'Play',
+				sonos_failure_cause_class: 'timeout',
+			},
+			dedupe: {
+				ttlMs: 60 * 60 * 1000,
+			},
+		},
+	})
 })
