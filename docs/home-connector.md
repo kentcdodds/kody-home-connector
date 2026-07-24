@@ -3,12 +3,13 @@
 The local `this repository` process is the bridge between Kody's Cloudflare
 Worker and devices that are only reachable on the local network.
 
-It is a **remote connector** identified only by `HOME_CONNECTOR_ID`. The
-connector opens its outbound Worker session to
+It is a **remote connector**. In the common single-account setup it is
+identified by `HOME_CONNECTOR_ID` and opens one outbound Worker session to
 `/@{KODY_USERNAME}/connectors/{HOME_CONNECTOR_ID}` when `KODY_USERNAME` is
-configured.
+configured. The same process can also dial multiple Kody accounts at once (see
+[Multi-account Worker sessions](#multi-account-worker-sessions)).
 
-Core deployment env vars:
+Core single-target deployment env vars:
 
 - `KODY_USERNAME` - the Kody username that owns this home connector. Required
   for production Kody Worker URLs such as `https://heykody.dev`; URL path
@@ -20,6 +21,61 @@ Core deployment env vars:
   `http://localhost:3742` for local development.
 - `HOME_CONNECTOR_SHARED_SECRET` - the shared secret used to authenticate the
   connector after the WebSocket opens.
+
+### Multi-account Worker sessions
+
+Household deployments can run one LAN home-connector process that opens an
+independent Worker WebSocket session for each configured Kody account. All
+sessions share the same local tool registry, device adapters, and SQLite state.
+Heartbeat/reconnect are per session; stopping the process stops every session;
+one session failing does not permanently kill the others.
+
+Configure targets with either:
+
+- `HOME_CONNECTOR_TARGETS` - JSON array of target objects, or
+- `HOME_CONNECTOR_TARGETS_FILE` - filesystem path to that JSON array
+
+Do not set both. An empty array is rejected. When neither multi-target var is
+set, the legacy single-target env vars above behave exactly as before (one
+session).
+
+Example for two accounts:
+
+```bash
+WORKER_BASE_URL=https://heykody.dev
+HOME_CONNECTOR_TARGETS='[
+  {
+    "kodyUsername": "alice",
+    "sharedSecret": "alice-connector-secret",
+    "connectorId": "home"
+  },
+  {
+    "kodyUsername": "bob",
+    "sharedSecret": "bob-connector-secret",
+    "connectorId": "home"
+  }
+]'
+```
+
+Per-target fields:
+
+- `kodyUsername` / `KODY_USERNAME` - required for production Worker URLs
+- `sharedSecret` / `HOME_CONNECTOR_SHARED_SECRET` - Worker auth secret for that
+  account's connector row
+- `connectorId` / `homeConnectorId` / `HOME_CONNECTOR_ID` - connector name in
+  that account's `/account/remote-connectors` list (defaults to `default`)
+- `workerBaseUrl` / `WORKER_BASE_URL` - optional override; otherwise inherits
+  the process-level `WORKER_BASE_URL`
+
+Important: each Kody account still needs its own remote-connector registration
+and shared secret in Kody. This feature only multi-dials those existing per-user
+connector endpoints from one process. Local SQLite secret encryption uses
+process-level `HOME_CONNECTOR_SHARED_SECRET` when set, otherwise the first
+target's `sharedSecret`.
+
+`home_connector_get_metadata`, `/health`, and the admin dashboard expose
+per-session connection status (username + connector id) so multi-target
+deployments are observable.
 
 ## Public-vs-internal boundary
 

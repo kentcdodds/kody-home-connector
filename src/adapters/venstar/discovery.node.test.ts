@@ -6,10 +6,21 @@ import { scanVenstarThermostats } from './discovery.ts'
 function createConfig(scanCidrs: Array<string>): HomeConnectorConfig {
 	return {
 		homeConnectorId: 'default',
+		kodyUsername: null,
 		workerBaseUrl: 'http://localhost:3742',
 		workerSessionUrl: 'http://localhost:3742/connectors/default',
 		workerWebSocketUrl: 'ws://localhost:3742/connectors/default',
 		sharedSecret: 'secret',
+		workerTargets: [
+			{
+				kodyUsername: null,
+				homeConnectorId: 'default',
+				sharedSecret: 'secret',
+				workerBaseUrl: 'http://localhost:3742',
+				workerSessionUrl: 'http://localhost:3742/connectors/default',
+				workerWebSocketUrl: 'ws://localhost:3742/connectors/default',
+			},
+		],
 		accessNetworksUnleashedScanCidrs: ['192.168.1.10/32'],
 		accessNetworksUnleashedAllowInsecureTls: false,
 		accessNetworksUnleashedRequestTimeoutMs: 8_000,
