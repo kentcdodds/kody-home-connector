@@ -939,3 +939,40 @@ test('island router non-ping timeouts are marked as expected device noise', asyn
 		},
 	})
 })
+
+test('island router ping SSH timeouts without ping output stay failures', async () => {
+	using _env = withTemporaryEnv({})
+	const islandRouter = createIslandRouterAdapter({
+		config: createConfig(),
+		commandRunner: async (request) => ({
+			id: request.id,
+			commandLines: ['terminal length 0', 'ping 1.1.1.1'],
+			stdout: '',
+			stderr: 'ssh: connect to host router.local port 22: Connection timed out',
+			exitCode: null,
+			signal: 'SIGTERM',
+			timedOut: true,
+			durationMs: 12_000,
+		}),
+	})
+
+	const error = await islandRouter
+		.runCommand({
+			commandId: 'ping',
+			params: { host: '1.1.1.1' },
+		})
+		.catch((caught: unknown) => caught)
+
+	expect(error).toMatchObject({
+		name: 'IslandRouterCommandError',
+		message: 'Island router command ping timed out after 12000ms.',
+		homeConnectorCaptureContext: {
+			shouldCapture: false,
+			tags: {
+				connector_vendor: 'island-router',
+				island_router_command_id: 'ping',
+				island_router_failure_class: 'timeout',
+			},
+		},
+	})
+})

@@ -76,14 +76,20 @@ function createIslandRouterCommandError(
 	return error
 }
 
+function didIslandRouterPingStart(result: IslandRouterCommandResult) {
+	const output = `${result.stdout}\n${result.stderr}`
+	return /\bPING\b|\bicmp_seq\b|\bbytes from\b/i.test(output)
+}
+
 function ensureSuccessfulCommand(
 	result: IslandRouterCommandResult,
 	message: string,
 ) {
 	if (result.timedOut) {
 		// Continuous diagnostics such as `ping` run until the connector timeout
-		// stops the SSH session. That end state is the designed completion path.
-		if (result.id === 'ping') {
+		// stops the SSH session. Treat that as success only when ping output
+		// shows the remote diagnostic actually started (not a bare SSH timeout).
+		if (result.id === 'ping' && didIslandRouterPingStart(result)) {
 			return result
 		}
 		throw createIslandRouterCommandError(
