@@ -873,3 +873,69 @@ test('parser handles real Island CLI transcript shape with prompt echoes and goo
 		'Copyright 2004-2026 PerfTech, Inc.',
 	])
 })
+
+test('island router ping timeouts complete successfully with ping output', async () => {
+	using _env = withTemporaryEnv({})
+	const islandRouter = createIslandRouterAdapter({
+		config: createConfig(),
+		commandRunner: async (request) => ({
+			id: request.id,
+			commandLines: ['terminal length 0', 'ping 1.1.1.1'],
+			stdout: [
+				'PING 1.1.1.1 (1.1.1.1): 56 data bytes',
+				'64 bytes from 1.1.1.1: icmp_seq=0 ttl=57 time=12.3 ms',
+				'64 bytes from 1.1.1.1: icmp_seq=1 ttl=57 time=11.8 ms',
+			].join('\n'),
+			stderr: '',
+			exitCode: null,
+			signal: 'SIGTERM',
+			timedOut: true,
+			durationMs: 12_006,
+		}),
+	})
+
+	const result = await islandRouter.runCommand({
+		commandId: 'ping',
+		params: { host: '1.1.1.1' },
+		timeoutMs: 12_000,
+	})
+
+	expect(result.commandId).toBe('ping')
+	expect(result.timedOut).toBe(true)
+	expect(result.rawOutput).toContain('icmp_seq=0')
+	expect(result.durationMs).toBe(12_006)
+})
+
+test('island router non-ping timeouts are marked as expected device noise', async () => {
+	using _env = withTemporaryEnv({})
+	const islandRouter = createIslandRouterAdapter({
+		config: createConfig(),
+		commandRunner: async (request) => ({
+			id: request.id,
+			commandLines: ['terminal length 0', 'show version'],
+			stdout: '',
+			stderr: '',
+			exitCode: null,
+			signal: 'SIGTERM',
+			timedOut: true,
+			durationMs: 5_000,
+		}),
+	})
+
+	const error = await islandRouter
+		.runCommand({ commandId: 'show version' })
+		.catch((caught: unknown) => caught)
+
+	expect(error).toMatchObject({
+		name: 'IslandRouterCommandError',
+		message: 'Island router command show version timed out after 5000ms.',
+		homeConnectorCaptureContext: {
+			shouldCapture: false,
+			tags: {
+				connector_vendor: 'island-router',
+				island_router_command_id: 'show version',
+				island_router_failure_class: 'timeout',
+			},
+		},
+	})
+})
