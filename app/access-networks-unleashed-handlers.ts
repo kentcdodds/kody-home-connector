@@ -14,6 +14,7 @@ import {
 	type AccessNetworksUnleashedDiscoveryDiagnostics,
 	type AccessNetworksUnleashedPublicController,
 } from '../src/adapters/access-networks-unleashed/types.ts'
+import { annotateAccessNetworksUnleashedTransientError } from '../src/adapters/access-networks-unleashed/errors.ts'
 import { type createAccessNetworksUnleashedAdapter } from '../src/adapters/access-networks-unleashed/index.ts'
 import { captureHomeConnectorException } from '../src/sentry.ts'
 import { type HomeConnectorState } from '../src/state.ts'
@@ -448,17 +449,20 @@ export function createAccessNetworksUnleashedStatusHandler(
 						scanMessage: `Scan complete. Discovered ${controllers.length} Access Networks Unleashed controller(s).`,
 					})
 				} catch (error) {
-					captureHomeConnectorException(error, {
-						tags: {
-							route: '/access-networks-unleashed/status',
-							action: 'scan',
-						},
-						contexts: {
-							accessNetworksUnleashed: {
-								connectorId: state.connection.connectorId,
+					captureHomeConnectorException(
+						annotateAccessNetworksUnleashedTransientError(error),
+						{
+							tags: {
+								route: '/access-networks-unleashed/status',
+								action: 'scan',
+							},
+							contexts: {
+								accessNetworksUnleashed: {
+									connectorId: state.connection.connectorId,
+								},
 							},
 						},
-					})
+					)
 					return renderPage({
 						scanError:
 							error instanceof Error
@@ -560,17 +564,20 @@ export function createAccessNetworksUnleashedSetupHandler(
 						message: 'Unknown form action.',
 					})
 				} catch (error) {
-					captureHomeConnectorException(error, {
-						tags: {
-							route: '/access-networks-unleashed/setup',
-							action: 'form',
-						},
-						contexts: {
-							accessNetworksUnleashed: {
-								connectorId: state.connection.connectorId,
+					captureHomeConnectorException(
+						annotateAccessNetworksUnleashedTransientError(error),
+						{
+							tags: {
+								route: '/access-networks-unleashed/setup',
+								action: 'form',
+							},
+							contexts: {
+								accessNetworksUnleashed: {
+									connectorId: state.connection.connectorId,
+								},
 							},
 						},
-					})
+					)
 					return renderPage({
 						tone: 'error',
 						message:

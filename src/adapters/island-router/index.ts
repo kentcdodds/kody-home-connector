@@ -1,4 +1,5 @@
 import { type HomeConnectorConfig } from '../../config.ts'
+import { type HomeConnectorErrorCaptureContext } from '../../sentry.ts'
 import {
 	type IslandRouterCommandRequest,
 	type IslandRouterCommandResult,
@@ -52,24 +53,74 @@ function normalizeTimeoutMs(config: HomeConnectorConfig, timeoutMs?: number) {
 	return Math.max(1000, Math.trunc(timeoutMs))
 }
 
+function createIslandRouterCommandError(
+	message: string,
+	input: {
+		commandId: IslandRouterCommandId
+		failureClass: 'timeout' | 'terminated' | 'exit_code'
+		shouldCapture?: boolean
+	},
+) {
+	const error = new Error(message) as Error & {
+		homeConnectorCaptureContext: HomeConnectorErrorCaptureContext
+	}
+	error.name = 'IslandRouterCommandError'
+	error.homeConnectorCaptureContext = {
+		tags: {
+			connector_vendor: 'island-router',
+			island_router_command_id: input.commandId,
+			island_router_failure_class: input.failureClass,
+		},
+		...(input.shouldCapture === false ? { shouldCapture: false } : {}),
+	}
+	return error
+}
+
+function didIslandRouterPingStart(result: IslandRouterCommandResult) {
+	const output = `${result.stdout}\n${result.stderr}`
+	return /\bPING\b|\bicmp_seq\b|\bbytes from\b/i.test(output)
+}
+
 function ensureSuccessfulCommand(
 	result: IslandRouterCommandResult,
 	message: string,
 ) {
 	if (result.timedOut) {
-		throw new Error(`${message} timed out after ${result.durationMs}ms.`)
+		// Continuous diagnostics such as `ping` run until the connector timeout
+		// stops the SSH session. Treat that as success only when ping output
+		// shows the remote diagnostic actually started (not a bare SSH timeout).
+		if (result.id === 'ping' && didIslandRouterPingStart(result)) {
+			return result
+		}
+		throw createIslandRouterCommandError(
+			`${message} timed out after ${result.durationMs}ms.`,
+			{
+				commandId: result.id,
+				failureClass: 'timeout',
+				shouldCapture: false,
+			},
+		)
 	}
 	if (result.exitCode === null) {
 		const reason = result.signal
 			? `signal ${result.signal}`
 			: 'an unknown termination state'
-		throw new Error(
+		throw createIslandRouterCommandError(
 			`${message} failed because the command exited via ${reason}. ${result.stderr.trim()}`.trim(),
+			{
+				commandId: result.id,
+				failureClass: 'terminated',
+				shouldCapture: false,
+			},
 		)
 	}
 	if (!didIslandRouterCommandSucceed(result)) {
-		throw new Error(
+		throw createIslandRouterCommandError(
 			`${message} failed with exit code ${result.exitCode}. ${result.stderr.trim()}`.trim(),
+			{
+				commandId: result.id,
+				failureClass: 'exit_code',
+			},
 		)
 	}
 	return result

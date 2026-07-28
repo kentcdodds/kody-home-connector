@@ -198,7 +198,17 @@ async function probeHost(input: {
 			if (match.controller) return match
 			lastDiagnostic = match.diagnostic
 		} catch (error) {
-			if (error instanceof Error && error.name === 'AbortError') {
+			const errorName =
+				error instanceof Error
+					? error.name
+					: error && typeof error === 'object' && 'name' in error
+						? String((error as { name?: unknown }).name ?? '')
+						: ''
+			if (
+				errorName === 'AbortError' ||
+				errorName === 'TimeoutError' ||
+				/abort|timeout/i.test(errorName)
+			) {
 				return {
 					controller: null,
 					diagnostic: {
