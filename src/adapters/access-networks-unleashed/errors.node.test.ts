@@ -1,7 +1,9 @@
 import { expect, test } from 'vitest'
 import {
 	AccessNetworksUnleashedRequestError,
+	annotateAccessNetworksUnleashedTransientError,
 	createAccessNetworksUnleashedRequestError,
+	isAccessNetworksUnleashedTransientNetworkError,
 } from './errors.ts'
 
 const certificateCauseMessage =
@@ -84,6 +86,30 @@ test('AbortError does not mention TLS or the env var', () => {
 		/tls|certificate|ACCESS_NETWORKS_UNLEASHED_ALLOW_INSECURE_TLS/i,
 	)
 	expect(error.cause).toBe(original)
+	expect(error.homeConnectorCaptureContext).toMatchObject({
+		shouldCapture: false,
+		tags: {
+			connector_vendor: 'access-networks-unleashed',
+			access_networks_unleashed_failure_class: 'transient_network',
+		},
+	})
+})
+
+test('raw AbortError scan failures are annotated as expected network noise', () => {
+	const original = new DOMException('This operation was aborted', 'AbortError')
+	expect(isAccessNetworksUnleashedTransientNetworkError(original)).toBe(true)
+	const annotated = annotateAccessNetworksUnleashedTransientError(
+		original,
+	) as Error & {
+		homeConnectorCaptureContext?: { shouldCapture?: boolean }
+	}
+	expect(annotated.homeConnectorCaptureContext).toMatchObject({
+		shouldCapture: false,
+		tags: {
+			connector_vendor: 'access-networks-unleashed',
+			access_networks_unleashed_failure_class: 'transient_network',
+		},
+	})
 })
 
 test('error with no cause still produces a sensible message', () => {
