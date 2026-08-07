@@ -47,7 +47,7 @@ session).
 Example for two accounts:
 
 ```bash
-WORKER_BASE_URL=https://heykody.dev
+WORKER_BASE_URL=https://heykody.app
 HOME_CONNECTOR_TARGETS='[
   {
     "kodyUsername": "alice",

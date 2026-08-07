@@ -137,7 +137,7 @@ test('production Kody worker URLs require KODY_USERNAME', () => {
 test('legacy single-target env vars produce one workerTargets entry', () => {
 	using _env = createTemporaryEnv({
 		HOME_CONNECTOR_ID: 'home',
-		WORKER_BASE_URL: 'https://heykody.dev',
+		WORKER_BASE_URL: 'https://heykody.app',
 		KODY_USERNAME: 'alice',
 		HOME_CONNECTOR_SHARED_SECRET: 'legacy-secret',
 		HOME_CONNECTOR_TARGETS: undefined,
@@ -151,9 +151,9 @@ test('legacy single-target env vars produce one workerTargets entry', () => {
 		kodyUsername: 'alice',
 		homeConnectorId: 'home',
 		sharedSecret: 'legacy-secret',
-		workerBaseUrl: 'https://heykody.dev',
-		workerSessionUrl: 'https://heykody.dev/@alice/connectors/home',
-		workerWebSocketUrl: 'wss://heykody.dev/@alice/connectors/home',
+		workerBaseUrl: 'https://heykody.app',
+		workerSessionUrl: 'https://heykody.app/@alice/connectors/home',
+		workerWebSocketUrl: 'wss://heykody.app/@alice/connectors/home',
 	})
 	expect(config.kodyUsername).toBe('alice')
 	expect(config.homeConnectorId).toBe('home')
@@ -162,7 +162,7 @@ test('legacy single-target env vars produce one workerTargets entry', () => {
 
 test('HOME_CONNECTOR_TARGETS parses N independent worker targets', () => {
 	using _env = createTemporaryEnv({
-		WORKER_BASE_URL: 'https://heykody.dev',
+		WORKER_BASE_URL: 'https://heykody.app',
 		HOME_CONNECTOR_TARGETS: JSON.stringify([
 			{
 				kodyUsername: 'alice',
@@ -173,7 +173,7 @@ test('HOME_CONNECTOR_TARGETS parses N independent worker targets', () => {
 				kodyUsername: 'bob',
 				sharedSecret: 'secret-b',
 				connectorId: 'Living-Room',
-				workerBaseUrl: 'https://heykody.dev/',
+				workerBaseUrl: 'https://heykody.app/',
 			},
 		]),
 		HOME_CONNECTOR_TARGETS_FILE: undefined,
@@ -188,13 +188,13 @@ test('HOME_CONNECTOR_TARGETS parses N independent worker targets', () => {
 		kodyUsername: 'alice',
 		homeConnectorId: 'home',
 		sharedSecret: 'secret-a',
-		workerWebSocketUrl: 'wss://heykody.dev/@alice/connectors/home',
+		workerWebSocketUrl: 'wss://heykody.app/@alice/connectors/home',
 	})
 	expect(config.workerTargets[1]).toMatchObject({
 		kodyUsername: 'bob',
 		homeConnectorId: 'living-room',
 		sharedSecret: 'secret-b',
-		workerWebSocketUrl: 'wss://heykody.dev/@bob/connectors/living-room',
+		workerWebSocketUrl: 'wss://heykody.app/@bob/connectors/living-room',
 	})
 	expect(config.homeConnectorId).toBe('home')
 	expect(config.kodyUsername).toBe('alice')
@@ -216,7 +216,7 @@ test('HOME_CONNECTOR_TARGETS_FILE loads targets and rejects empty arrays', () =>
 			]),
 		)
 		using _env = createTemporaryEnv({
-			WORKER_BASE_URL: 'https://heykody.dev',
+			WORKER_BASE_URL: 'https://heykody.app',
 			HOME_CONNECTOR_TARGETS: undefined,
 			HOME_CONNECTOR_TARGETS_FILE: filePath,
 			NODE_ENV: 'production',
@@ -250,7 +250,7 @@ test('rejects malformed multi-target config and both sources at once', () => {
 	expect(() => loadHomeConnectorConfig()).toThrow('must be valid JSON')
 
 	using _invalidName = createTemporaryEnv({
-		WORKER_BASE_URL: 'https://heykody.dev',
+		WORKER_BASE_URL: 'https://heykody.app',
 		HOME_CONNECTOR_TARGETS: JSON.stringify([
 			{
 				kodyUsername: 'alice',

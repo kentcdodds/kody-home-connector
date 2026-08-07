@@ -74,26 +74,26 @@ function createConfig(): HomeConnectorConfig {
 	return {
 		homeConnectorId: 'home',
 		kodyUsername: 'alice',
-		workerBaseUrl: 'https://heykody.dev',
-		workerSessionUrl: 'https://heykody.dev/@alice/connectors/home',
-		workerWebSocketUrl: 'wss://heykody.dev/@alice/connectors/home',
+		workerBaseUrl: 'https://heykody.app',
+		workerSessionUrl: 'https://heykody.app/@alice/connectors/home',
+		workerWebSocketUrl: 'wss://heykody.app/@alice/connectors/home',
 		sharedSecret: 'secret-a',
 		workerTargets: [
 			{
 				kodyUsername: 'alice',
 				homeConnectorId: 'home',
 				sharedSecret: 'secret-a',
-				workerBaseUrl: 'https://heykody.dev',
-				workerSessionUrl: 'https://heykody.dev/@alice/connectors/home',
-				workerWebSocketUrl: 'wss://heykody.dev/@alice/connectors/home',
+				workerBaseUrl: 'https://heykody.app',
+				workerSessionUrl: 'https://heykody.app/@alice/connectors/home',
+				workerWebSocketUrl: 'wss://heykody.app/@alice/connectors/home',
 			},
 			{
 				kodyUsername: 'bob',
 				homeConnectorId: 'home',
 				sharedSecret: 'secret-b',
-				workerBaseUrl: 'https://heykody.dev',
-				workerSessionUrl: 'https://heykody.dev/@bob/connectors/home',
-				workerWebSocketUrl: 'wss://heykody.dev/@bob/connectors/home',
+				workerBaseUrl: 'https://heykody.app',
+				workerSessionUrl: 'https://heykody.app/@bob/connectors/home',
+				workerWebSocketUrl: 'wss://heykody.app/@bob/connectors/home',
 			},
 		],
 		accessNetworksUnleashedScanCidrs: ['192.168.1.10/32'],
@@ -185,10 +185,10 @@ test('starts one websocket session per target and fans out tools/list_changed', 
 		await sessions.start()
 		expect(fakeWebSocketInstances).toHaveLength(2)
 		expect(fakeWebSocketInstances[0]?.url).toBe(
-			'wss://heykody.dev/@alice/connectors/home',
+			'wss://heykody.app/@alice/connectors/home',
 		)
 		expect(fakeWebSocketInstances[1]?.url).toBe(
-			'wss://heykody.dev/@bob/connectors/home',
+			'wss://heykody.app/@bob/connectors/home',
 		)
 
 		const aliceSocket = fakeWebSocketInstances[0]!

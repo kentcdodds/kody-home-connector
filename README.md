@@ -48,7 +48,7 @@ Each Kody account still needs its own `/account/remote-connectors` row and
 shared secret. This only multi-dials from one process.
 
 ```bash
-WORKER_BASE_URL=https://heykody.dev
+WORKER_BASE_URL=https://heykody.app
 HOME_CONNECTOR_TARGETS='[
   {
     "kodyUsername": "alice",
