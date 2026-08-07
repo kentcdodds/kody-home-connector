@@ -14,7 +14,7 @@ load_connector_env() {
 	fi
 
 	if [[ -z "${HOME_CONNECTOR_ID:-}" ]]; then
-		HOME_CONNECTOR_ID="default"
+		HOME_CONNECTOR_ID="home"
 		export HOME_CONNECTOR_ID
 	fi
 
