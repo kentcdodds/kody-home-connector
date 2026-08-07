@@ -12,7 +12,7 @@ configured. The same process can also dial multiple Kody accounts at once (see
 Core single-target deployment env vars:
 
 - `KODY_USERNAME` - the Kody username that owns this home connector. Required
-  for production Kody Worker URLs such as `https://heykody.dev`; URL path
+  for production Kody Worker URLs such as `https://heykody.app`; URL path
   characters are encoded before building the ingress URL.
 - `HOME_CONNECTOR_ID` - the connector name saved in Kody
   (`/account/remote-connectors`), defaulting to `default`. Values are trimmed

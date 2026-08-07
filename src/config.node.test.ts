@@ -91,7 +91,7 @@ test('explicit discovery URLs override defaults in mock mode', () => {
 test('worker URLs use the username-scoped connector path when KODY_USERNAME is set', () => {
 	using _env = createTemporaryEnv({
 		HOME_CONNECTOR_ID: ' Living-Room ',
-		WORKER_BASE_URL: 'https://heykody.dev/',
+		WORKER_BASE_URL: 'https://heykody.app/',
 		KODY_USERNAME: ' kentcdodds ',
 		NODE_ENV: 'production',
 	})
@@ -99,10 +99,10 @@ test('worker URLs use the username-scoped connector path when KODY_USERNAME is s
 	const config = loadHomeConnectorConfig()
 	expect(config.homeConnectorId).toBe('living-room')
 	expect(config.workerSessionUrl).toBe(
-		'https://heykody.dev/@kentcdodds/connectors/living-room',
+		'https://heykody.app/@kentcdodds/connectors/living-room',
 	)
 	expect(config.workerWebSocketUrl).toBe(
-		'wss://heykody.dev/@kentcdodds/connectors/living-room',
+		'wss://heykody.app/@kentcdodds/connectors/living-room',
 	)
 	expect(config.workerWebSocketUrl).not.toContain('/connectors/u/')
 })
@@ -126,7 +126,7 @@ test('local worker URLs omit username when KODY_USERNAME is absent', () => {
 test('production Kody worker URLs require KODY_USERNAME', () => {
 	using _env = createTemporaryEnv({
 		HOME_CONNECTOR_ID: 'default',
-		WORKER_BASE_URL: 'https://heykody.dev',
+		WORKER_BASE_URL: 'https://heykody.app',
 		KODY_USERNAME: undefined,
 		NODE_ENV: 'production',
 	})

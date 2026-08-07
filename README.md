@@ -27,7 +27,7 @@ saved in Kody (`/account/remote-connectors`):
 ```bash
 KODY_USERNAME=your-kody-username
 HOME_CONNECTOR_ID=home
-WORKER_BASE_URL=https://heykody.dev
+WORKER_BASE_URL=https://heykody.app
 HOME_CONNECTOR_SHARED_SECRET=...
 ```
 
