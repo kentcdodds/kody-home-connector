@@ -104,6 +104,42 @@ function isRetriableKasaTransportError(error: unknown) {
 	)
 }
 
+function isKasaTransientNetworkError(error: unknown) {
+	const message = (
+		error instanceof Error ? error.message : String(error)
+	).toLowerCase()
+	return (
+		message.includes('ehostunreach') ||
+		message.includes('enetunreach') ||
+		message.includes('econnrefused') ||
+		message.includes('econnreset') ||
+		message.includes('etimedout') ||
+		message.includes('enotfound') ||
+		message.includes('eai_again') ||
+		message.includes('subprocess timed out') ||
+		message.includes('kasa klap subprocess timed out')
+	)
+}
+
+function annotateKasaTransientNetworkError(error: unknown) {
+	if (!isKasaTransientNetworkError(error) || !(error instanceof Error)) {
+		return error
+	}
+	const annotated = error as Error & {
+		homeConnectorCaptureContext?: HomeConnectorErrorCaptureContext
+	}
+	annotated.homeConnectorCaptureContext = {
+		...annotated.homeConnectorCaptureContext,
+		shouldCapture: false,
+		tags: {
+			connector_vendor: 'kasa',
+			kasa_failure_class: 'transient_network',
+			...annotated.homeConnectorCaptureContext?.tags,
+		},
+	}
+	return annotated
+}
+
 function getEnvCredentials(config: HomeConnectorConfig) {
 	if (!config.kasaUsername || !config.kasaPassword) return null
 	return {
@@ -315,11 +351,11 @@ export function createKasaAdapter(input: {
 					continue
 				}
 				updateFailedAuth(error)
-				throw error
+				throw annotateKasaTransientNetworkError(error)
 			}
 		}
 		updateFailedAuth(lastError)
-		throw lastError
+		throw annotateKasaTransientNetworkError(lastError)
 	}
 
 	async function setRelayState(selector: KasaPlugSelector, state: boolean) {
@@ -366,11 +402,11 @@ export function createKasaAdapter(input: {
 					continue
 				}
 				updateFailedAuth(error)
-				throw error
+				throw annotateKasaTransientNetworkError(error)
 			}
 		}
 		updateFailedAuth(lastError)
-		throw lastError
+		throw annotateKasaTransientNetworkError(lastError)
 	}
 
 	return {

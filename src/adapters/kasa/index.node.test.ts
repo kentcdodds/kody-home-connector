@@ -325,6 +325,99 @@ test('adapter rejects relay control when device reports an error or unchanged st
 	}
 })
 
+test('adapter marks unreachable plug errors as expected Sentry noise', async () => {
+	const config = createConfig()
+	const state = createAppState()
+	const storage = createHomeConnectorStorage(config)
+	const fakeClient: KasaClient = {
+		async getSysInfo() {
+			throw new Error('connect EHOSTUNREACH 192.168.1.145:80')
+		},
+		async setRelayState() {
+			throw new Error('connect EHOSTUNREACH 192.168.1.145:80')
+		},
+	}
+	const adapter = createKasaAdapter({
+		config,
+		state,
+		storage,
+		clientFactory: () => fakeClient,
+		scanPlugs: async () => ({
+			plugs: [
+				{
+					plugId: 'plug-1',
+					alias: 'Water recirculating pump',
+					host: '192.168.1.145',
+					port: 80,
+					model: 'EP25',
+					mac: 'aabbccddeeff',
+					deviceId: 'plug-1',
+					relayState: 'off',
+					rawSysinfo: null,
+					rawDiscovery: { server: 'SHIP 2.0' },
+					lastSeenAt: '2026-06-24T17:52:00.000Z',
+				},
+			],
+			diagnostics: {
+				protocol: 'klap',
+				discoveryUrl: '192.168.1.145/32',
+				scannedAt: '2026-06-24T17:52:00.000Z',
+				udpPorts: [9999, 20002],
+				probes: [],
+				subnetProbe: {
+					cidrs: ['192.168.1.145/32'],
+					hostsProbed: 1,
+					shipMatches: 1,
+					authenticatedMatches: 1,
+				},
+				credentialStatus: 'present',
+			},
+		}),
+	})
+
+	try {
+		adapter.setCredentials('kent@example.com', 'secret-password')
+		await adapter.scan()
+		adapter.adoptPlug({ plugId: 'plug-1' })
+
+		let statusError: unknown
+		try {
+			await adapter.getPlugStatus({ plugId: 'plug-1' })
+		} catch (error) {
+			statusError = error
+		}
+		expect(statusError).toMatchObject({
+			message: 'connect EHOSTUNREACH 192.168.1.145:80',
+			homeConnectorCaptureContext: {
+				shouldCapture: false,
+				tags: {
+					connector_vendor: 'kasa',
+					kasa_failure_class: 'transient_network',
+				},
+			},
+		})
+
+		let controlError: unknown
+		try {
+			await adapter.turnOn({ plugId: 'plug-1' })
+		} catch (error) {
+			controlError = error
+		}
+		expect(controlError).toMatchObject({
+			message: 'connect EHOSTUNREACH 192.168.1.145:80',
+			homeConnectorCaptureContext: {
+				shouldCapture: false,
+				tags: {
+					connector_vendor: 'kasa',
+					kasa_failure_class: 'transient_network',
+				},
+			},
+		})
+	} finally {
+		storage.close()
+	}
+})
+
 test('adapter does not mark stored credentials healthy when fallback auth was used', async () => {
 	const config = createConfig()
 	const state = createAppState()
