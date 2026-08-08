@@ -132,9 +132,9 @@ function annotateKasaTransientNetworkError(error: unknown) {
 		...annotated.homeConnectorCaptureContext,
 		shouldCapture: false,
 		tags: {
+			...annotated.homeConnectorCaptureContext?.tags,
 			connector_vendor: 'kasa',
 			kasa_failure_class: 'transient_network',
-			...annotated.homeConnectorCaptureContext?.tags,
 		},
 	}
 	return annotated
