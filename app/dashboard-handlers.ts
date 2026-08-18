@@ -58,7 +58,7 @@ type DashboardSnapshot = {
 	connectionTone: StatusTone
 	connectionLabel: string
 	connectionIssues: Array<string>
-	workerSnapshotUrl: string | null
+	mcpUrl: string
 	roku: {
 		adopted: number
 		discovered: number
@@ -139,121 +139,43 @@ type LoadDashboardSnapshotInput = {
 	islandRouterStatus?: IslandRouterStatus
 }
 
-function getWorkerSessions(state: HomeConnectorState) {
-	return state.workerSessions.length > 0
-		? state.workerSessions
-		: [
-				{
-					...state.connection,
-					sessionKey: `${state.connection.kodyUsername ?? 'local'}/${state.connection.connectorId || 'default'}`,
-					workerSessionUrl: '',
-					workerWebSocketUrl: '',
-				},
-			]
-}
-
-function getConnectedSessionCount(state: HomeConnectorState) {
-	return getWorkerSessions(state).filter((session) => session.connected).length
-}
-
 function getConnectionTone(state: HomeConnectorState): StatusTone {
-	const sessions = getWorkerSessions(state)
-	const connectedCount = sessions.filter((session) => session.connected).length
-	if (connectedCount === 0) return 'bad'
-	if (
-		sessions.some(
-			(session) =>
-				session.toolInventoryStatus === 'empty_local_registry' ||
-				session.toolInventoryStatus ===
-					'reconnecting_after_missing_remote_list',
-		)
-	) {
-		return 'bad'
-	}
-	if (connectedCount < sessions.length) return 'warn'
-	if (
-		sessions.some(
-			(session) =>
-				session.toolInventoryStatus === 'pending_remote_list' ||
-				session.toolInventoryStatus === 'refresh_requested' ||
-				session.toolInventoryStatus === 'remote_list_missing',
-		)
-	) {
-		return 'warn'
-	}
-	if (sessions.some((session) => !session.sharedSecret)) return 'warn'
+	if (!state.connection.listening) return 'warn'
+	if (state.connection.lastError) return 'warn'
+	if (state.connection.localToolCount === 0) return 'warn'
+	if (!state.connection.operatorPasswordConfigured) return 'warn'
 	return 'good'
 }
 
 function getConnectionLabel(state: HomeConnectorState) {
-	const sessions = getWorkerSessions(state)
-	const connectedCount = sessions.filter((session) => session.connected).length
-	if (sessions.length > 1) {
-		if (connectedCount === 0) {
-			return `Disconnected (${sessions.length} Worker sessions)`
-		}
-		if (connectedCount < sessions.length) {
-			return `Partially connected (${connectedCount}/${sessions.length} Worker sessions)`
-		}
-		const allRegistered = sessions.every(
-			(session) => session.toolInventoryStatus === 'registered',
-		)
-		return allRegistered
-			? `Connected (${sessions.length} Worker sessions, tools registered)`
-			: `Connected (${sessions.length} Worker sessions)`
+	if (!state.connection.listening) return 'MCP server not listening'
+	if (state.connection.localToolCount === 0) {
+		return 'Listening with empty tool registry'
 	}
-	if (!state.connection.connected) return 'Disconnected'
-	if (state.connection.toolInventoryStatus === 'registered') {
-		return 'Connected with tools registered'
+	if (!state.connection.operatorPasswordConfigured) {
+		return 'Listening; operator password not configured'
 	}
-	if (state.connection.toolInventoryStatus === 'empty_local_registry') {
-		return 'Connected with empty local tool registry'
-	}
-	if (
-		state.connection.toolInventoryStatus ===
-		'reconnecting_after_missing_remote_list'
-	) {
-		return 'Reconnecting tool inventory'
-	}
-	if (state.connection.toolInventoryStatus === 'refresh_requested') {
-		return 'Connected; tool inventory refresh requested'
-	}
-	if (state.connection.toolInventoryStatus === 'remote_list_missing') {
-		return 'Connected; waiting for remote tool inventory list'
-	}
-	if (state.connection.toolInventoryStatus === 'pending_remote_list') {
-		return 'Connected; awaiting tool inventory registration'
-	}
-	if (!state.connection.sharedSecret) return 'Connected with missing secret'
-	return 'Connected'
+	return `Listening (${state.connection.localToolCount} tools)`
 }
 
-function getConnectionIssues(state: HomeConnectorState) {
+function getConnectionIssues(
+	state: HomeConnectorState,
+	config: HomeConnectorConfig,
+) {
 	const issues: Array<string> = []
-	const sessions = getWorkerSessions(state)
-	const connectedCount = getConnectedSessionCount(state)
-	if (connectedCount === 0) {
-		issues.push('Worker connector is not currently connected.')
-	} else if (connectedCount < sessions.length) {
+	if (!state.connection.listening) {
+		issues.push('The local HTTP MCP server is not marked as listening yet.')
+	}
+	if (!config.operatorPassword) {
 		issues.push(
-			`${sessions.length - connectedCount} of ${sessions.length} Worker sessions are disconnected.`,
+			'HOME_MCP_OPERATOR_PASSWORD is unset, so CIMD clients cannot complete /authorize.',
 		)
 	}
-	for (const session of sessions) {
-		const identity = `${session.kodyUsername ?? 'local'}/${session.connectorId || 'unknown'}`
-		if (!session.sharedSecret) {
-			issues.push(
-				`Shared secret is missing for ${identity}, so authenticated worker sync is degraded.`,
-			)
-		}
-		if (session.lastError) {
-			issues.push(`Last connector error (${identity}): ${session.lastError}`)
-		}
-		if (session.connected && session.toolInventoryStatus !== 'registered') {
-			issues.push(
-				`Tool inventory (${identity}): ${session.toolInventoryStatusReason}`,
-			)
-		}
+	if (state.connection.localToolCount === 0) {
+		issues.push('The local MCP tool registry is empty.')
+	}
+	if (state.connection.lastError) {
+		issues.push(`Last server error: ${state.connection.lastError}`)
 	}
 	return issues
 }
@@ -261,17 +183,7 @@ function getConnectionIssues(state: HomeConnectorState) {
 function getSafeConnectionSnapshot(state: HomeConnectorState) {
 	return {
 		...state.connection,
-		sharedSecret: state.connection.sharedSecret ? 'configured' : 'missing',
 	}
-}
-
-function getWorkerSnapshotUrl(
-	config: HomeConnectorConfig,
-	state: HomeConnectorState,
-) {
-	return state.connection.connectorId
-		? `${config.workerSessionUrl}/snapshot`
-		: null
 }
 
 function countDiagnosticSources(state: HomeConnectorState) {
@@ -349,7 +261,7 @@ async function loadDashboardSnapshot(
 		(thermostat) => thermostat.info != null,
 	).length
 
-	const connectionIssues = getConnectionIssues(deps.state)
+	const connectionIssues = getConnectionIssues(deps.state, deps.config)
 	const islandRouterTone = getIslandRouterTone({
 		configured: islandRouterStatus.config.configured,
 		connected: islandRouterStatus.connected,
@@ -361,7 +273,7 @@ async function loadDashboardSnapshot(
 		connectionTone: getConnectionTone(deps.state),
 		connectionLabel: getConnectionLabel(deps.state),
 		connectionIssues,
-		workerSnapshotUrl: getWorkerSnapshotUrl(deps.config, deps.state),
+		mcpUrl: deps.config.mcpUrl,
 		roku: {
 			adopted: rokuAdopted.length,
 			discovered: rokuDiscovered.length,
@@ -494,51 +406,28 @@ function getIntegrationStatusLabel(input: {
 	return 'No recent data'
 }
 
-function renderWorkerSessionsNote(state: HomeConnectorState) {
-	const sessions = getWorkerSessions(state)
-	if (sessions.length <= 1) return null
-	return html`<ul class="compact-list">
-		${sessions.map((session) => {
-			const identity = `${session.kodyUsername ?? 'local'}/${session.connectorId || 'unknown'}`
-			const status = session.connected ? 'connected' : 'disconnected'
-			return html`<li>
-				${identity}: ${status} · inventory ${session.toolInventoryStatus}
-			</li>`
-		})}
-	</ul>`
-}
-
 function renderConnectionSummary(
 	state: HomeConnectorState,
 	snapshot: DashboardSnapshot,
 ) {
-	const sessions = getWorkerSessions(state)
-	const connectedCount = getConnectedSessionCount(state)
-	const sessionNote = renderWorkerSessionsNote(state)
 	return renderSummaryCard({
-		title: sessions.length > 1 ? 'Connector sessions' : 'Connector session',
+		title: 'Home MCP server',
 		description:
-			'Worker connectivity, identity, sync timing, and shared secret readiness.',
+			'Streamable HTTP MCP endpoint, CIMD OAuth readiness, and local tool count.',
 		status: snapshot.connectionLabel,
 		tone: snapshot.connectionTone,
 		metrics: [
 			{
-				label: sessions.length > 1 ? 'Sessions' : 'Connector ID',
-				value:
-					sessions.length > 1
-						? `${connectedCount}/${sessions.length} connected`
-						: state.connection.connectorId || 'not registered',
+				label: 'Connector ID',
+				value: state.connection.connectorId || 'not registered',
 			},
 			{
-				label: sessions.length > 1 ? 'Primary target' : 'Last sync',
-				value:
-					sessions.length > 1
-						? `${state.connection.kodyUsername ?? 'local'}/${state.connection.connectorId || 'not registered'}`
-						: (state.connection.lastSyncAt ?? 'never'),
+				label: 'MCP URL',
+				value: snapshot.mcpUrl,
 			},
 			{
-				label: 'Tool inventory',
-				value: `${state.connection.toolInventoryStatus} (${state.connection.localToolCount})`,
+				label: 'Tools',
+				value: String(state.connection.localToolCount),
 			},
 			{
 				label: 'Mocks',
@@ -549,23 +438,12 @@ function renderConnectionSummary(
 			href: routes.systemStatus.href(),
 			label: 'Open system status',
 		},
-		secondaryLink: snapshot.workerSnapshotUrl
-			? {
-					href: snapshot.workerSnapshotUrl,
-					label: 'Worker snapshot',
-				}
-			: undefined,
 		note:
 			snapshot.connectionIssues.length > 0
 				? html`<ul class="compact-list">
-							${snapshot.connectionIssues.map(
-								(issue) => html`<li>${issue}</li>`,
-							)}
-						</ul>
-						${sessionNote ?? ''}`
-				: sessionNote
-					? html`${sessionNote}`
-					: 'Connection prerequisites look healthy from the local connector state.',
+						${snapshot.connectionIssues.map((issue) => html`<li>${issue}</li>`)}
+					</ul>`
+				: 'The local MCP server is ready for Kody to add at /account/mcp-servers.',
 	})
 }
 
@@ -1130,34 +1008,27 @@ export function createSystemStatusHandler(deps: DashboardDependencies) {
 						})}
 						<div class="metric-grid">
 							${renderMetricCard({
-								label: 'Connection',
+								label: 'MCP server',
 								value: snapshot.connectionLabel,
-								detail: deps.state.connection.lastSyncAt ?? 'No sync yet',
+								detail: deps.config.mcpUrl,
 								tone: snapshot.connectionTone,
 							})}
 							${renderMetricCard({
-								label: 'Tool inventory',
-								value: deps.state.connection.toolInventoryStatus,
-								detail: `${deps.state.connection.localToolCount} local tool(s)`,
+								label: 'Tools',
+								value: String(deps.state.connection.localToolCount),
+								detail: 'Local MCP tool registry size.',
 								tone:
-									deps.state.connection.toolInventoryStatus === 'registered'
-										? 'good'
-										: deps.state.connection.toolInventoryStatus ===
-													'not_connected' ||
-											  deps.state.connection.toolInventoryStatus ===
-													'empty_local_registry' ||
-											  deps.state.connection.toolInventoryStatus ===
-													'reconnecting_after_missing_remote_list'
-											? 'bad'
-											: 'warn',
+									deps.state.connection.localToolCount > 0 ? 'good' : 'warn',
 							})}
 							${renderMetricCard({
-								label: 'Worker secret',
-								value: deps.state.connection.sharedSecret
+								label: 'Operator password',
+								value: deps.state.connection.operatorPasswordConfigured
 									? 'configured'
 									: 'missing',
-								detail: 'Used for authenticated worker connector traffic.',
-								tone: deps.state.connection.sharedSecret ? 'good' : 'warn',
+								detail: 'Required for CIMD OAuth consent on /authorize.',
+								tone: deps.state.connection.operatorPasswordConfigured
+									? 'good'
+									: 'warn',
 							})}
 							${renderMetricCard({
 								label: 'Mocks',
@@ -1194,18 +1065,18 @@ export function createSystemStatusHandler(deps: DashboardDependencies) {
 										>`,
 									},
 									{
-										label: 'Worker URL',
-										value: html`<code
-											>${deps.state.connection.workerUrl}</code
-										>`,
+										label: 'Public base URL',
+										value: html`<code>${deps.config.publicBaseUrl}</code>`,
 									},
 									{
-										label: 'Worker session URL',
-										value: html`<code>${deps.config.workerSessionUrl}</code>`,
+										label: 'MCP URL',
+										value: html`<code>${deps.config.mcpUrl}</code>`,
 									},
 									{
-										label: 'Worker WebSocket URL',
-										value: html`<code>${deps.config.workerWebSocketUrl}</code>`,
+										label: 'Operator password',
+										value: deps.state.connection.operatorPasswordConfigured
+											? 'configured'
+											: 'missing',
 									},
 									{
 										label: 'Data path',
@@ -1216,37 +1087,16 @@ export function createSystemStatusHandler(deps: DashboardDependencies) {
 										value: html`<code>${deps.config.dbPath}</code>`,
 									},
 									{
-										label: 'Last connector error',
+										label: 'Last server error',
 										value: deps.state.connection.lastError ?? 'none',
 									},
 									{
-										label: 'Tool inventory status',
-										value: deps.state.connection.toolInventoryStatus,
-									},
-									{
-										label: 'Tool inventory reason',
-										value: deps.state.connection.toolInventoryStatusReason,
+										label: 'Listening',
+										value: deps.state.connection.listening ? 'yes' : 'no',
 									},
 									{
 										label: 'Local tool count',
 										value: String(deps.state.connection.localToolCount),
-									},
-									{
-										label: 'Last tools/list request',
-										value:
-											deps.state.connection.lastToolsListRequestAt ?? 'never',
-									},
-									{
-										label: 'Last tools changed notification',
-										value:
-											deps.state.connection.lastToolsChangedNotificationAt ??
-											'never',
-									},
-									{
-										label: 'Tool inventory recoveries',
-										value: String(
-											deps.state.connection.toolInventoryRecoveryCount,
-										),
 									},
 								])}
 							</section>

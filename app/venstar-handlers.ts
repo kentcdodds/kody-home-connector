@@ -282,7 +282,7 @@ function renderVenstarStatusPage(input: {
 					<p>
 						<a href="${routes.venstarSetup.href()}">Venstar setup</a>
 						<span class="muted">
-							— add, remove, and review managed thermostats
+							â add, remove, and review managed thermostats
 						</span>
 					</p>
 					<form method="POST">
@@ -301,9 +301,9 @@ function renderVenstarStatusPage(input: {
 						: ''}
 					<div class="status-grid">
 						<div>
-							<strong>Worker connection</strong>
+							<strong>MCP server</strong>
 							<div>
-								${input.state.connection.connected
+								${input.state.connection.listening
 									? 'connected'
 									: 'disconnected'}
 							</div>
@@ -438,11 +438,11 @@ export function createVenstarSetupHandler(
 						<p>
 							<a href="${routes.venstarStatus.href()}">Venstar status</a>
 							<span class="muted">
-								— scan the network and verify live thermostat status
+								â scan the network and verify live thermostat status
 							</span>
 						</p>
 						${renderInfoRows([
-							{ label: 'Worker URL', value: config.workerBaseUrl },
+							{ label: 'MCP URL', value: config.mcpUrl },
 							{
 								label: 'Connector ID',
 								value: state.connection.connectorId || 'not registered yet',

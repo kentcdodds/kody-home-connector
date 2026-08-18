@@ -2,6 +2,7 @@ import { mkdirSync } from 'node:fs'
 import path from 'node:path'
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite'
 import { type HomeConnectorConfig } from '../config.ts'
+import { initializeOAuthSchema } from '../oauth/store.ts'
 
 type SqliteStatement = {
 	all(...params: Array<SQLInputValue>): Array<unknown>
@@ -332,6 +333,7 @@ export function createHomeConnectorStorage(
 	ensureParentDirectory(config.dbPath)
 	const db = createSqliteDatabase(config.dbPath)
 	initializeSchema(db)
+	initializeOAuthSchema(db)
 	return {
 		db,
 		sharedSecret: config.sharedSecret,

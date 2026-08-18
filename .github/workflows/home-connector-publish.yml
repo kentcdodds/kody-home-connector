@@ -1,4 +1,4 @@
-name: 🐳 Publish Home Connector
+name: ð³ Publish Home Connector
 
 on:
   push:
@@ -16,37 +16,36 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
-    name: ✅ Test Home Connector
+    name: â Test Home Connector
     timeout-minutes: 4
     steps:
-      - name: ⚙️ Configure Git defaults
+      - name: âï¸ Configure Git defaults
         run: git config --global init.defaultBranch main
 
-      - name: 📦 Checkout
+      - name: ð¦ Checkout
         uses: actions/checkout@v6.0.2
 
-      - name: 🟢 Setup Node
+      - name: ð¢ Setup Node
         uses: actions/setup-node@v6
         with:
           node-version: 24
           cache: npm
 
-      - name: 📥 Install Dependencies
+      - name: ð¥ Install Dependencies
         run: npm ci
 
-      - name: ✅ Run Home Connector Tests
+      - name: â Run Home Connector Tests
         env:
           NODE_OPTIONS: --disable-warning=ExperimentalWarning
         run: npm test
 
-      - name: ✅ Smoke-test Home Connector on Node
+      - name: â Smoke-test Home Connector on Node
         shell: bash
         env:
           PORT: 4041
-          KODY_USERNAME: ci-user
+          HOME_MCP_PUBLIC_BASE_URL: http://127.0.0.1:4041
           HOME_CONNECTOR_SHARED_SECRET: ci-home-connector-secret
           NODE_OPTIONS: --disable-warning=ExperimentalWarning
-          WORKER_BASE_URL: http://127.0.0.1:65535
         run: |
           set -euo pipefail
 
@@ -74,17 +73,17 @@ jobs:
 
   publish:
     runs-on: ubuntu-latest
-    name: 🐳 Publish Docker image
+    name: ð³ Publish Docker image
     timeout-minutes: 10
     needs: test
     steps:
-      - name: ⚙️ Configure Git defaults
+      - name: âï¸ Configure Git defaults
         run: git config --global init.defaultBranch main
 
-      - name: 📦 Checkout
+      - name: ð¦ Checkout
         uses: actions/checkout@v6.0.2
 
-      - name: 🧾 Validate Docker Hub configuration
+      - name: ð§¾ Validate Docker Hub configuration
         shell: bash
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -109,16 +108,16 @@ jobs:
             exit 1
           fi
 
-      - name: 🏗️ Setup Docker Buildx
+      - name: ðï¸ Setup Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      - name: 🔐 Login to Docker Hub
+      - name: ð Login to Docker Hub
         uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: 🏷️ Compute Docker tags
+      - name: ð·ï¸ Compute Docker tags
         id: meta
         uses: docker/metadata-action@v6
         with:
@@ -127,7 +126,7 @@ jobs:
             type=raw,value=latest
             type=sha,format=short,prefix=sha-
 
-      - name: 🚀 Build and push image
+      - name: ð Build and push image
         uses: docker/build-push-action@v7
         with:
           context: .

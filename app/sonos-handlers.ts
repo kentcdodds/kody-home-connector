@@ -176,9 +176,9 @@ function renderSonosStatusPage(input: {
 					</form>
 					<div class="status-grid">
 						<div>
-							<strong>Worker connection</strong>
+							<strong>MCP server</strong>
 							<div>
-								${input.state.connection.connected
+								${input.state.connection.listening
 									? 'connected'
 									: 'disconnected'}
 							</div>
@@ -302,7 +302,7 @@ export function createSonosSetupHandler(
 		async handler() {
 			const status = sonos.getStatus()
 			const diagnostics = [
-				`Worker URL: ${state.connection.workerUrl}`,
+				`MCP URL: ${state.connection.mcpUrl}`,
 				`Connector ID: ${state.connection.connectorId}`,
 				`Sonos discovery URL: ${state.sonosDiscoveryDiagnostics?.discoveryUrl ?? 'not scanned yet'}`,
 				`Known Sonos players: ${String(status.allPlayers.length)}`,

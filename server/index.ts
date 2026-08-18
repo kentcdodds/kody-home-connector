@@ -7,6 +7,12 @@ import {
 	flushHomeConnectorSentry,
 } from '../src/sentry.ts'
 import { startHomeConnectorApp } from '../src/index.ts'
+import {
+	createHomeMcpHttpHandler,
+	homeMcpHttpInstructions,
+	serveHomeMcpRequest,
+} from '../src/mcp/http-mcp.ts'
+import { createHomeMcpOAuthHandler } from '../src/oauth/http.ts'
 
 const signalExitCodeByName = {
 	SIGINT: 130,
@@ -40,11 +46,11 @@ function installGracefulShutdownHandlers(input: {
 		shutdownPromise = (async () => {
 			input.connector.logger.info(
 				'server.shutdown.started',
-				`Shutting down home connector reason=${reason}`,
+				`Shutting down home MCP server reason=${reason}`,
 				{ reason },
 			)
-			input.connector.workerConnector.stop()
 			await closeServerWithWatchdog()
+			input.connector.storage.close()
 			await closeHomeConnectorSentry()
 		})()
 
@@ -53,8 +59,6 @@ function installGracefulShutdownHandlers(input: {
 
 	for (const signal of ['SIGINT', 'SIGTERM'] as const) {
 		process.once(signal, () => {
-			// For clean termination, close the client so it stops accepting events
-			// before the process exits.
 			void shutdown(`signal:${signal}`).finally(() => {
 				process.exit(signalExitCodeByName[signal])
 			})
@@ -68,8 +72,6 @@ function installGracefulShutdownHandlers(input: {
 				process_event: 'uncaughtException',
 			},
 		})
-		// On fatal process paths, flush buffered events but avoid relying on a full
-		// async shutdown from an undefined runtime state.
 		void flushHomeConnectorSentry().finally(() => {
 			process.exit(1)
 		})
@@ -91,8 +93,6 @@ function installGracefulShutdownHandlers(input: {
 				...(reason instanceof Error ? { reasonName: reason.name } : {}),
 			},
 		})
-		// On fatal process paths, flush buffered events but avoid relying on a full
-		// async shutdown from an undefined runtime state.
 		void flushHomeConnectorSentry().finally(() => {
 			process.exit(1)
 		})
@@ -101,6 +101,14 @@ function installGracefulShutdownHandlers(input: {
 
 async function main() {
 	const connector = await startHomeConnectorApp()
+	const oauth = createHomeMcpOAuthHandler({
+		config: connector.config,
+		storage: connector.storage,
+	})
+	const mcpHttp = createHomeMcpHttpHandler({
+		toolRegistry: connector.toolRegistry,
+		instructions: homeMcpHttpInstructions,
+	})
 	const router = createHomeConnectorRouter(
 		connector.state,
 		connector.config,
@@ -120,6 +128,20 @@ async function main() {
 		createRequestListener(
 			async (request) => {
 				try {
+					const oauthResponse = await oauth.handle(request)
+					if (oauthResponse) return oauthResponse
+
+					const url = new URL(request.url)
+					if (url.pathname === connector.config.mcpPath) {
+						const auth = await oauth.authenticateMcp(request)
+						if (auth instanceof Response) return auth
+						return serveHomeMcpRequest({
+							request,
+							handler: mcpHttp,
+							authInfo: auth,
+						})
+					}
+
 					return await router.fetch(request)
 				} catch (error) {
 					captureHomeConnectorException(error, {
@@ -145,9 +167,10 @@ async function main() {
 	server.listen(connector.config.port, () => {
 		connector.logger.info(
 			'server.http.listening',
-			`home-connector listening on http://localhost:${connector.config.port}`,
+			`home MCP listening on http://localhost:${connector.config.port} (public ${connector.config.mcpUrl})`,
 			{
 				port: connector.config.port,
+				mcpUrl: connector.config.mcpUrl,
 			},
 		)
 	})

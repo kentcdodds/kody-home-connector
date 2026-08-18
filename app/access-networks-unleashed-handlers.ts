@@ -27,8 +27,8 @@ function renderControllerOptions(
 	return controllers.map(
 		(controller) =>
 			html`<option value="${controller.controllerId}">
-				${controller.name} (${controller.controllerId}) — adopted:
-				${controller.adopted ? 'yes' : 'no'} — auth:
+				${controller.name} (${controller.controllerId}) â adopted:
+				${controller.adopted ? 'yes' : 'no'} â auth:
 				${controller.hasStoredCredentials ? 'stored' : 'missing'}
 			</option>`,
 	)
@@ -161,7 +161,7 @@ function renderAccessNetworksUnleashedStatusPage(input: {
 							>Access Networks Unleashed setup</a
 						>
 						<span class="muted">
-							— adopt a controller and save auth information
+							â adopt a controller and save auth information
 						</span>
 					</p>
 					<form method="POST">
@@ -169,8 +169,8 @@ function renderAccessNetworksUnleashedStatusPage(input: {
 					</form>
 					${renderInfoRows([
 						{
-							label: 'Worker connection',
-							value: input.state.connection.connected
+							label: 'MCP server',
+							value: input.state.connection.listening
 								? 'connected'
 								: 'disconnected',
 						},
@@ -268,7 +268,7 @@ function renderAccessNetworksUnleashedSetupPage(input: {
 							>Access Networks Unleashed status</a
 						>
 						<span class="muted">
-							— run scans and inspect controller readiness
+							â run scans and inspect controller readiness
 						</span>
 					</p>
 					${renderInfoRows([

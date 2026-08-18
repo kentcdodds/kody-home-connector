@@ -33,12 +33,12 @@ function renderIslandRouterApiStatusPage(input: {
 						<a href="${routes.islandRouterApiSetup.href()}"
 							>Island Router API setup</a
 						>
-						<span class="muted">— save or clear the local PIN</span>
+						<span class="muted">â save or clear the local PIN</span>
 					</p>
 					${renderInfoRows([
 						{
-							label: 'Worker connection',
-							value: input.state.connection.connected
+							label: 'MCP server',
+							value: input.state.connection.listening
 								? 'connected'
 								: 'disconnected',
 						},
@@ -104,7 +104,7 @@ function renderIslandRouterApiSetupPage(input: {
 						<a href="${routes.islandRouterApiStatus.href()}"
 							>Island Router API status</a
 						>
-						<span class="muted">— review API proxy readiness</span>
+						<span class="muted">â review API proxy readiness</span>
 					</p>
 					${renderInfoRows([
 						{

@@ -24,21 +24,11 @@ import { createHomeConnectorRouter } from './router.ts'
 function createConfig(dataPath = '/tmp'): HomeConnectorConfig {
 	return {
 		homeConnectorId: 'default',
-		kodyUsername: null,
-		workerBaseUrl: 'http://localhost:3742',
-		workerSessionUrl: 'http://localhost:3742/@test-user/connectors/default',
-		workerWebSocketUrl: 'ws://localhost:3742/@test-user/connectors/default',
+		publicBaseUrl: 'http://localhost:4040',
+		mcpPath: '/mcp',
+		mcpUrl: 'http://localhost:4040/mcp',
+		operatorPassword: 'operator-password',
 		sharedSecret: 'secret',
-		workerTargets: [
-			{
-				kodyUsername: null,
-				homeConnectorId: 'default',
-				sharedSecret: 'secret',
-				workerBaseUrl: 'http://localhost:3742',
-				workerSessionUrl: 'http://localhost:3742/@test-user/connectors/default',
-				workerWebSocketUrl: 'ws://localhost:3742/@test-user/connectors/default',
-			},
-		],
 		islandRouterHost: null,
 		islandRouterPort: 22,
 		islandRouterUsername: null,
@@ -203,7 +193,8 @@ test('home route toggles worker snapshot link by connector id', async () => {
 		kasa,
 	} = createAdapters(config)
 	state.connection.connectorId = 'default'
-	state.connection.workerUrl = 'http://localhost:3742'
+	state.connection.mcpUrl = config.mcpUrl
+	state.connection.listening = true
 	try {
 		const router = createHomeConnectorRouter(
 			state,
@@ -222,17 +213,14 @@ test('home route toggles worker snapshot link by connector id', async () => {
 		const responseWithConnector = await router.fetch('http://example.test/')
 		expect(responseWithConnector.status).toBe(200)
 		const htmlWithConnector = await responseWithConnector.text()
-		expect(htmlWithConnector).toContain(
-			'/@test-user/connectors/default/snapshot',
-		)
+		expect(htmlWithConnector).toContain('http://localhost:4040/mcp')
+		expect(htmlWithConnector).toContain('Home MCP server')
 
 		state.connection.connectorId = ''
 		const responseWithoutConnector = await router.fetch('http://example.test/')
 		expect(responseWithoutConnector.status).toBe(200)
 		const htmlWithoutConnector = await responseWithoutConnector.text()
-		expect(htmlWithoutConnector).not.toContain(
-			'/@test-user/connectors/default/snapshot',
-		)
+		expect(htmlWithoutConnector).toContain('http://localhost:4040/mcp')
 		expect(htmlWithConnector).toContain('Home connector dashboard')
 		expect(htmlWithConnector).toContain('Island router diagnostics')
 	} finally {
@@ -944,38 +932,23 @@ test('health route returns ok json', async () => {
 		expect(await response.json()).toEqual({
 			ok: true,
 			service: 'home-connector',
-			connectorId: '',
+			connectorId: config.homeConnectorId,
+			mcpUrl: config.mcpUrl,
 			metadata: expect.objectContaining({
 				service: 'home-connector',
 				connectorId: config.homeConnectorId,
 				appCommitSha: null,
-				workerBaseUrl: config.workerBaseUrl,
+				mcpUrl: config.mcpUrl,
 				mocksEnabled: false,
-				workerSessionCount: 1,
-				connectedWorkerSessionCount: 0,
+				listening: false,
+				localToolCount: 0,
 			}),
 			connection: {
-				connected: false,
-				lastSyncAt: null,
+				listening: false,
 				lastError: null,
-				connectedSessionCount: 0,
-				sessionCount: 1,
 			},
-			workerSessions: [
-				expect.objectContaining({
-					sessionKey: 'local/default',
-					connectorId: config.homeConnectorId,
-					connected: false,
-					sharedSecretConfigured: true,
-				}),
-			],
-			toolInventory: {
-				status: 'not_connected',
-				reason: 'Worker transport is not connected yet.',
+			tools: {
 				localToolCount: 0,
-				lastToolsChangedNotificationAt: null,
-				lastToolsListRequestAt: null,
-				recoveryCount: 0,
 			},
 		})
 	} finally {
@@ -1000,10 +973,10 @@ test('system and diagnostics routes render aggregated admin surfaces', async () 
 		kasa,
 	} = createAdapters(config)
 	state.connection.connectorId = 'default'
-	state.connection.workerUrl = 'http://localhost:3742'
-	state.connection.connected = true
-	state.connection.lastSyncAt = '2026-05-02T22:47:00.000Z'
-	state.connection.sharedSecret = 'top-secret-value'
+	state.connection.mcpUrl = config.mcpUrl
+	state.connection.listening = true
+	state.connection.localToolCount = 12
+	state.connection.operatorPasswordConfigured = true
 	try {
 		const router = createHomeConnectorRouter(
 			state,
@@ -1026,6 +999,7 @@ test('system and diagnostics routes render aggregated admin surfaces', async () 
 		const systemHtml = await systemResponse.text()
 		expect(systemHtml).toContain('System status')
 		expect(systemHtml).toContain('Connector identity')
+		expect(systemHtml).toContain('http://localhost:4040/mcp')
 		expect(systemHtml).toContain('Island router readiness')
 		expect(systemHtml).toContain('Managed endpoints')
 		expect(systemHtml).toContain('2')
@@ -1041,9 +1015,9 @@ test('system and diagnostics routes render aggregated admin surfaces', async () 
 		expect(diagnosticsHtml).toContain('Diagnostics matrix')
 		expect(diagnosticsHtml).toContain('Island router')
 		expect(diagnosticsHtml).toContain(
-			'&quot;sharedSecret&quot;: &quot;configured&quot;',
+			'&quot;operatorPasswordConfigured&quot;: true',
 		)
-		expect(diagnosticsHtml).not.toContain('top-secret-value')
+		expect(diagnosticsHtml).not.toContain('operator-password')
 	} finally {
 		storage.close()
 	}
