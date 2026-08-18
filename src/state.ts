@@ -24,7 +24,6 @@ export type HomeConnectorConnectionState = {
 	lastError: string | null
 	mocksEnabled: boolean
 	localToolCount: number
-	operatorPasswordConfigured: boolean
 }
 
 export type HomeConnectorState = {
@@ -50,7 +49,6 @@ const initialConnectionState: HomeConnectorConnectionState = {
 	lastError: null,
 	mocksEnabled: false,
 	localToolCount: 0,
-	operatorPasswordConfigured: false,
 }
 
 const initialState: HomeConnectorState = {

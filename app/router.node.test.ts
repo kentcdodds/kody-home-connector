@@ -27,7 +27,6 @@ function createConfig(dataPath = '/tmp'): HomeConnectorConfig {
 		publicBaseUrl: 'http://localhost:4040',
 		mcpPath: '/mcp',
 		mcpUrl: 'http://localhost:4040/mcp',
-		operatorPassword: 'operator-password',
 		sharedSecret: 'secret',
 		islandRouterHost: null,
 		islandRouterPort: 22,
@@ -976,7 +975,6 @@ test('system and diagnostics routes render aggregated admin surfaces', async () 
 	state.connection.mcpUrl = config.mcpUrl
 	state.connection.listening = true
 	state.connection.localToolCount = 12
-	state.connection.operatorPasswordConfigured = true
 	try {
 		const router = createHomeConnectorRouter(
 			state,
@@ -1014,9 +1012,7 @@ test('system and diagnostics routes render aggregated admin surfaces', async () 
 		expect(diagnosticsHtml).toContain('Diagnostics overview')
 		expect(diagnosticsHtml).toContain('Diagnostics matrix')
 		expect(diagnosticsHtml).toContain('Island router')
-		expect(diagnosticsHtml).toContain(
-			'&quot;operatorPasswordConfigured&quot;: true',
-		)
+		expect(diagnosticsHtml).toContain('&quot;listening&quot;: true')
 		expect(diagnosticsHtml).not.toContain('operator-password')
 	} finally {
 		storage.close()

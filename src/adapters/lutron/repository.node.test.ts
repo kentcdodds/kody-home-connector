@@ -16,7 +16,6 @@ function createConfig(dbPath: string) {
 		publicBaseUrl: 'http://localhost:4040',
 		mcpPath: '/mcp',
 		mcpUrl: 'http://localhost:4040/mcp',
-		operatorPassword: 'operator-password',
 		sharedSecret: 'secret',
 		rokuDiscoveryUrl: 'http://roku.mock.local/discovery',
 		samsungTvDiscoveryUrl: 'http://samsung-tv.mock.local/discovery',

@@ -143,7 +143,6 @@ function getConnectionTone(state: HomeConnectorState): StatusTone {
 	if (!state.connection.listening) return 'warn'
 	if (state.connection.lastError) return 'warn'
 	if (state.connection.localToolCount === 0) return 'warn'
-	if (!state.connection.operatorPasswordConfigured) return 'warn'
 	return 'good'
 }
 
@@ -152,24 +151,13 @@ function getConnectionLabel(state: HomeConnectorState) {
 	if (state.connection.localToolCount === 0) {
 		return 'Listening with empty tool registry'
 	}
-	if (!state.connection.operatorPasswordConfigured) {
-		return 'Listening; operator password not configured'
-	}
 	return `Listening (${state.connection.localToolCount} tools)`
 }
 
-function getConnectionIssues(
-	state: HomeConnectorState,
-	config: HomeConnectorConfig,
-) {
+function getConnectionIssues(state: HomeConnectorState) {
 	const issues: Array<string> = []
 	if (!state.connection.listening) {
 		issues.push('The local HTTP MCP server is not marked as listening yet.')
-	}
-	if (!config.operatorPassword) {
-		issues.push(
-			'HOME_MCP_OPERATOR_PASSWORD is unset, so CIMD clients cannot complete /authorize.',
-		)
 	}
 	if (state.connection.localToolCount === 0) {
 		issues.push('The local MCP tool registry is empty.')
@@ -261,7 +249,7 @@ async function loadDashboardSnapshot(
 		(thermostat) => thermostat.info != null,
 	).length
 
-	const connectionIssues = getConnectionIssues(deps.state, deps.config)
+	const connectionIssues = getConnectionIssues(deps.state)
 	const islandRouterTone = getIslandRouterTone({
 		configured: islandRouterStatus.config.configured,
 		connected: islandRouterStatus.connected,
@@ -1021,16 +1009,6 @@ export function createSystemStatusHandler(deps: DashboardDependencies) {
 									deps.state.connection.localToolCount > 0 ? 'good' : 'warn',
 							})}
 							${renderMetricCard({
-								label: 'Operator password',
-								value: deps.state.connection.operatorPasswordConfigured
-									? 'configured'
-									: 'missing',
-								detail: 'Required for CIMD OAuth consent on /authorize.',
-								tone: deps.state.connection.operatorPasswordConfigured
-									? 'good'
-									: 'warn',
-							})}
-							${renderMetricCard({
 								label: 'Mocks',
 								value: deps.state.connection.mocksEnabled
 									? 'enabled'
@@ -1071,12 +1049,6 @@ export function createSystemStatusHandler(deps: DashboardDependencies) {
 									{
 										label: 'MCP URL',
 										value: html`<code>${deps.config.mcpUrl}</code>`,
-									},
-									{
-										label: 'Operator password',
-										value: deps.state.connection.operatorPasswordConfigured
-											? 'configured'
-											: 'missing',
 									},
 									{
 										label: 'Data path',

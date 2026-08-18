@@ -88,7 +88,6 @@ test('normalizes HOME_CONNECTOR_ID and defaults the public MCP URL', () => {
 	using _env = createTemporaryEnv({
 		HOME_CONNECTOR_ID: ' Living-Room ',
 		HOME_MCP_PUBLIC_BASE_URL: undefined,
-		HOME_MCP_OPERATOR_PASSWORD: undefined,
 		NODE_ENV: 'test',
 	})
 
@@ -97,31 +96,29 @@ test('normalizes HOME_CONNECTOR_ID and defaults the public MCP URL', () => {
 	expect(config.publicBaseUrl).toBe('https://kody-home.doddsfamily.us')
 	expect(config.mcpPath).toBe('/mcp')
 	expect(config.mcpUrl).toBe('https://kody-home.doddsfamily.us/mcp')
-	expect(config.operatorPassword).toBeNull()
 })
 
 test('HOME_MCP_PUBLIC_BASE_URL overrides the published MCP origin', () => {
 	using _env = createTemporaryEnv({
 		...requiredConfigEnv,
 		HOME_MCP_PUBLIC_BASE_URL: 'https://home.example.test/',
-		HOME_MCP_OPERATOR_PASSWORD: 'op-secret',
 	})
 
 	const config = loadHomeConnectorConfig()
 	expect(config.publicBaseUrl).toBe('https://home.example.test')
 	expect(config.mcpUrl).toBe('https://home.example.test/mcp')
-	expect(config.operatorPassword).toBe('op-secret')
 })
 
-test('production HTTPS public URL requires HOME_MCP_OPERATOR_PASSWORD', () => {
+test('production HTTPS public URL boots without an operator password', () => {
 	using _env = createTemporaryEnv({
 		HOME_CONNECTOR_ID: 'default',
 		HOME_MCP_PUBLIC_BASE_URL: 'https://kody-home.doddsfamily.us',
-		HOME_MCP_OPERATOR_PASSWORD: undefined,
 		NODE_ENV: 'production',
 	})
 
-	expect(() => loadHomeConnectorConfig()).toThrow('HOME_MCP_OPERATOR_PASSWORD')
+	expect(loadHomeConnectorConfig().mcpUrl).toBe(
+		'https://kody-home.doddsfamily.us/mcp',
+	)
 })
 
 test('HOME_CONNECTOR_DATA_KEY is preferred over HOME_CONNECTOR_SHARED_SECRET', () => {

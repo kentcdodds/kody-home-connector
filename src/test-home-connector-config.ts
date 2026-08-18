@@ -14,7 +14,6 @@ export function createTestHomeConnectorConfig(
 		publicBaseUrl,
 		mcpPath,
 		mcpUrl: `${publicBaseUrl}${mcpPath}`,
-		operatorPassword: 'operator-password',
 		sharedSecret: 'secret',
 		accessNetworksUnleashedScanCidrs: ['192.168.1.10/32'],
 		accessNetworksUnleashedAllowInsecureTls: true,

@@ -1,11 +1,10 @@
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { type HomeConnectorStorage } from '../storage/index.ts'
 
 export const mcpOAuthScope = 'mcp'
 export const authorizationCodeTtlSeconds = 10 * 60
 export const accessTokenTtlSeconds = 60 * 60
 export const refreshTokenTtlSeconds = 30 * 24 * 60 * 60
-export const operatorSessionTtlSeconds = 60 * 60
 
 type SqliteDatabase = HomeConnectorStorage['db']
 
@@ -37,17 +36,6 @@ export function hashOAuthSecret(value: string) {
 
 export function createOAuthSecret() {
 	return randomBytes(32).toString('base64url')
-}
-
-export function secretsMatch(left: string, right: string) {
-	const leftHash = hashOAuthSecret(left)
-	const rightHash = hashOAuthSecret(right)
-	const leftBytes = Buffer.from(leftHash, 'hex')
-	const rightBytes = Buffer.from(rightHash, 'hex')
-	return (
-		leftBytes.length === rightBytes.length &&
-		timingSafeEqual(leftBytes, rightBytes)
-	)
 }
 
 export function initializeOAuthSchema(db: SqliteDatabase) {

@@ -29,17 +29,14 @@ npm run dev
 
 ## Configuration
 
-Required for a public HTTPS deploy:
+Public origin (defaults to the live hostname):
 
 ```bash
 HOME_MCP_PUBLIC_BASE_URL=https://kody-home.doddsfamily.us
-HOME_MCP_OPERATOR_PASSWORD=...
 ```
 
-`HOME_MCP_PUBLIC_BASE_URL` defaults to `https://kody-home.doddsfamily.us`.
-`HOME_MCP_OPERATOR_PASSWORD` is required when `NODE_ENV=production` and the
-public URL is HTTPS. The operator signs in on `/authorize` to approve a CIMD
-client.
+`/authorize` does not use an operator password. On the public hostname,
+Cloudflare Access is the human gate. The LAN origin is trusted.
 
 Optional local persistence:
 
@@ -62,11 +59,10 @@ Worker shared secret for auth. Those Worker reverse-dial settings are gone.
    routes `https://kody-home.doddsfamily.us` through the **Dodds Vault** tunnel.
    MCP/OAuth machine paths (`/mcp`, `/token`, `/revoke`, `/.well-known`,
    `/health`) bypass Access. The admin UI and `/authorize` require Cloudflare
-   Access, then `HOME_MCP_OPERATOR_PASSWORD`.
+   Access. The LAN origin is trusted and has no extra login.
 2. In Kody, open `/account/mcp-servers` and add
    `https://kody-home.doddsfamily.us/mcp` with name `home`.
-3. Open the authorization URL, pass Cloudflare Access, sign in with
-   `HOME_MCP_OPERATOR_PASSWORD`, and approve Kody.
+3. Open the authorization URL, pass Cloudflare Access, and approve Kody.
 4. Tools appear as `kody.mcp["home"].tool_name(...)`.
 
 After Kody ships the remote-connector removal PR, run package codemod

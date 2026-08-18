@@ -19,7 +19,6 @@ export type HomeConnectorConfig = {
 	publicBaseUrl: string
 	mcpPath: typeof homeMcpPath
 	mcpUrl: string
-	operatorPassword: string | null
 	sharedSecret: string | null
 	/**
 	 * Access Networks / RUCKUS Unleashed discovery probes these CIDRs over HTTPS.
@@ -109,25 +108,6 @@ function resolvePublicBaseUrl() {
 
 function resolveMcpUrl(publicBaseUrl: string) {
 	return `${publicBaseUrl}${homeMcpPath}`
-}
-
-function resolveOperatorPassword() {
-	return process.env.HOME_MCP_OPERATOR_PASSWORD?.trim() || null
-}
-
-function requireOperatorPasswordForPublicHttps(input: {
-	publicBaseUrl: string
-	operatorPassword: string | null
-}) {
-	if (input.operatorPassword) return
-	if (
-		process.env.NODE_ENV === 'production' &&
-		input.publicBaseUrl.startsWith('https://')
-	) {
-		throw new Error(
-			'HOME_MCP_OPERATOR_PASSWORD is required to authorize MCP clients against the public HTTPS home server.',
-		)
-	}
 }
 
 function resolveHomeConnectorDataPath() {
@@ -323,8 +303,6 @@ export function loadHomeConnectorConfig(): HomeConnectorConfig {
 	const publicBaseUrl = resolvePublicBaseUrl()
 	const mcpPath = homeMcpPath
 	const mcpUrl = resolveMcpUrl(publicBaseUrl)
-	const operatorPassword = resolveOperatorPassword()
-	requireOperatorPasswordForPublicHttps({ publicBaseUrl, operatorPassword })
 	// Encrypts secrets in local SQLite. Not used for Worker or MCP auth.
 	const sharedSecret =
 		process.env.HOME_CONNECTOR_DATA_KEY?.trim() ||
@@ -357,7 +335,6 @@ export function loadHomeConnectorConfig(): HomeConnectorConfig {
 		publicBaseUrl,
 		mcpPath,
 		mcpUrl,
-		operatorPassword,
 		sharedSecret,
 		accessNetworksUnleashedScanCidrs,
 		accessNetworksUnleashedAllowInsecureTls:
