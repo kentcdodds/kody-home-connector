@@ -11,9 +11,8 @@ import { createVenstarAdapter } from './adapters/venstar/index.ts'
 import { createHomeConnectorMcpServer } from './mcp/server.ts'
 import { loadHomeConnectorConfig } from './config.ts'
 import { createHomeConnectorLogger } from './logging/index.ts'
-import { createAppState } from './state.ts'
+import { createAppState, updateConnectionState } from './state.ts'
 import { createHomeConnectorStorage } from './storage/index.ts'
-import { createWorkerConnectorSessions } from './transport/worker-connector-sessions.ts'
 
 export function createHomeConnectorApp() {
 	const config = loadHomeConnectorConfig()
@@ -81,11 +80,14 @@ export function createHomeConnectorApp() {
 		accessNetworksUnleashed,
 		kasa,
 	})
-	const workerConnector = createWorkerConnectorSessions({
-		config,
-		state,
-		logger,
-		toolRegistry: mcp.createToolRegistry(),
+	const toolRegistry = mcp.createToolRegistry()
+	updateConnectionState(state, {
+		connectorId: config.homeConnectorId,
+		mcpUrl: config.mcpUrl,
+		listening: false,
+		mocksEnabled: config.mocksEnabled,
+		localToolCount: toolRegistry.list().length,
+		operatorPasswordConfigured: Boolean(config.operatorPassword),
 	})
 
 	return {
@@ -104,12 +106,20 @@ export function createHomeConnectorApp() {
 		accessNetworksUnleashed,
 		kasa,
 		mcp,
-		workerConnector,
+		toolRegistry,
 	}
 }
 
 export async function startHomeConnectorApp() {
 	const app = createHomeConnectorApp()
-	await app.workerConnector.start()
+	updateConnectionState(app.state, { listening: true })
+	app.logger.info(
+		'server.mcp.ready',
+		`Home MCP server ready at ${app.config.mcpUrl}`,
+		{
+			mcpUrl: app.config.mcpUrl,
+			localToolCount: app.state.connection.localToolCount,
+		},
+	)
 	return app
 }

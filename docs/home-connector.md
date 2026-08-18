@@ -1,101 +1,60 @@
-# Home Connector
+# Home MCP server
 
-The local `this repository` process is the bridge between Kody's Cloudflare
-Worker and devices that are only reachable on the local network.
+This process is the LAN-side MCP server for devices that are only reachable on
+the local network. Kody connects to it the same way it connects to any other
+remote MCP server: outbound Streamable HTTP to `/mcp`, then OAuth.
 
-It is a **remote connector**. In the common single-account setup it is
-identified by `HOME_CONNECTOR_ID` and opens one outbound Worker session to
-`/@{KODY_USERNAME}/connectors/{HOME_CONNECTOR_ID}` when `KODY_USERNAME` is
-configured. The same process can also dial multiple Kody accounts at once (see
-[Multi-account Worker sessions](#multi-account-worker-sessions)).
+Published URL:
 
-Core single-target deployment env vars:
-
-- `KODY_USERNAME` - the Kody username that owns this home connector. Required
-  for production Kody Worker URLs such as `https://heykody.app`; URL path
-  characters are encoded before building the ingress URL.
-- `HOME_CONNECTOR_ID` - the connector name saved in Kody
-  (`/account/remote-connectors`), defaulting to `default`. Values are trimmed
-  and lowercased before use.
-- `WORKER_BASE_URL` - the Kody Worker origin, defaulting to
-  `http://localhost:3742` for local development.
-- `HOME_CONNECTOR_SHARED_SECRET` - the shared secret used to authenticate the
-  connector after the WebSocket opens.
-
-### Multi-account Worker sessions
-
-Household deployments can run one LAN home-connector process that opens an
-independent Worker WebSocket session for each configured Kody account. All
-sessions share the same local tool registry, device adapters, and SQLite state.
-Heartbeat/reconnect are per session; stopping the process stops every session;
-one session failing does not permanently kill the others. Ordinary reconnect
-backoff grows from 2s to 30s. A Worker handshake rejection (invalid shared
-secret, session-key mismatch, or malformed hello) escalates that backoff from
-30s to 15 minutes and is reported to Sentry at most once per hour per distinct
-message and session. A `server.ping` no longer resets reconnect backoff, because
-the Worker can ping before it validates the connector hello.
-
-Configure targets with either:
-
-- `HOME_CONNECTOR_TARGETS` - JSON array of target objects, or
-- `HOME_CONNECTOR_TARGETS_FILE` - filesystem path to that JSON array
-
-Do not set both. An empty array is rejected. When neither multi-target var is
-set, the legacy single-target env vars above behave exactly as before (one
-session).
-
-Example for two accounts:
-
-```bash
-WORKER_BASE_URL=https://heykody.app
-HOME_CONNECTOR_TARGETS='[
-  {
-    "kodyUsername": "alice",
-    "sharedSecret": "alice-connector-secret",
-    "connectorId": "home"
-  },
-  {
-    "kodyUsername": "bob",
-    "sharedSecret": "bob-connector-secret",
-    "connectorId": "home"
-  }
-]'
+```
+https://kody-home.doddsfamily.us/mcp
 ```
 
-Per-target fields:
+The protocol is MCP `2026-07-28` (SDK v2 `createMcpHandler`, dual-era so current
+Kody clients can still connect). Authorization is CIMD only:
 
-- `kodyUsername` / `KODY_USERNAME` - required for production Worker URLs
-- `sharedSecret` / `HOME_CONNECTOR_SHARED_SECRET` - Worker auth secret for that
-  account's connector row
-- `connectorId` / `homeConnectorId` / `HOME_CONNECTOR_ID` - connector name in
-  that account's `/account/remote-connectors` list (defaults to `default`)
-- `workerBaseUrl` / `WORKER_BASE_URL` - optional override; otherwise inherits
-  the process-level `WORKER_BASE_URL`
+- `/.well-known/oauth-authorization-server` advertises
+  `client_id_metadata_document_supported: true` and no `registration_endpoint`
+- `/authorize` requires the operator password, fetches the client's HTTPS Client
+  ID Metadata Document, enforces PKCE S256, and requires RFC 8707 `resource` to
+  be this server's MCP URL
+- `/token` and `/revoke` issue and revoke hashed bearer tokens
+- `/mcp` requires `Authorization: Bearer` and answers 401 with
+  `WWW-Authenticate` `resource_metadata`
 
-Important: each Kody account still needs its own remote-connector registration
-and shared secret in Kody. This feature only multi-dials those existing per-user
-connector endpoints from one process. Local SQLite secret encryption uses
-process-level `HOME_CONNECTOR_SHARED_SECRET` when set, otherwise the first
-target's `sharedSecret`.
+There is no reverse-dial Worker WebSocket, no DCR, and no leftover Worker
+shared-secret handshake. Each Kody account adds the same public MCP URL at
+`/account/mcp-servers`. After authorize, tools are
+`kody.mcp["<server-name>"].tool_name(...)` (use `home` as the server name).
 
-`home_connector_get_metadata`, `/health`, and the admin dashboard expose
-per-session connection status (username + connector id) so multi-target
-deployments are observable.
+Core env vars:
 
-## Public-vs-internal boundary
+- `HOME_MCP_PUBLIC_BASE_URL` - public origin, default
+  `https://kody-home.doddsfamily.us`
+- `HOME_MCP_OPERATOR_PASSWORD` - required for production HTTPS; used only to
+  sign in on `/authorize`
+- `HOME_CONNECTOR_ID` - local SQLite namespace for adopted devices, default
+  `default`. Keep an existing id so device rows stay visible. This is not the
+  Kody MCP server name.
+- `HOME_CONNECTOR_DATA_KEY` / `HOME_CONNECTOR_SHARED_SECRET` - optional local
+  SQLite encryption key. Not used for MCP or Kody auth.
 
-The connector URL paths (for example `/@{KODY_USERNAME}/connectors/default/...`)
-are **WebSocket-only** on the public internet. The Worker entrypoint rejects
-non-WebSocket HTTP requests to connector routes with `404` before they reach the
-`HomeConnectorSession` Durable Object, and the DO `fetch()` handler itself also
-rejects non-upgrade HTTP with `404` as a second layer.
+Cloudflare (KCD account, zone `doddsfamily.us`) already publishes this origin:
 
-Worker-internal code that needs snapshot or tool data (such as
-`packages/worker/src/home/client.ts`) calls Durable Object RPC methods directly
-on the stub (`getSnapshot()`, `rpcListTools()`, `rpcCallTool()`), bypassing
-`fetch()` entirely. See
-[Remote connectors § Internal access](./remote-connectors.md#internal-access-do-rpc-not-http)
-for details.
+- Tunnel: **Dodds Vault** (`2b106400-17fb-466a-8abb-374e82608620`), same
+  remote-managed tunnel as jellyfin / mediarss / music / vault
+- Ingress: `kody-home.doddsfamily.us` â `http://192.168.1.234:4040`
+- DNS: proxied CNAME to `{tunnel-id}.cfargotunnel.com`
+- Access **Bypass** on `/mcp`, `/token`, `/revoke`, `/.well-known`, `/health`
+  so Kody's CIMD client can reach machine paths without a Zero Trust login
+- Access **Allow** on the rest of the hostname (admin UI and `/authorize`) for
+  `kentcdodds@gmail.com` and `me@kentcdodds.com`
+
+The Remix admin UI stays on the same HTTP server. Opening `/authorize` during
+CIMD requires Cloudflare Access first, then `HOME_MCP_OPERATOR_PASSWORD`.
+
+`home_connector_get_metadata`, `/health`, and the admin dashboard report MCP
+URL, listening state, and local tool count.
 
 ## Current adapters
 
@@ -114,9 +73,7 @@ The connector exposes these local-device families:
 - JellyFish Lighting controller discovery, zones, patterns, and daily/calendar
   schedules over the controller's local WebSocket API
 
-All surfaces are registered as MCP tools inside the connector and then exposed
-to the Worker through the existing outbound WebSocket session to
-`HomeConnectorSession`.
+All surfaces are registered as MCP tools on this process and served at `/mcp`.
 
 ## Bond bridge health and workflow fanout
 
@@ -138,11 +95,11 @@ request logs for diagnostics. Use it when investigating reliability history; use
 `bond_get_bridge_health` for lightweight workflow guards.
 
 The production "Bond bridge ZPGI01117 uptime monitor" is a Kody scheduled job,
-not source in this repository. It should be updated in Kody to call
-`home_default_bond_get_bridge_health({ bridgeId })` before
-`home_default_bond_get_bridge_version({ bridgeId })`. When health says the
-bridge is cooling down, the monitor should record a skipped/backoff sample and
-avoid the version fetch until `nextRecommendedAttemptAt`.
+not source in this repository. After adding this server in Kody as `home`,
+update that job to call `kody.mcp["home"].bond_get_bridge_health({ bridgeId })`
+before `kody.mcp["home"].bond_get_bridge_version({ bridgeId })`. When health
+says the bridge is cooling down, the monitor should record a skipped/backoff
+sample and avoid the version fetch until `nextRecommendedAttemptAt`.
 
 ## JellyFish Lighting integration
 
@@ -377,10 +334,9 @@ The adapter explicitly does not expose:
 
 The Island Router HTTP API proxy adapter lives under
 `src/adapters/island-router-api/` alongside the SSH diagnostics adapter. It lets
-the Worker drive `my.islandrouter.com` through the home connector WebSocket when
-the connector host is inside the user's LAN and can resolve
-`my.islandrouter.com` through the router's intercepting DNS. It will not work
-from a host outside that LAN path.
+Kody drive `my.islandrouter.com` through this MCP server when the connector host
+is inside the user's LAN and can resolve `my.islandrouter.com` through the
+router's intercepting DNS. It will not work from a host outside that LAN path.
 
 The adapter stores the user's Island PIN locally in SQLite, encrypted with
 `HOME_CONNECTOR_SHARED_SECRET`. The PIN is supplied through
@@ -480,9 +436,7 @@ capabilities.
 
 ## Local persistence
 
-Unlike the Worker-side home connector session, which persists its own view of
-the live socket state in Durable Object storage, the local connector also
-persists device-family-specific state on disk.
+The local process persists device-family-specific state on disk.
 
 The connector stores a local SQLite database containing:
 
@@ -514,8 +468,7 @@ directory with `HOME_CONNECTOR_DATA_PATH` or the full file path with
 `HOME_CONNECTOR_DB_PATH`.
 
 This persistence is intentionally local to the connector host so that pairing
-survives connector restarts without pushing device-local secrets into Worker
-storage.
+survives process restarts without pushing device-local secrets into Kody.
 
 ## Discovery and mocks
 

@@ -173,7 +173,7 @@ function renderKasaSetupPage(input: {
 					</p>
 					<p>
 						<a href="${routes.kasaStatus.href()}">Kasa status</a>
-						<span class="muted">— scan plugs and inspect readiness</span>
+						<span class="muted">â scan plugs and inspect readiness</span>
 						<br />
 						<a href="${routes.home.href()}">Dashboard</a>
 					</p>
@@ -277,15 +277,15 @@ function renderKasaStatusPage(input: {
 					</p>
 					<p>
 						<a href="${routes.kasaSetup.href()}">Kasa setup</a>
-						<span class="muted">— save TP-Link account credentials</span>
+						<span class="muted">â save TP-Link account credentials</span>
 					</p>
 					<form method="POST">
 						<button type="submit">Scan plugs</button>
 					</form>
 					${renderInfoRows([
 						{
-							label: 'Worker connection',
-							value: input.state.connection.connected
+							label: 'MCP server',
+							value: input.state.connection.listening
 								? 'connected'
 								: 'disconnected',
 						},

@@ -2,7 +2,7 @@
   "name": "kody-home-connector",
   "version": "0.0.0",
   "private": true,
-  "description": "Local-network home automation connector for Kody.",
+  "description": "Local-network home automation MCP server for Kody.",
   "homepage": "https://github.com/kentcdodds/kody-home-connector#readme",
   "bugs": {
     "url": "https://github.com/kentcdodds/kody-home-connector/issues"
@@ -26,6 +26,7 @@
   "dependencies": {
     "@kody-bot/connector-kit": "^2.0.0",
     "@modelcontextprotocol/sdk": "1.29.0",
+    "@modelcontextprotocol/server": "2.0.0",
     "@sentry/node": "^10.45.0",
     "dns-equal": "^1.0.0",
     "dns-txt": "^2.0.2",

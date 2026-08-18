@@ -160,7 +160,7 @@ function renderJellyfishStatusPage(input: {
 					<p>
 						<a href="${routes.jellyfishSetup.href()}">JellyFish setup</a>
 						<span class="muted">
-							— connector configuration and scan settings</span
+							â connector configuration and scan settings</span
 						>
 					</p>
 					<form method="POST">
@@ -168,9 +168,9 @@ function renderJellyfishStatusPage(input: {
 					</form>
 					<div class="status-grid">
 						<div>
-							<strong>Worker connection</strong>
+							<strong>MCP server</strong>
 							<div>
-								${input.state.connection.connected
+								${input.state.connection.listening
 									? 'connected'
 									: 'disconnected'}
 							</div>
@@ -294,7 +294,7 @@ export function createJellyfishSetupHandler(
 						</p>
 						<p>
 							<a href="${routes.jellyfishStatus.href()}">JellyFish status</a>
-							<span class="muted"> — scan and inspect live controllers</span>
+							<span class="muted"> â scan and inspect live controllers</span>
 						</p>
 						${renderInfoRows([
 							{

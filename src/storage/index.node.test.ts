@@ -26,21 +26,11 @@ import { createHomeConnectorStorage } from './index.ts'
 function createConfig(dbPath: string) {
 	return {
 		homeConnectorId: 'default',
-		kodyUsername: null,
-		workerBaseUrl: 'http://localhost:3742',
-		workerSessionUrl: 'http://localhost:3742/connectors/default',
-		workerWebSocketUrl: 'ws://localhost:3742/connectors/default',
+		publicBaseUrl: 'http://localhost:4040',
+		mcpPath: '/mcp',
+		mcpUrl: 'http://localhost:4040/mcp',
+		operatorPassword: 'operator-password',
 		sharedSecret: 'secret',
-		workerTargets: [
-			{
-				kodyUsername: null,
-				homeConnectorId: 'default',
-				sharedSecret: 'secret',
-				workerBaseUrl: 'http://localhost:3742',
-				workerSessionUrl: 'http://localhost:3742/connectors/default',
-				workerWebSocketUrl: 'ws://localhost:3742/connectors/default',
-			},
-		],
 		rokuDiscoveryUrl: 'http://roku.mock.local/discovery',
 		samsungTvDiscoveryUrl: 'http://samsung-tv.mock.local/discovery',
 		lutronDiscoveryUrl: 'http://lutron.mock.local/discovery',

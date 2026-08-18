@@ -180,9 +180,9 @@ function renderLutronStatusPage(input: {
 					</form>
 					<div class="status-grid">
 						<div>
-							<strong>Worker connection</strong>
+							<strong>MCP server</strong>
 							<div>
-								${input.state.connection.connected
+								${input.state.connection.listening
 									? 'connected'
 									: 'disconnected'}
 							</div>
@@ -268,7 +268,7 @@ export function createLutronSetupHandler(
 		async handler() {
 			const status = lutron.getStatus()
 			const diagnostics = [
-				`Worker URL: ${state.connection.workerUrl}`,
+				`MCP URL: ${state.connection.mcpUrl}`,
 				`Connector ID: ${state.connection.connectorId}`,
 				`Lutron discovery URL: ${state.lutronDiscoveryDiagnostics?.discoveryUrl ?? 'not scanned yet'}`,
 				`Discovered processors: ${String(status.processors.length)}`,
@@ -423,9 +423,9 @@ function renderRokuStatusPage(input: {
 					</form>
 					<div class="status-grid">
 						<div>
-							<strong>Worker connection</strong>
+							<strong>MCP server</strong>
 							<div>
-								${input.state.connection.connected
+								${input.state.connection.listening
 									? 'connected'
 									: 'disconnected'}
 							</div>
@@ -435,8 +435,8 @@ function renderRokuStatusPage(input: {
 							<div>${input.state.connection.connectorId}</div>
 						</div>
 						<div>
-							<strong>Last sync</strong>
-							<div>${input.state.connection.lastSyncAt ?? 'never'}</div>
+							<strong>Listening</strong>
+							<div>${input.state.connection.listening ? 'yes' : 'no'}</div>
 						</div>
 					</div>
 				</section>
@@ -512,11 +512,11 @@ export function createRokuSetupHandler(state: HomeConnectorState) {
 		middleware: [],
 		async handler() {
 			const diagnostics = [
-				`Worker URL: ${state.connection.workerUrl}`,
+				`MCP URL: ${state.connection.mcpUrl}`,
 				`Connector ID: ${state.connection.connectorId}`,
-				state.connection.sharedSecret
-					? 'Shared secret is configured.'
-					: 'Shared secret is missing.',
+				state.connection.operatorPasswordConfigured
+					? 'Operator password is configured.'
+					: 'Operator password is missing.',
 				state.connection.mocksEnabled
 					? 'Mocks are enabled for this connector instance.'
 					: 'Mocks are disabled for this connector instance.',
@@ -682,9 +682,9 @@ function renderSamsungTvStatusPage(input: {
 					</form>
 					<div class="status-grid">
 						<div>
-							<strong>Worker connection</strong>
+							<strong>MCP server</strong>
 							<div>
-								${input.state.connection.connected
+								${input.state.connection.listening
 									? 'connected'
 									: 'disconnected'}
 							</div>
@@ -770,7 +770,7 @@ export function createSamsungTvSetupHandler(
 		async handler() {
 			const status = samsungTv.getStatus()
 			const diagnostics = [
-				`Worker URL: ${state.connection.workerUrl}`,
+				`MCP URL: ${state.connection.mcpUrl}`,
 				`Connector ID: ${state.connection.connectorId}`,
 				`Samsung discovery URL: ${state.samsungTvDiscoveryDiagnostics?.discoveryUrl ?? 'not scanned yet'}`,
 				`Paired Samsung TVs: ${String(status.pairedCount)}`,
