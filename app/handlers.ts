@@ -514,9 +514,6 @@ export function createRokuSetupHandler(state: HomeConnectorState) {
 			const diagnostics = [
 				`MCP URL: ${state.connection.mcpUrl}`,
 				`Connector ID: ${state.connection.connectorId}`,
-				state.connection.operatorPasswordConfigured
-					? 'Operator password is configured.'
-					: 'Operator password is missing.',
 				state.connection.mocksEnabled
 					? 'Mocks are enabled for this connector instance.'
 					: 'Mocks are disabled for this connector instance.',

@@ -9,7 +9,6 @@ function createConfig(scanCidrs: Array<string>): HomeConnectorConfig {
 		publicBaseUrl: 'http://localhost:4040',
 		mcpPath: '/mcp',
 		mcpUrl: 'http://localhost:4040/mcp',
-		operatorPassword: 'operator-password',
 		sharedSecret: 'secret',
 		accessNetworksUnleashedScanCidrs: scanCidrs,
 		accessNetworksUnleashedAllowInsecureTls: true,

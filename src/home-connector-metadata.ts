@@ -14,7 +14,6 @@ export type HomeConnectorRuntimeMetadata = {
 	sentryEnvironment: string | null
 	port: number
 	processUptimeSeconds: number
-	operatorPasswordConfigured: boolean
 	dataKeyConfigured: boolean
 	localToolCount: number
 	listening: boolean
@@ -63,7 +62,6 @@ export function buildHomeConnectorRuntimeMetadata(input: {
 		sentryEnvironment: readOptionalEnvString(env, 'SENTRY_ENVIRONMENT'),
 		port: input.config.port,
 		processUptimeSeconds: Math.floor(process.uptime()),
-		operatorPasswordConfigured: Boolean(input.config.operatorPassword),
 		dataKeyConfigured: Boolean(input.config.sharedSecret),
 		localToolCount: input.state.connection.localToolCount,
 		listening: input.state.connection.listening,

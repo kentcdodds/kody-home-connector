@@ -16,7 +16,6 @@ describe('buildHomeConnectorRuntimeMetadata', () => {
 			listening: true,
 			mocksEnabled: false,
 			localToolCount: 12,
-			operatorPasswordConfigured: true,
 		})
 
 		const metadata = buildHomeConnectorRuntimeMetadata({
@@ -40,7 +39,6 @@ describe('buildHomeConnectorRuntimeMetadata', () => {
 			mocksEnabled: false,
 			sentryEnabled: true,
 			sentryEnvironment: 'production',
-			operatorPasswordConfigured: Boolean(config.operatorPassword),
 			dataKeyConfigured: Boolean(config.sharedSecret),
 			localToolCount: 12,
 			listening: true,

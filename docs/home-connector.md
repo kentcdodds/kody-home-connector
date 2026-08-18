@@ -15,9 +15,10 @@ Kody clients can still connect). Authorization is CIMD only:
 
 - `/.well-known/oauth-authorization-server` advertises
   `client_id_metadata_document_supported: true` and no `registration_endpoint`
-- `/authorize` requires the operator password, fetches the client's HTTPS Client
-  ID Metadata Document, enforces PKCE S256, and requires RFC 8707 `resource` to
-  be this server's MCP URL
+- `/authorize` fetches the client's HTTPS Client ID Metadata Document, enforces
+  PKCE S256, and requires RFC 8707 `resource` to be this server's MCP URL.
+  Public `/authorize` is gated by Cloudflare Access. The LAN origin is trusted,
+  so there is no operator password.
 - `/token` and `/revoke` issue and revoke hashed bearer tokens
 - `/mcp` requires `Authorization: Bearer` and answers 401 with
   `WWW-Authenticate` `resource_metadata`
@@ -31,8 +32,6 @@ Core env vars:
 
 - `HOME_MCP_PUBLIC_BASE_URL` - public origin, default
   `https://kody-home.doddsfamily.us`
-- `HOME_MCP_OPERATOR_PASSWORD` - required for production HTTPS; used only to
-  sign in on `/authorize`
 - `HOME_CONNECTOR_ID` - local SQLite namespace for adopted devices, default
   `default`. Keep an existing id so device rows stay visible. This is not the
   Kody MCP server name.
@@ -45,13 +44,14 @@ Cloudflare (KCD account, zone `doddsfamily.us`) already publishes this origin:
   remote-managed tunnel as jellyfin / mediarss / music / vault
 - Ingress: `kody-home.doddsfamily.us` → `http://192.168.1.234:4040`
 - DNS: proxied CNAME to `{tunnel-id}.cfargotunnel.com`
-- Access **Bypass** on `/mcp`, `/token`, `/revoke`, `/.well-known`, `/health`
-  so Kody's CIMD client can reach machine paths without a Zero Trust login
+- Access **Bypass** on `/mcp`, `/token`, `/revoke`, `/.well-known`, `/health` so
+  Kody's CIMD client can reach machine paths without a Zero Trust login
 - Access **Allow** on the rest of the hostname (admin UI and `/authorize`) for
   `kentcdodds@gmail.com` and `me@kentcdodds.com`
 
 The Remix admin UI stays on the same HTTP server. Opening `/authorize` during
-CIMD requires Cloudflare Access first, then `HOME_MCP_OPERATOR_PASSWORD`.
+CIMD requires Cloudflare Access on the public hostname. The LAN origin is
+trusted.
 
 `home_connector_get_metadata`, `/health`, and the admin dashboard report MCP
 URL, listening state, and local tool count.

@@ -6,7 +6,6 @@ import { createHomeMcpOAuthHandler } from './http.ts'
 
 const clientId = 'https://kody.codes/oauth/client-metadata.json'
 const redirectUri = 'https://kody.codes/account/mcp-servers/oauth/callback'
-const operatorPassword = 'operator-password'
 
 function createCodeChallenge(verifier: string) {
 	return createHash('sha256').update(verifier).digest('base64url')
@@ -15,7 +14,6 @@ function createCodeChallenge(verifier: string) {
 function createOAuthApp() {
 	const config = createTestHomeConnectorConfig({
 		publicBaseUrl: 'https://kody-home.doddsfamily.us',
-		operatorPassword,
 	})
 	const storage = createHomeConnectorStorage(config)
 	const oauth = createHomeMcpOAuthHandler({ config, storage })
@@ -117,29 +115,12 @@ test('CIMD authorize + PKCE issues a bearer token for the MCP resource', async (
 			scope: 'mcp',
 			state: 'abc',
 		})
-		const login = await dispatch(
-			oauth,
-			new Request('https://kody-home.doddsfamily.us/authorize', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-				body: new URLSearchParams({
-					intent: 'login',
-					query: `?${query.toString()}`,
-					password: operatorPassword,
-				}),
-			}),
-		)
-		expect(login?.status).toBe(302)
-		const cookie = login?.headers.get('Set-Cookie') ?? ''
-		expect(cookie).toContain('home_mcp_operator=')
-
 		const approve = await dispatch(
 			oauth,
 			new Request('https://kody-home.doddsfamily.us/authorize', {
 				method: 'POST',
 				headers: {
 					'Content-Type': 'application/x-www-form-urlencoded',
-					Cookie: cookie.split(';', 1)[0] ?? '',
 				},
 				body: new URLSearchParams({
 					intent: 'approve',

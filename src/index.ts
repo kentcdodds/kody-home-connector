@@ -87,7 +87,6 @@ export function createHomeConnectorApp() {
 		listening: false,
 		mocksEnabled: config.mocksEnabled,
 		localToolCount: toolRegistry.list().length,
-		operatorPasswordConfigured: Boolean(config.operatorPassword),
 	})
 
 	return {
