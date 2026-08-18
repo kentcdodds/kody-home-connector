@@ -43,7 +43,7 @@ Cloudflare (KCD account, zone `doddsfamily.us`) already publishes this origin:
 
 - Tunnel: **Dodds Vault** (`2b106400-17fb-466a-8abb-374e82608620`), same
   remote-managed tunnel as jellyfin / mediarss / music / vault
-- Ingress: `kody-home.doddsfamily.us` â `http://192.168.1.234:4040`
+- Ingress: `kody-home.doddsfamily.us` → `http://192.168.1.234:4040`
 - DNS: proxied CNAME to `{tunnel-id}.cfargotunnel.com`
 - Access **Bypass** on `/mcp`, `/token`, `/revoke`, `/.well-known`, `/health`
   so Kody's CIMD client can reach machine paths without a Zero Trust login

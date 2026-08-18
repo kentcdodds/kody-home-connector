@@ -86,7 +86,7 @@ function renderBondStatusPage(input: {
 					</p>
 					<p>
 						<a href="${routes.bondSetup.href()}">Bond token setup</a>
-						<span class="muted"> â paste or retrieve the local API token</span>
+						<span class="muted"> — paste or retrieve the local API token</span>
 					</p>
 					<form method="POST">
 						<button type="submit">Scan now</button>
@@ -203,8 +203,8 @@ function renderBondSetupPage(input: {
 	const bridgeOptions = bridges.map(
 		(bridge) =>
 			html`<option value="${bridge.bridgeId}">
-				${bridge.instanceName} (${bridge.bridgeId}) â token:
-				${bridge.hasStoredToken ? 'yes' : 'no'} â adopted:
+				${bridge.instanceName} (${bridge.bridgeId}) — token:
+				${bridge.hasStoredToken ? 'yes' : 'no'} — adopted:
 				${bridge.adopted ? 'yes' : 'no'}
 			</option>`,
 	)
@@ -229,14 +229,14 @@ function renderBondSetupPage(input: {
 					</p>
 					<p>
 						<a href="${routes.bondStatus.href()}">Bond status</a>
-						<span class="muted"> â scan the network for bridges first</span>
+						<span class="muted"> — scan the network for bridges first</span>
 					</p>
 					<p class="muted">
 						Override discovery with <code>BOND_DISCOVERY_URL</code> (mDNS URL or
 						HTTP JSON discovery document).
 					</p>
 					<p class="muted">
-						Connector ID <code>${input.state.connection.connectorId}</code> Â·
+						Connector ID <code>${input.state.connection.connectorId}</code> ·
 						Mocks
 						<code>${String(input.state.connection.mocksEnabled)}</code>
 					</p>
@@ -280,7 +280,7 @@ function renderBondSetupPage(input: {
 					<p class="muted">
 						When the bridge allows it (for example within ~10 minutes after a
 						power cycle, or while the token endpoint is unlocked), this asks the
-						bridge for <code>/v2/token</code> and stores the result â nothing is
+						bridge for <code>/v2/token</code> and stores the result — nothing is
 						displayed in the browser.
 					</p>
 					${bridges.length === 0

@@ -282,7 +282,7 @@ function renderVenstarStatusPage(input: {
 					<p>
 						<a href="${routes.venstarSetup.href()}">Venstar setup</a>
 						<span class="muted">
-							â add, remove, and review managed thermostats
+							— add, remove, and review managed thermostats
 						</span>
 					</p>
 					<form method="POST">
@@ -438,7 +438,7 @@ export function createVenstarSetupHandler(
 						<p>
 							<a href="${routes.venstarStatus.href()}">Venstar status</a>
 							<span class="muted">
-								â scan the network and verify live thermostat status
+								— scan the network and verify live thermostat status
 							</span>
 						</p>
 						${renderInfoRows([

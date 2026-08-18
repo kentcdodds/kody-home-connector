@@ -160,7 +160,7 @@ function renderJellyfishStatusPage(input: {
 					<p>
 						<a href="${routes.jellyfishSetup.href()}">JellyFish setup</a>
 						<span class="muted">
-							â connector configuration and scan settings</span
+							— connector configuration and scan settings</span
 						>
 					</p>
 					<form method="POST">
@@ -294,7 +294,7 @@ export function createJellyfishSetupHandler(
 						</p>
 						<p>
 							<a href="${routes.jellyfishStatus.href()}">JellyFish status</a>
-							<span class="muted"> â scan and inspect live controllers</span>
+							<span class="muted"> — scan and inspect live controllers</span>
 						</p>
 						${renderInfoRows([
 							{

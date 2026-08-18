@@ -3141,7 +3141,7 @@ export function createHomeConnectorMcpServer(input: {
 		{
 			name: 'sonos_group_players',
 			title: 'Group Sonos Players',
-			description: 'Join a Sonos player to another playerâs group coordinator.',
+			description: 'Join a Sonos player to another player’s group coordinator.',
 			...buildToolInputSchema({
 				playerId: z.string().min(1),
 				coordinatorPlayerId: z.string().min(1),
