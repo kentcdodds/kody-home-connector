@@ -13,7 +13,7 @@ const homeMcpServerInfo = {
 } as const
 
 export const homeMcpHttpInstructions =
-	'Home MCP server for local-network devices. Tools stay on this process; Kody connects over Streamable HTTP at /mcp after CIMD OAuth.'
+	'Home MCP server for local-network devices, including an Android phone companion over WebSocket at /phone/ws. Tools stay on this process; Kody connects over Streamable HTTP at /mcp after CIMD OAuth. Phone tools are kody.mcp["home"].phone_*.'
 
 export function createHomeMcpHttpHandler(input: {
 	toolRegistry: HomeConnectorToolRegistry

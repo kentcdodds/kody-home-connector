@@ -4,6 +4,7 @@ import { createIslandRouterApiAdapter } from './adapters/island-router-api/index
 import { createIslandRouterAdapter } from './adapters/island-router/index.ts'
 import { createJellyfishAdapter } from './adapters/jellyfish/index.ts'
 import { createKasaAdapter } from './adapters/kasa/index.ts'
+import { createPhoneAdapter } from './adapters/phone/index.ts'
 import { createLutronAdapter } from './adapters/lutron/index.ts'
 import { createSamsungTvAdapter } from './adapters/samsung-tv/index.ts'
 import { createSonosAdapter } from './adapters/sonos/index.ts'
@@ -65,6 +66,10 @@ export function createHomeConnectorApp() {
 		state,
 		storage,
 	})
+	const phone = createPhoneAdapter({
+		config,
+		logger,
+	})
 	const mcp = createHomeConnectorMcpServer({
 		config,
 		state,
@@ -79,6 +84,7 @@ export function createHomeConnectorApp() {
 		venstar,
 		accessNetworksUnleashed,
 		kasa,
+		phone,
 	})
 	const toolRegistry = mcp.createToolRegistry()
 	updateConnectionState(state, {
@@ -104,6 +110,7 @@ export function createHomeConnectorApp() {
 		venstar,
 		accessNetworksUnleashed,
 		kasa,
+		phone,
 		mcp,
 		toolRegistry,
 	}

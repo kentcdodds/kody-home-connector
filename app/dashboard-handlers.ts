@@ -26,6 +26,7 @@ import { type IslandRouterApiStatus } from '../src/adapters/island-router-api/ty
 import { type createIslandRouterAdapter } from '../src/adapters/island-router/index.ts'
 import { type createJellyfishAdapter } from '../src/adapters/jellyfish/index.ts'
 import { type createKasaAdapter } from '../src/adapters/kasa/index.ts'
+import { type createPhoneAdapter } from '../src/adapters/phone/index.ts'
 import { type createLutronAdapter } from '../src/adapters/lutron/index.ts'
 import { type createSamsungTvAdapter } from '../src/adapters/samsung-tv/index.ts'
 import { type createSonosAdapter } from '../src/adapters/sonos/index.ts'
@@ -52,6 +53,7 @@ type DashboardDependencies = {
 	jellyfish: ReturnType<typeof createJellyfishAdapter>
 	venstar: ReturnType<typeof createVenstarAdapter>
 	kasa: ReturnType<typeof createKasaAdapter>
+	phone: ReturnType<typeof createPhoneAdapter>
 }
 
 type DashboardSnapshot = {
@@ -80,6 +82,12 @@ type DashboardSnapshot = {
 		adopted: number
 		withCredentials: number
 		diagnosticsCaptured: boolean
+	}
+	phone: {
+		tokenConfigured: boolean
+		connected: boolean
+		deviceName: string | null
+		lastSeenAt: string | null
 	}
 	sonos: {
 		adopted: number
@@ -238,6 +246,7 @@ async function loadDashboardSnapshot(
 	const accessNetworksUnleashedAdoptedController =
 		deps.accessNetworksUnleashed.getAdoptedController()
 	const kasaStatus = deps.kasa.getStatus()
+	const phoneStatus = deps.phone.getStatus()
 	const [venstarStatus, loadedIslandRouterStatus] = await Promise.all([
 		deps.venstar.listThermostatsWithStatus(),
 		input.islandRouterStatus
@@ -286,6 +295,12 @@ async function loadDashboardSnapshot(
 			adopted: kasaStatus.adopted.length,
 			withCredentials: kasaStatus.config.configured ? 1 : 0,
 			diagnosticsCaptured: deps.state.kasaDiscoveryDiagnostics != null,
+		},
+		phone: {
+			tokenConfigured: phoneStatus.tokenConfigured,
+			connected: phoneStatus.connected,
+			deviceName: phoneStatus.lastHello?.deviceName ?? null,
+			lastSeenAt: phoneStatus.lastSeenAt,
 		},
 		sonos: {
 			adopted: sonosStatus.adopted.length,
@@ -345,6 +360,7 @@ async function loadDashboardSnapshot(
 				lutronStatus.processors.length +
 				(accessNetworksUnleashedAdoptedController ? 1 : 0) +
 				kasaStatus.adopted.length +
+				(phoneStatus.connected ? 1 : 0) +
 				sonosStatus.adopted.length +
 				samsungStatus.adopted.length +
 				bondStatus.adopted.length +
@@ -534,6 +550,42 @@ function renderIntegrationSummaryCards(snapshot: DashboardSnapshot) {
 			secondaryLink: {
 				href: routes.kasaSetup.href(),
 				label: 'Kasa setup',
+			},
+		})}
+		${renderSummaryCard({
+			title: 'Phone',
+			description: 'Android companion over WebSocket at /phone/ws.',
+			status: snapshot.phone.connected
+				? (snapshot.phone.deviceName ?? 'Connected')
+				: snapshot.phone.tokenConfigured
+					? 'Offline'
+					: 'Token missing',
+			tone: snapshot.phone.connected
+				? 'good'
+				: snapshot.phone.tokenConfigured
+					? 'warn'
+					: 'warn',
+			metrics: [
+				{
+					label: 'Token',
+					value: snapshot.phone.tokenConfigured ? 'configured' : 'missing',
+				},
+				{
+					label: 'Companion',
+					value: snapshot.phone.connected ? 'connected' : 'offline',
+				},
+				{
+					label: 'Last seen',
+					value: snapshot.phone.lastSeenAt ?? 'never',
+				},
+			],
+			primaryLink: {
+				href: routes.phoneStatus.href(),
+				label: 'Phone status',
+			},
+			secondaryLink: {
+				href: routes.phoneSetup.href(),
+				label: 'Phone setup',
 			},
 		})}
 		${renderSummaryCard({
@@ -756,6 +808,20 @@ function renderDrillDownActions(snapshot: DashboardSnapshot) {
 							: 'neutral',
 			},
 		})}
+		${renderActionCard({
+			href: routes.phoneStatus.href(),
+			title: 'Android phone companion',
+			description:
+				'See whether Kent’s phone is connected on /phone/ws and confirm PHONE_DEVICE_TOKEN is configured.',
+			badge: {
+				label: snapshot.phone.connected
+					? 'Connected'
+					: snapshot.phone.tokenConfigured
+						? 'Offline'
+						: 'Token missing',
+				tone: snapshot.phone.connected ? 'good' : 'warn',
+			},
+		})}
 	</div>`
 }
 
@@ -817,6 +883,20 @@ function renderDiagnosticsHighlights(snapshot: DashboardSnapshot) {
 			tone: 'warn',
 			detail:
 				'Kasa plugs are known, but TP-Link/Kasa account credentials are not configured.',
+		})
+	}
+	if (!snapshot.phone.tokenConfigured) {
+		highlights.push({
+			label: 'Phone token',
+			tone: 'warn',
+			detail:
+				'PHONE_DEVICE_TOKEN is not set, so the Android companion cannot connect.',
+		})
+	} else if (!snapshot.phone.connected) {
+		highlights.push({
+			label: 'Phone companion',
+			tone: 'warn',
+			detail: 'No Android companion is connected on /phone/ws.',
 		})
 	}
 	if (snapshot.venstar.offline > 0) {
@@ -1328,6 +1408,24 @@ export function createDiagnosticsHandler(deps: DashboardDependencies) {
 					links: [
 						{ href: routes.kasaStatus.href(), label: 'Kasa status' },
 						{ href: routes.kasaSetup.href(), label: 'Kasa setup' },
+					],
+				},
+				{
+					name: 'Android phone companion',
+					status: snapshot.phone.connected
+						? 'Connected'
+						: snapshot.phone.tokenConfigured
+							? 'Offline'
+							: 'Token missing',
+					tone: snapshot.phone.connected ? 'good' : 'warn',
+					details: snapshot.phone.connected
+						? `Connected as ${snapshot.phone.deviceName ?? 'Android companion'}.`
+						: snapshot.phone.tokenConfigured
+							? 'PHONE_DEVICE_TOKEN is set, but no phone is connected on /phone/ws.'
+							: 'Set PHONE_DEVICE_TOKEN so the Android companion can authenticate.',
+					links: [
+						{ href: routes.phoneStatus.href(), label: 'Phone status' },
+						{ href: routes.phoneSetup.href(), label: 'Phone setup' },
 					],
 				},
 				{

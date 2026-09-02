@@ -13,6 +13,7 @@ import {
 	serveHomeMcpRequest,
 } from '../src/mcp/http-mcp.ts'
 import { createHomeMcpOAuthHandler } from '../src/oauth/http.ts'
+import { attachPhoneWebSocketUpgrade } from '../src/adapters/phone/index.ts'
 
 const signalExitCodeByName = {
 	SIGINT: 130,
@@ -122,6 +123,7 @@ async function main() {
 		connector.jellyfish,
 		connector.venstar,
 		connector.kasa,
+		connector.phone,
 	)
 
 	const server = http.createServer(
@@ -173,6 +175,11 @@ async function main() {
 				mcpUrl: connector.config.mcpUrl,
 			},
 		)
+	})
+
+	attachPhoneWebSocketUpgrade({
+		server,
+		phone: connector.phone,
 	})
 
 	installGracefulShutdownHandlers({

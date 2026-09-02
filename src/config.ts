@@ -6,6 +6,7 @@ import {
 } from '@kody-bot/connector-kit/urls'
 
 export const defaultHomePublicBaseUrl = 'https://kody-home.doddsfamily.us'
+export const defaultHomeLanListenHost = '192.168.1.234'
 export const homeMcpPath = '/mcp'
 
 export type HomeConnectorConfig = {
@@ -38,6 +39,11 @@ export type HomeConnectorConfig = {
 	kasaRequestTimeoutMs: number
 	kasaUsername: string | null
 	kasaPassword: string | null
+	/**
+	 * Shared secret the Android companion presents on `/phone/ws`.
+	 * Env-only for v1 (`PHONE_DEVICE_TOKEN`). Never log the raw value.
+	 */
+	phoneDeviceToken: string | null
 	islandRouterHost: string | null
 	islandRouterPort: number
 	islandRouterUsername: string | null
@@ -351,6 +357,7 @@ export function loadHomeConnectorConfig(): HomeConnectorConfig {
 				: 8000,
 		kasaUsername: process.env.KASA_USERNAME?.trim() || null,
 		kasaPassword: process.env.KASA_PASSWORD?.trim() || null,
+		phoneDeviceToken: process.env.PHONE_DEVICE_TOKEN?.trim() || null,
 		islandRouterHost: process.env.ISLAND_ROUTER_HOST?.trim() || null,
 		islandRouterPort:
 			islandRouterPort != null &&

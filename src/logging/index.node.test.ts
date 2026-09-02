@@ -39,6 +39,7 @@ function createConfig(): HomeConnectorConfig {
 		kasaRequestTimeoutMs: 8000,
 		kasaUsername: null,
 		kasaPassword: null,
+		phoneDeviceToken: null,
 		bondRequestPaceMs: 0,
 		bondCircuitBreakerCooldownMs: 0,
 		jellyfishDiscoveryUrl: null,

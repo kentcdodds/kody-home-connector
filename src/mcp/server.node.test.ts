@@ -9,6 +9,7 @@ import { type IslandRouterCommandRequest } from '../adapters/island-router/types
 import { createIslandRouterAdapter } from '../adapters/island-router/index.ts'
 import { createJellyfishAdapter } from '../adapters/jellyfish/index.ts'
 import { createKasaAdapter } from '../adapters/kasa/index.ts'
+import { createPhoneAdapter } from '../adapters/phone/index.ts'
 import { createLutronAdapter } from '../adapters/lutron/index.ts'
 import { createSonosAdapter } from '../adapters/sonos/index.ts'
 import { createSamsungTvAdapter } from '../adapters/samsung-tv/index.ts'
@@ -502,6 +503,7 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 		venstar,
 		accessNetworksUnleashed,
 		kasa,
+		phone: createPhoneAdapter({ config }),
 	})
 
 	try {
@@ -1201,6 +1203,7 @@ test('mcp server exposes island router write tools when host verification is con
 		venstar,
 		accessNetworksUnleashed,
 		kasa,
+		phone: createPhoneAdapter({ config }),
 	})
 
 	try {

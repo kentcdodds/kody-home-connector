@@ -10,6 +10,7 @@ function createConfig(scanCidrs: Array<string>): HomeConnectorConfig {
 		mcpPath: '/mcp',
 		mcpUrl: 'http://localhost:4040/mcp',
 		sharedSecret: 'secret',
+		phoneDeviceToken: null,
 		accessNetworksUnleashedScanCidrs: scanCidrs,
 		accessNetworksUnleashedAllowInsecureTls: true,
 		accessNetworksUnleashedRequestTimeoutMs: 1_500,
