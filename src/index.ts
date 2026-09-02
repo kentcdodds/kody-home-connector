@@ -68,6 +68,7 @@ export function createHomeConnectorApp() {
 	})
 	const phone = createPhoneAdapter({
 		config,
+		storage,
 		logger,
 	})
 	const mcp = createHomeConnectorMcpServer({

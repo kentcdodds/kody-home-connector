@@ -40,8 +40,9 @@ export type HomeConnectorConfig = {
 	kasaUsername: string | null
 	kasaPassword: string | null
 	/**
-	 * Shared secret the Android companion presents on `/phone/ws`.
-	 * Env-only for v1 (`PHONE_DEVICE_TOKEN`). Never log the raw value.
+	 * Optional env fallback for the Android companion token on `/phone/ws`.
+	 * Prefer the encrypted token stored from `/phone/setup`. Never log the raw
+	 * value.
 	 */
 	phoneDeviceToken: string | null
 	islandRouterHost: string | null

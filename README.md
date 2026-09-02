@@ -50,7 +50,10 @@ Keep an existing `HOME_CONNECTOR_ID` so adopted-device rows stay visible. That
 id is only a local SQLite namespace. The Kody MCP server name is chosen when you
 add the server in Kody (`home` is the usual name).
 
-Android companion (optional):
+Android companion (optional): save the shared device token on `/phone/setup`. It
+is encrypted in local SQLite with `HOME_CONNECTOR_DATA_KEY`.
+`PHONE_DEVICE_TOKEN` remains an optional env fallback if no stored token is
+present.
 
 ```bash
 PHONE_DEVICE_TOKEN=...

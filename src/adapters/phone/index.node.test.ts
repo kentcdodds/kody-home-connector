@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events'
 import type { IncomingMessage } from 'node:http'
 import { expect, test } from 'vitest'
+import { createHomeConnectorStorage } from '../../storage/index.ts'
 import { createTestHomeConnectorConfig } from '../../test-home-connector-config.ts'
 import {
 	authorizePhoneUpgrade,
@@ -294,6 +295,93 @@ test('status URLs use the configured port for loopback and LAN', () => {
 		localWebSocketUrl: 'ws://127.0.0.1:4141/phone/ws',
 		lanWebSocketUrl: 'ws://192.168.1.234:4141/phone/ws',
 	})
+})
+
+test('stored token is used for auth and takes precedence over env', () => {
+	const storage = createHomeConnectorStorage(
+		createTestHomeConnectorConfig({
+			dbPath: ':memory:',
+			phoneDeviceToken: 'env-token',
+		}),
+	)
+	try {
+		const phone = createPhoneAdapter({
+			config: createTestHomeConnectorConfig({
+				phoneDeviceToken: 'env-token',
+			}),
+			storage,
+		})
+		expect(phone.getStatus()).toMatchObject({
+			tokenConfigured: true,
+			hasStoredToken: false,
+			hasEnvToken: true,
+			tokenSource: 'env',
+		})
+		phone.setDeviceToken('stored-token')
+		expect(phone.getStatus()).toMatchObject({
+			tokenConfigured: true,
+			hasStoredToken: true,
+			hasEnvToken: true,
+			tokenSource: 'stored',
+		})
+		expect(
+			phone.authorizeUpgrade({
+				url: '/phone/ws?token=stored-token',
+				headers: {},
+			}),
+		).toEqual({ ok: true })
+		expect(
+			phone.authorizeUpgrade({
+				url: '/phone/ws?token=env-token',
+				headers: {},
+			}),
+		).toMatchObject({ ok: false, status: 401 })
+		phone.clearStoredDeviceToken()
+		expect(phone.getStatus()).toMatchObject({
+			tokenConfigured: true,
+			hasStoredToken: false,
+			tokenSource: 'env',
+		})
+		expect(
+			phone.authorizeUpgrade({
+				url: '/phone/ws?token=env-token',
+				headers: {},
+			}),
+		).toEqual({ ok: true })
+	} finally {
+		storage.close()
+	}
+})
+
+test('rotating the stored token disconnects the current companion', async () => {
+	const storage = createHomeConnectorStorage(
+		createTestHomeConnectorConfig({
+			dbPath: ':memory:',
+			phoneDeviceToken: null,
+		}),
+	)
+	try {
+		const phone = createPhoneAdapter({
+			config: createTestHomeConnectorConfig({
+				phoneDeviceToken: null,
+			}),
+			storage,
+		})
+		phone.setDeviceToken('first-token')
+		const socket = await connectPhone(phone)
+		expect(phone.getStatus().connected).toBe(true)
+		phone.setDeviceToken('second-token')
+		expect(socket.closed).toBe(true)
+		expect(phone.getStatus().connected).toBe(false)
+		expect(
+			phone.authorizeUpgrade({
+				url: '/phone/ws?token=second-token',
+				headers: {},
+			}),
+		).toEqual({ ok: true })
+	} finally {
+		storage.close()
+	}
 })
 
 test('ping from the phone is answered with pong', async () => {

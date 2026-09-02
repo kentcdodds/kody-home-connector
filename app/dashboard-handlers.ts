@@ -812,7 +812,7 @@ function renderDrillDownActions(snapshot: DashboardSnapshot) {
 			href: routes.phoneStatus.href(),
 			title: 'Android phone companion',
 			description:
-				'See whether Kent’s phone is connected on /phone/ws and confirm PHONE_DEVICE_TOKEN is configured.',
+				'See whether Kent’s phone is connected on /phone/ws and save the device token on Phone setup.',
 			badge: {
 				label: snapshot.phone.connected
 					? 'Connected'
@@ -890,7 +890,7 @@ function renderDiagnosticsHighlights(snapshot: DashboardSnapshot) {
 			label: 'Phone token',
 			tone: 'warn',
 			detail:
-				'PHONE_DEVICE_TOKEN is not set, so the Android companion cannot connect.',
+				'Save a phone device token on Phone setup so the Android companion can connect.',
 		})
 	} else if (!snapshot.phone.connected) {
 		highlights.push({
@@ -1421,8 +1421,8 @@ export function createDiagnosticsHandler(deps: DashboardDependencies) {
 					details: snapshot.phone.connected
 						? `Connected as ${snapshot.phone.deviceName ?? 'Android companion'}.`
 						: snapshot.phone.tokenConfigured
-							? 'PHONE_DEVICE_TOKEN is set, but no phone is connected on /phone/ws.'
-							: 'Set PHONE_DEVICE_TOKEN so the Android companion can authenticate.',
+							? 'A device token is configured, but no phone is connected on /phone/ws.'
+							: 'Save a phone device token on Phone setup so the Android companion can authenticate.',
 					links: [
 						{ href: routes.phoneStatus.href(), label: 'Phone status' },
 						{ href: routes.phoneSetup.href(), label: 'Phone setup' },

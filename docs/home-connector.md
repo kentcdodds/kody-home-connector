@@ -36,9 +36,11 @@ Core env vars:
   `default`. Keep an existing id so device rows stay visible. This is not the
   Kody MCP server name.
 - `HOME_CONNECTOR_DATA_KEY` / `HOME_CONNECTOR_SHARED_SECRET` - optional local
-  SQLite encryption key. Not used for MCP or Kody auth.
-- `PHONE_DEVICE_TOKEN` - shared secret the Android companion presents on
-  `/phone/ws`. Env-only for v1. Never log the raw value.
+  SQLite encryption key. Not used for MCP or Kody auth. Required to save the
+  Android companion token from `/phone/setup`.
+- `PHONE_DEVICE_TOKEN` - optional env fallback for the Android companion token
+  on `/phone/ws`. Prefer the encrypted token saved from `/phone/setup`. Never
+  log the raw value.
 
 Cloudflare (KCD account, zone `doddsfamily.us`) already publishes this origin:
 
@@ -319,10 +321,12 @@ admin pages.
 
 Auth accepts the device token from, in order: query `token`, header
 `X-Phone-Token`, or `Authorization: Bearer`. The connector compares it with
-timing-safe equality against `PHONE_DEVICE_TOKEN`. If the env var is unset,
+timing-safe equality against the stored token from `/phone/setup`, falling back
+to `PHONE_DEVICE_TOKEN` if no stored token is present. If neither is set,
 upgrades are rejected with 503 and MCP tools return a
 `phone_token_not_configured` structured error. The raw token is never logged or
-rendered in the admin UI.
+rendered in the admin UI. Saving or clearing the stored token disconnects any
+current companion socket.
 
 The JSON protocol is one object per text frame at `protocolVersion` 1: phone
 `hello` / server `hello_ack`, server `call` / phone `result`, and optional
@@ -528,6 +532,8 @@ The connector stores a local SQLite database containing:
 - Kasa TP-Link account credentials encrypted locally with
   `HOME_CONNECTOR_SHARED_SECRET`
 - last Kasa authentication success/error details
+- Android companion device token encrypted locally with
+  `HOME_CONNECTOR_DATA_KEY`
 - discovered JellyFish controller metadata and latest connection status
 - discovered Bond bridges and tokens
 - discovered Sonos players

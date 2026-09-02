@@ -7,6 +7,13 @@ import {
 	type HomeConnectorConfig,
 } from '../../config.ts'
 import { type HomeConnectorLogger } from '../../logging/index.ts'
+import { type HomeConnectorStorage } from '../../storage/index.ts'
+import {
+	clearPhoneDeviceToken,
+	getPhoneDeviceToken,
+	hasStoredPhoneDeviceToken,
+	savePhoneDeviceToken,
+} from './repository.ts'
 import {
 	authorizePhoneUpgrade,
 	getUpgradePathname,
@@ -57,6 +64,7 @@ export type {
 	PhoneHelloInfo,
 	PhoneSocket,
 	PhoneStructuredError,
+	PhoneTokenSource,
 	PhoneUpgradeRequest,
 } from './types.ts'
 
@@ -210,21 +218,42 @@ function rejectHttpUpgrade(
 
 export function createPhoneAdapter(input: {
 	config: HomeConnectorConfig
+	storage?: HomeConnectorStorage
 	logger?: HomeConnectorLogger
 	now?: () => Date
 	createCallId?: () => string
 	defaultTimeoutMs?: number
 }) {
-	const expectedToken = input.config.phoneDeviceToken
 	const defaultTimeoutMs = input.defaultTimeoutMs ?? phoneDefaultRpcTimeoutMs
 	const createCallId = input.createCallId ?? (() => randomUUID())
 	const now = () => (input.now ? input.now() : new Date())
+	const connectorId = input.config.homeConnectorId
 
+	const sessions = new Set<PhoneSession>()
 	let primary: PhoneSession | null = null
 	let nextGeneration = 0
 	let lastHello: PhoneHelloInfo | null = null
 	let lastSeenAt: string | null = null
 	let connectedAt: string | null = null
+
+	function getEnvToken() {
+		return input.config.phoneDeviceToken
+	}
+
+	function getStoredToken() {
+		if (!input.storage) return null
+		return getPhoneDeviceToken(input.storage, connectorId)
+	}
+
+	function getExpectedToken() {
+		return getStoredToken() ?? getEnvToken()
+	}
+
+	function getTokenSource() {
+		if (getStoredToken()) return 'stored' as const
+		if (getEnvToken()) return 'env' as const
+		return null
+	}
 
 	function isoNow() {
 		return now().toISOString()
@@ -243,6 +272,7 @@ export function createPhoneAdapter(input: {
 	}
 
 	function dropSession(session: PhoneSession, replaced: boolean) {
+		sessions.delete(session)
 		if (primary === session) {
 			primary = null
 			connectedAt = null
@@ -263,6 +293,14 @@ export function createPhoneAdapter(input: {
 			session.socket.close()
 		} catch {
 			// Ignore sockets that are already closing.
+		}
+	}
+
+	function dropAllSessions() {
+		while (sessions.size > 0) {
+			const session = sessions.values().next().value
+			if (!session) break
+			dropSession(session, true)
 		}
 	}
 
@@ -363,6 +401,7 @@ export function createPhoneAdapter(input: {
 			hello: null,
 			pending: new Map(),
 		}
+		sessions.add(session)
 
 		ws.on('message', (data) => {
 			const text = socketDataToString(data)
@@ -378,6 +417,7 @@ export function createPhoneAdapter(input: {
 		})
 
 		ws.on('close', () => {
+			sessions.delete(session)
 			if (primary === session) {
 				primary = null
 				connectedAt = null
@@ -399,7 +439,7 @@ export function createPhoneAdapter(input: {
 	}
 
 	function getCallReadiness(): PhoneStructuredError | null {
-		if (!expectedToken) {
+		if (!getExpectedToken()) {
 			return structuredError(phoneTokenNotConfiguredError)
 		}
 		if (!primary?.hello) {
@@ -452,13 +492,40 @@ export function createPhoneAdapter(input: {
 	function authorizeUpgrade(request: PhoneUpgradeRequest) {
 		return authorizePhoneUpgrade({
 			request,
-			expectedToken,
+			expectedToken: getExpectedToken(),
 		})
 	}
 
+	function requireStorage() {
+		if (!input.storage) {
+			throw new Error('Phone token storage is not available.')
+		}
+		return input.storage
+	}
+
+	function setDeviceToken(token: string) {
+		savePhoneDeviceToken({
+			storage: requireStorage(),
+			connectorId,
+			token,
+		})
+		dropAllSessions()
+	}
+
+	function clearStoredDeviceToken() {
+		clearPhoneDeviceToken(requireStorage(), connectorId)
+		dropAllSessions()
+	}
+
 	function getStatus(): PhoneConnectionStatus {
+		const tokenSource = getTokenSource()
 		return {
-			tokenConfigured: Boolean(expectedToken),
+			tokenConfigured: Boolean(tokenSource),
+			hasStoredToken: input.storage
+				? hasStoredPhoneDeviceToken(input.storage, connectorId)
+				: false,
+			hasEnvToken: Boolean(getEnvToken()),
+			tokenSource,
 			connected: Boolean(primary?.hello),
 			websocketPath: phoneWebSocketPath,
 			publicWebSocketUrl: `${toWebSocketOrigin(input.config.publicBaseUrl)}${phoneWebSocketPath}`,
@@ -477,6 +544,8 @@ export function createPhoneAdapter(input: {
 		call,
 		getStatus,
 		getCallReadiness,
+		setDeviceToken,
+		clearStoredDeviceToken,
 		mdnsScanTimeoutMs: phoneMdnsScanTimeoutMs,
 	}
 }

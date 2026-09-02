@@ -111,8 +111,13 @@ export type PhoneCallResult<T = unknown> =
 	| PhoneCallSuccess<T>
 	| PhoneStructuredError
 
+export type PhoneTokenSource = 'stored' | 'env'
+
 export type PhoneConnectionStatus = {
 	tokenConfigured: boolean
+	hasStoredToken: boolean
+	hasEnvToken: boolean
+	tokenSource: PhoneTokenSource | null
 	connected: boolean
 	websocketPath: typeof phoneWebSocketPath
 	publicWebSocketUrl: string
