@@ -37,6 +37,8 @@ Core env vars:
   Kody MCP server name.
 - `HOME_CONNECTOR_DATA_KEY` / `HOME_CONNECTOR_SHARED_SECRET` - optional local
   SQLite encryption key. Not used for MCP or Kody auth.
+- `PHONE_DEVICE_TOKEN` - shared secret the Android companion presents on
+  `/phone/ws`. Env-only for v1. Never log the raw value.
 
 Cloudflare (KCD account, zone `doddsfamily.us`) already publishes this origin:
 
@@ -44,10 +46,15 @@ Cloudflare (KCD account, zone `doddsfamily.us`) already publishes this origin:
   remote-managed tunnel as jellyfin / mediarss / music / vault
 - Ingress: `kody-home.doddsfamily.us` → `http://192.168.1.234:4040`
 - DNS: proxied CNAME to `{tunnel-id}.cfargotunnel.com`
-- Access **Bypass** on `/mcp`, `/token`, `/revoke`, `/.well-known`, `/health` so
-  Kody's CIMD client can reach machine paths without a Zero Trust login
+- Access **Bypass** on `/mcp`, `/token`, `/revoke`, `/.well-known`, `/health`,
+  and `/phone/ws` so Kody's CIMD client and the Android companion can reach
+  machine paths without a Zero Trust login
 - Access **Allow** on the rest of the hostname (admin UI and `/authorize`) for
   `kentcdodds@gmail.com` and `me@kentcdodds.com`
+
+A phone cannot complete Cloudflare Access login. `/phone/status` and
+`/phone/setup` stay behind Access like other admin pages. Do not put phone
+control behind Access on `/mcp`; `/mcp` stays machine Bypass.
 
 The Remix admin UI stays on the same HTTP server. Opening `/authorize` during
 CIMD requires Cloudflare Access on the public hostname. The LAN origin is
@@ -66,6 +73,9 @@ The connector exposes these local-device families:
   channels
 - Venstar WiFi thermostat status and control over the local REST API
 - TP-Link Kasa KLAP/SHIP 2.0 smart plug discovery and on/off control
+- Android phone companion over WebSocket at `/phone/ws` (status, permissions,
+  calendars, contacts summary, network, mDNS, packages, Settings, Tesla/cast
+  diagnosis)
 - Island router diagnostics and guarded writes over SSH using one typed command
   catalog
 - Access Networks Unleashed / RUCKUS Unleashed WiFi controller reads and typed
@@ -284,6 +294,66 @@ NAS troubleshooting scripts live under `scripts/nas/`. Copy them to the NAS
 docker folder next to the start script and run `probe-kasa-full.sh` or
 `probe-kasa-exec.sh` against a plug IP when KLAP fails from the connector but
 works from another host.
+
+## Android phone companion
+
+The phone adapter lives under `src/adapters/phone/` and is a **device client**,
+not a second MCP server. Kent's Android app (built separately in
+`@kentcdodds/phone`) dials this connector over WebSocket. Kody still talks to
+this process at `https://kody-home.doddsfamily.us/mcp` as `kody.mcp["home"]`.
+Phone tools become `kody.mcp["home"].phone_*`.
+
+This is not the old reverse-dial Worker. That Worker reverse-dial was how the
+connector used to reach Kody. It is gone. The phone opens a WebSocket to the
+connector; Kody keeps using Streamable HTTP `/mcp` plus CIMD OAuth.
+
+WebSocket URLs:
+
+- Production: `wss://kody-home.doddsfamily.us/phone/ws`
+- LAN: `ws://192.168.1.234:4040/phone/ws`
+
+The upgrade is attached on the raw Node `http.Server` in `server/index.ts`
+because Remix's `createRequestListener` cannot handle WebSocket upgrades. Remix
+is not mounted on `/phone/ws`. `/phone/status` and `/phone/setup` are ordinary
+admin pages.
+
+Auth accepts the device token from, in order: query `token`, header
+`X-Phone-Token`, or `Authorization: Bearer`. The connector compares it with
+timing-safe equality against `PHONE_DEVICE_TOKEN`. If the env var is unset,
+upgrades are rejected with 503 and MCP tools return a
+`phone_token_not_configured` structured error. The raw token is never logged or
+rendered in the admin UI.
+
+The JSON protocol is one object per text frame at `protocolVersion` 1: phone
+`hello` / server `hello_ack`, server `call` / phone `result`, and optional
+`ping`/`pong`. Default RPC timeout is 25s (`phone_mdns_scan` uses 60s). v1 keeps
+one primary connected phone. The same `deviceId` reconnect replaces the old
+socket; a different `deviceId` keeps the newest and drops the old.
+
+The MCP surface is:
+
+- `phone_status`
+- `phone_permissions`
+- `phone_calendars`
+- `phone_contacts_summary` (counts only; no contact payloads in v1)
+- `phone_network`
+- `phone_mdns_scan` (default `_googlecast._tcp`)
+- `phone_packages`
+- `phone_open_app_settings`
+- `phone_diagnose_tesla` (permissions for `com.teslamotors.tesla` plus
+  calendars, contacts summary, and network)
+- `phone_diagnose_cast` (network, mDNS `_googlecast._tcp`, and permissions for
+  Google Home, YouTube, and GMS)
+
+These tools can read calendar metadata and contact counts, and
+`phone_open_app_settings` can open Android Settings on the connected phone. When
+no phone is connected, RPC tools return `isError` with structured
+`phone_offline` rather than throwing.
+
+Cloudflare Access Bypass for `kody-home.doddsfamily.us` must include `/phone/ws`
+(same machine list as `/mcp`, `/token`, `/revoke`, `/.well-known`, `/health`).
+Apply that in Cloudflare; this repo does not change Access. A phone cannot
+complete Access login. `/phone/status` and `/phone/setup` stay behind Access.
 
 ## Island router diagnostics integration
 

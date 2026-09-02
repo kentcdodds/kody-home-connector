@@ -9,6 +9,7 @@ import { createIslandRouterApiAdapter } from '../src/adapters/island-router-api/
 import { createIslandRouterAdapter } from '../src/adapters/island-router/index.ts'
 import { createJellyfishAdapter } from '../src/adapters/jellyfish/index.ts'
 import { createKasaAdapter } from '../src/adapters/kasa/index.ts'
+import { createPhoneAdapter } from '../src/adapters/phone/index.ts'
 import { upsertDiscoveredKasaPlugs } from '../src/adapters/kasa/repository.ts'
 import { createLutronAdapter } from '../src/adapters/lutron/index.ts'
 import { createSamsungTvAdapter } from '../src/adapters/samsung-tv/index.ts'
@@ -50,6 +51,7 @@ function createConfig(dataPath = '/tmp'): HomeConnectorConfig {
 		kasaRequestTimeoutMs: 8_000,
 		kasaUsername: null,
 		kasaPassword: null,
+		phoneDeviceToken: null,
 		bondRequestPaceMs: 0,
 		bondCircuitBreakerCooldownMs: 0,
 		jellyfishDiscoveryUrl: 'http://jellyfish.mock.local/discovery',
@@ -166,6 +168,9 @@ function createAdapters(config: HomeConnectorConfig) {
 				},
 			}),
 		}),
+		phone: createPhoneAdapter({
+			config,
+		}),
 	}
 }
 
@@ -190,6 +195,7 @@ test('home route toggles worker snapshot link by connector id', async () => {
 		jellyfish,
 		venstar,
 		kasa,
+		phone,
 	} = createAdapters(config)
 	state.connection.connectorId = 'default'
 	state.connection.mcpUrl = config.mcpUrl
@@ -208,6 +214,7 @@ test('home route toggles worker snapshot link by connector id', async () => {
 			jellyfish,
 			venstar,
 			kasa,
+			phone,
 		)
 		const responseWithConnector = await router.fetch('http://example.test/')
 		expect(responseWithConnector.status).toBe(200)
@@ -242,6 +249,7 @@ test('venstar status scan shows discovered thermostats', async () => {
 		jellyfish,
 		venstar,
 		kasa,
+		phone,
 	} = createAdapters(config)
 	try {
 		const router = createHomeConnectorRouter(
@@ -257,6 +265,7 @@ test('venstar status scan shows discovered thermostats', async () => {
 			jellyfish,
 			venstar,
 			kasa,
+			phone,
 		)
 		const response = await router.fetch('http://example.test/venstar/status', {
 			method: 'POST',
@@ -296,6 +305,7 @@ test('venstar status can adopt a discovered thermostat', async () => {
 		jellyfish,
 		venstar,
 		kasa,
+		phone,
 	} = createAdapters(config)
 	try {
 		const router = createHomeConnectorRouter(
@@ -311,6 +321,7 @@ test('venstar status can adopt a discovered thermostat', async () => {
 			jellyfish,
 			venstar,
 			kasa,
+			phone,
 		)
 
 		await router.fetch('http://example.test/venstar/status', {
@@ -369,6 +380,7 @@ test('venstar setup can save and remove thermostats directly', async () => {
 		jellyfish,
 		venstar,
 		kasa,
+		phone,
 	} = createAdapters(config)
 	try {
 		venstar.removeThermostat('venstar.mock.local')
@@ -385,6 +397,7 @@ test('venstar setup can save and remove thermostats directly', async () => {
 			jellyfish,
 			venstar,
 			kasa,
+			phone,
 		)
 
 		const saveResponse = await router.fetch(
@@ -444,6 +457,7 @@ test('access networks unleashed setup can adopt a controller and save auth infor
 		jellyfish,
 		venstar,
 		kasa,
+		phone,
 	} = createAdapters(config)
 	try {
 		upsertDiscoveredAccessNetworksUnleashedControllers(storage, 'default', [
@@ -470,6 +484,7 @@ test('access networks unleashed setup can adopt a controller and save auth infor
 			jellyfish,
 			venstar,
 			kasa,
+			phone,
 		)
 
 		const adoptResponse = await router.fetch(
@@ -538,6 +553,7 @@ test('kasa setup saves credentials without echoing the password', async () => {
 		jellyfish,
 		venstar,
 		kasa,
+		phone,
 	} = createAdapters(config)
 	try {
 		const router = createHomeConnectorRouter(
@@ -553,6 +569,7 @@ test('kasa setup saves credentials without echoing the password', async () => {
 			jellyfish,
 			venstar,
 			kasa,
+			phone,
 		)
 
 		const setupResponse = await router.fetch('http://example.test/kasa/setup')
@@ -626,6 +643,7 @@ test('kasa setup accepts LAN host origin when request URL is localhost', async (
 		jellyfish,
 		venstar,
 		kasa,
+		phone,
 	} = createAdapters(config)
 	try {
 		const router = createHomeConnectorRouter(
@@ -641,6 +659,7 @@ test('kasa setup accepts LAN host origin when request URL is localhost', async (
 			jellyfish,
 			venstar,
 			kasa,
+			phone,
 		)
 
 		const saveResponse = await router.fetch(
@@ -688,6 +707,7 @@ test('kasa setup accepts LAN origin with explicit port when Host omits port', as
 		jellyfish,
 		venstar,
 		kasa,
+		phone,
 	} = createAdapters(config)
 	try {
 		const router = createHomeConnectorRouter(
@@ -703,6 +723,7 @@ test('kasa setup accepts LAN origin with explicit port when Host omits port', as
 			jellyfish,
 			venstar,
 			kasa,
+			phone,
 		)
 
 		const saveResponse = await router.fetch(
@@ -746,6 +767,7 @@ test('kasa status reflects credential state and known plugs', async () => {
 		jellyfish,
 		venstar,
 		kasa,
+		phone,
 	} = createAdapters(config)
 	try {
 		kasa.setCredentials('kent@example.com', 'super-secret-kasa-password')
@@ -782,6 +804,7 @@ test('kasa status reflects credential state and known plugs', async () => {
 			jellyfish,
 			venstar,
 			kasa,
+			phone,
 		)
 
 		const statusResponse = await router.fetch('http://example.test/kasa/status')
@@ -813,6 +836,7 @@ test('island router api setup can save and clear the local pin', async () => {
 		jellyfish,
 		venstar,
 		kasa,
+		phone,
 	} = createAdapters(config)
 	try {
 		const router = createHomeConnectorRouter(
@@ -828,6 +852,7 @@ test('island router api setup can save and clear the local pin', async () => {
 			jellyfish,
 			venstar,
 			kasa,
+			phone,
 		)
 
 		const setupResponse = await router.fetch(
@@ -910,6 +935,7 @@ test('health route returns ok json', async () => {
 		jellyfish,
 		venstar,
 		kasa,
+		phone,
 	} = createAdapters(config)
 	try {
 		const router = createHomeConnectorRouter(
@@ -925,6 +951,7 @@ test('health route returns ok json', async () => {
 			jellyfish,
 			venstar,
 			kasa,
+			phone,
 		)
 		const response = await router.fetch('http://example.test/health')
 		expect(response.status).toBe(200)
@@ -970,6 +997,7 @@ test('system and diagnostics routes render aggregated admin surfaces', async () 
 		jellyfish,
 		venstar,
 		kasa,
+		phone,
 	} = createAdapters(config)
 	state.connection.connectorId = 'default'
 	state.connection.mcpUrl = config.mcpUrl
@@ -989,6 +1017,7 @@ test('system and diagnostics routes render aggregated admin surfaces', async () 
 			jellyfish,
 			venstar,
 			kasa,
+			phone,
 		)
 		const systemResponse = await router.fetch(
 			'http://example.test/system-status',
@@ -1034,6 +1063,7 @@ test('dashboard starts Venstar and router reads in parallel', async () => {
 		jellyfish,
 		venstar,
 		kasa,
+		phone,
 	} = createAdapters(config)
 	const started: Array<string> = []
 	let resolveVenstar: (() => void) | null = null
@@ -1073,6 +1103,7 @@ test('dashboard starts Venstar and router reads in parallel', async () => {
 			jellyfish,
 			venstar,
 			kasa,
+			phone,
 		)
 		const responsePromise = router.fetch('http://example.test/')
 		await Promise.resolve()
@@ -1103,6 +1134,7 @@ test('island router status route renders configuration details and host diagnosi
 		jellyfish,
 		venstar,
 		kasa,
+		phone,
 	} = createAdapters(config)
 	try {
 		const router = createHomeConnectorRouter(
@@ -1118,6 +1150,7 @@ test('island router status route renders configuration details and host diagnosi
 			jellyfish,
 			venstar,
 			kasa,
+			phone,
 		)
 		const response = await router.fetch(
 			'http://example.test/island-router/status?host=192.168.1.10',
@@ -1128,6 +1161,60 @@ test('island router status route renders configuration details and host diagnosi
 		expect(pageHtml).toContain('SSH configuration')
 		expect(pageHtml).toContain('Host diagnosis')
 		expect(pageHtml).toContain('Host diagnosis failed')
+	} finally {
+		storage.close()
+	}
+})
+
+test('phone status and setup pages never render the device token', async () => {
+	const config = createConfig()
+	config.phoneDeviceToken = 'super-secret-phone-token'
+	const {
+		state,
+		storage,
+		lutron,
+		sonos,
+		samsungTv,
+		bond,
+		accessNetworksUnleashed,
+		islandRouter,
+		islandRouterApi,
+		jellyfish,
+		venstar,
+		kasa,
+		phone,
+	} = createAdapters(config)
+	try {
+		const router = createHomeConnectorRouter(
+			state,
+			config,
+			lutron,
+			samsungTv,
+			sonos,
+			bond,
+			accessNetworksUnleashed,
+			islandRouter,
+			islandRouterApi,
+			jellyfish,
+			venstar,
+			kasa,
+			phone,
+		)
+		const statusResponse = await router.fetch(
+			'http://example.test/phone/status',
+		)
+		expect(statusResponse.status).toBe(200)
+		const statusHtml = await statusResponse.text()
+		expect(statusHtml).toContain('Android phone status')
+		expect(statusHtml).toContain('/phone/ws')
+		expect(statusHtml).not.toContain('super-secret-phone-token')
+
+		const setupResponse = await router.fetch('http://example.test/phone/setup')
+		expect(setupResponse.status).toBe(200)
+		const setupHtml = await setupResponse.text()
+		expect(setupHtml).toContain('PHONE_DEVICE_TOKEN')
+		expect(setupHtml).toContain('Token configured')
+		expect(setupHtml).not.toContain('super-secret-phone-token')
 	} finally {
 		storage.close()
 	}

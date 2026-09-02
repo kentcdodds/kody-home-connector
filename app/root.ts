@@ -76,6 +76,12 @@ const navigationSections: Array<{
 				matchPaths: [routes.kasaSetup.href()],
 			},
 			{
+				href: routes.phoneStatus.href(),
+				label: 'Phone',
+				description: 'Android companion WebSocket',
+				matchPaths: [routes.phoneSetup.href()],
+			},
+			{
 				href: routes.sonosStatus.href(),
 				label: 'Sonos',
 				description: 'Players and groups',

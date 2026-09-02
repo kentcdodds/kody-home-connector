@@ -22,6 +22,8 @@ export const routes = route({
 	accessNetworksUnleashedSetup: '/access-networks-unleashed/setup',
 	kasaStatus: '/kasa/status',
 	kasaSetup: '/kasa/setup',
+	phoneStatus: '/phone/status',
+	phoneSetup: '/phone/setup',
 	jellyfishStatus: '/jellyfish/status',
 	jellyfishSetup: '/jellyfish/setup',
 	venstarStatus: '/venstar/status',

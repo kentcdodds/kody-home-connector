@@ -50,6 +50,17 @@ Keep an existing `HOME_CONNECTOR_ID` so adopted-device rows stay visible. That
 id is only a local SQLite namespace. The Kody MCP server name is chosen when you
 add the server in Kody (`home` is the usual name).
 
+Android companion (optional):
+
+```bash
+PHONE_DEVICE_TOKEN=...
+```
+
+The phone app dials `wss://kody-home.doddsfamily.us/phone/ws` (LAN:
+`ws://192.168.1.234:4040/phone/ws`) with that token. Cloudflare Access Bypass
+must include `/phone/ws` on the same list as `/mcp`. `/phone/status` and
+`/phone/setup` stay behind Access. A phone cannot complete Access login.
+
 Do not set `KODY_USERNAME`, `WORKER_BASE_URL`, `HOME_CONNECTOR_TARGETS`, or a
 Worker shared secret for auth. Those Worker reverse-dial settings are gone.
 
@@ -58,8 +69,8 @@ Worker shared secret for auth. Those Worker reverse-dial settings are gone.
 1. Deploy this process on the NAS at `192.168.1.234:4040`. Cloudflare already
    routes `https://kody-home.doddsfamily.us` through the **Dodds Vault** tunnel.
    MCP/OAuth machine paths (`/mcp`, `/token`, `/revoke`, `/.well-known`,
-   `/health`) bypass Access. The admin UI and `/authorize` require Cloudflare
-   Access. The LAN origin is trusted and has no extra login.
+   `/health`, `/phone/ws`) bypass Access. The admin UI and `/authorize` require
+   Cloudflare Access. The LAN origin is trusted and has no extra login.
 2. In Kody, open `/account/mcp-servers` and add
    `https://kody-home.doddsfamily.us/mcp` with name `home`.
 3. Open the authorization URL, pass Cloudflare Access, and approve Kody.

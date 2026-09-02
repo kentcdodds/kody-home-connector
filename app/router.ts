@@ -35,6 +35,10 @@ import {
 	createKasaStatusHandler,
 } from './kasa-handlers.ts'
 import {
+	createPhoneSetupHandler,
+	createPhoneStatusHandler,
+} from './phone-handlers.ts'
+import {
 	createSonosSetupHandler,
 	createSonosStatusHandler,
 } from './sonos-handlers.ts'
@@ -48,6 +52,7 @@ import { type createLutronAdapter } from '../src/adapters/lutron/index.ts'
 import { type createBondAdapter } from '../src/adapters/bond/index.ts'
 import { type createJellyfishAdapter } from '../src/adapters/jellyfish/index.ts'
 import { type createKasaAdapter } from '../src/adapters/kasa/index.ts'
+import { type createPhoneAdapter } from '../src/adapters/phone/index.ts'
 import { type createSonosAdapter } from '../src/adapters/sonos/index.ts'
 import { type createSamsungTvAdapter } from '../src/adapters/samsung-tv/index.ts'
 import { type createVenstarAdapter } from '../src/adapters/venstar/index.ts'
@@ -71,6 +76,7 @@ export function createHomeConnectorRouter(
 	jellyfish: ReturnType<typeof createJellyfishAdapter>,
 	venstar: ReturnType<typeof createVenstarAdapter>,
 	kasa: ReturnType<typeof createKasaAdapter>,
+	phone: ReturnType<typeof createPhoneAdapter>,
 ) {
 	const router = createRouter({
 		middleware: [],
@@ -91,6 +97,7 @@ export function createHomeConnectorRouter(
 				jellyfish,
 				venstar,
 				kasa,
+				phone,
 			}),
 			systemStatus: createSystemStatusHandler({
 				state,
@@ -105,6 +112,7 @@ export function createHomeConnectorRouter(
 				jellyfish,
 				venstar,
 				kasa,
+				phone,
 			}),
 			diagnostics: createDiagnosticsHandler({
 				state,
@@ -119,6 +127,7 @@ export function createHomeConnectorRouter(
 				jellyfish,
 				venstar,
 				kasa,
+				phone,
 			}),
 			islandRouterStatus: createIslandRouterStatusHandler({
 				state,
@@ -133,6 +142,7 @@ export function createHomeConnectorRouter(
 				jellyfish,
 				venstar,
 				kasa,
+				phone,
 			}),
 			health: createHealthHandler(state, config),
 			islandRouterApiStatus: createIslandRouterApiStatusHandler(
@@ -167,6 +177,8 @@ export function createHomeConnectorRouter(
 			venstarSetup: createVenstarSetupHandler(state, config, venstar),
 			kasaStatus: createKasaStatusHandler(state, kasa),
 			kasaSetup: createKasaSetupHandler(state, kasa),
+			phoneStatus: createPhoneStatusHandler(state, phone),
+			phoneSetup: createPhoneSetupHandler(state, phone),
 		},
 	})
 
