@@ -17,6 +17,7 @@ function createConfig(): HomeConnectorConfig {
 		mcpPath: '/mcp',
 		mcpUrl: 'http://localhost:4040/mcp',
 		sharedSecret: 'secret',
+		phoneDeviceToken: null,
 		accessNetworksUnleashedScanCidrs: ['192.168.1.10/32'],
 		accessNetworksUnleashedAllowInsecureTls: false,
 		accessNetworksUnleashedRequestTimeoutMs: 8_000,

@@ -386,6 +386,7 @@ test('Kasa env vars are loaded with safe defaults and explicit overrides', () =>
 			kasaRequestTimeoutMs: 8000,
 			kasaUsername: null,
 			kasaPassword: null,
+			phoneDeviceToken: null,
 		})
 	}
 
@@ -396,6 +397,7 @@ test('Kasa env vars are loaded with safe defaults and explicit overrides', () =>
 			KASA_REQUEST_TIMEOUT_MS: '12000',
 			KASA_USERNAME: ' kent@example.com ',
 			KASA_PASSWORD: ' secret ',
+			PHONE_DEVICE_TOKEN: ' phone-token ',
 		})
 
 		expect(loadHomeConnectorConfig()).toMatchObject({
@@ -403,6 +405,7 @@ test('Kasa env vars are loaded with safe defaults and explicit overrides', () =>
 			kasaRequestTimeoutMs: 12000,
 			kasaUsername: 'kent@example.com',
 			kasaPassword: 'secret',
+			phoneDeviceToken: 'phone-token',
 		})
 	}
 

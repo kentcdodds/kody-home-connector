@@ -22,6 +22,7 @@ export function createTestHomeConnectorConfig(
 		kasaRequestTimeoutMs: 8_000,
 		kasaUsername: null,
 		kasaPassword: null,
+		phoneDeviceToken: null,
 		islandRouterHost: null,
 		islandRouterPort: 22,
 		islandRouterUsername: null,
