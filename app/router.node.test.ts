@@ -1207,6 +1207,7 @@ test('phone status and setup pages never render the device token', async () => {
 		const statusHtml = await statusResponse.text()
 		expect(statusHtml).toContain('Android phone status')
 		expect(statusHtml).toContain('/phone/ws')
+		expect(statusHtml).toContain('ws://192.168.1.234:4040/phone/ws')
 		expect(statusHtml).not.toContain('super-secret-phone-token')
 
 		const setupResponse = await router.fetch('http://example.test/phone/setup')
@@ -1214,6 +1215,7 @@ test('phone status and setup pages never render the device token', async () => {
 		const setupHtml = await setupResponse.text()
 		expect(setupHtml).toContain('PHONE_DEVICE_TOKEN')
 		expect(setupHtml).toContain('Token configured')
+		expect(setupHtml).toContain('ws://192.168.1.234:4040/phone/ws')
 		expect(setupHtml).not.toContain('super-secret-phone-token')
 	} finally {
 		storage.close()

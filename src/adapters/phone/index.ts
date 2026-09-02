@@ -2,7 +2,10 @@ import { randomUUID } from 'node:crypto'
 import type { IncomingMessage } from 'node:http'
 import type { Duplex } from 'node:stream'
 import { WebSocketServer, type WebSocket } from 'ws'
-import { type HomeConnectorConfig } from '../../config.ts'
+import {
+	defaultHomeLanListenHost,
+	type HomeConnectorConfig,
+} from '../../config.ts'
 import { type HomeConnectorLogger } from '../../logging/index.ts'
 import {
 	authorizePhoneUpgrade,
@@ -63,6 +66,7 @@ type PendingCall = {
 }
 
 type PhoneSession = {
+	generation: number
 	socket: PhoneSocket
 	hello: PhoneHelloInfo | null
 	pending: Map<string, PendingCall>
@@ -217,6 +221,7 @@ export function createPhoneAdapter(input: {
 	const now = () => (input.now ? input.now() : new Date())
 
 	let primary: PhoneSession | null = null
+	let nextGeneration = 0
 	let lastHello: PhoneHelloInfo | null = null
 	let lastSeenAt: string | null = null
 	let connectedAt: string | null = null
@@ -262,20 +267,25 @@ export function createPhoneAdapter(input: {
 	}
 
 	function setPrimary(session: PhoneSession) {
-		if (primary && primary !== session) {
+		if (primary === session) return true
+		if (primary && session.generation < primary.generation) {
+			dropSession(session, true)
+			return false
+		}
+		if (primary) {
 			const previous = primary
 			primary = session
 			dropSession(previous, true)
-			return
+			return true
 		}
 		primary = session
+		return true
 	}
 
 	function handleClientMessage(
 		session: PhoneSession,
 		message: PhoneClientMessage,
 	) {
-		lastSeenAt = isoNow()
 		switch (message.type) {
 			case 'hello': {
 				session.hello = {
@@ -286,11 +296,12 @@ export function createPhoneAdapter(input: {
 					sdkInt: message.sdkInt,
 					appVersion: message.appVersion,
 				}
+				const wasPrimary = primary === session
+				if (!setPrimary(session)) return
 				lastHello = session.hello
-				const becamePrimary = primary !== session
-				setPrimary(session)
-				if (!connectedAt || becamePrimary) {
-					connectedAt = isoNow()
+				lastSeenAt = isoNow()
+				if (!wasPrimary) {
+					connectedAt = lastSeenAt
 				}
 				send(session, {
 					type: 'hello_ack',
@@ -310,6 +321,9 @@ export function createPhoneAdapter(input: {
 				return
 			}
 			case 'result': {
+				if (session === primary) {
+					lastSeenAt = isoNow()
+				}
 				const pending = session.pending.get(message.id)
 				if (!pending) return
 				session.pending.delete(message.id)
@@ -322,10 +336,16 @@ export function createPhoneAdapter(input: {
 				return
 			}
 			case 'ping': {
+				if (session === primary) {
+					lastSeenAt = isoNow()
+				}
 				send(session, { type: 'pong', id: message.id })
 				return
 			}
 			case 'pong': {
+				if (session === primary) {
+					lastSeenAt = isoNow()
+				}
 				return
 			}
 			default: {
@@ -336,7 +356,9 @@ export function createPhoneAdapter(input: {
 	}
 
 	function accept(ws: PhoneSocket) {
+		nextGeneration += 1
 		const session: PhoneSession = {
+			generation: nextGeneration,
 			socket: ws,
 			hello: null,
 			pending: new Map(),
@@ -441,6 +463,7 @@ export function createPhoneAdapter(input: {
 			websocketPath: phoneWebSocketPath,
 			publicWebSocketUrl: `${toWebSocketOrigin(input.config.publicBaseUrl)}${phoneWebSocketPath}`,
 			localWebSocketUrl: `ws://127.0.0.1:${String(input.config.port)}${phoneWebSocketPath}`,
+			lanWebSocketUrl: `ws://${defaultHomeLanListenHost}:${String(input.config.port)}${phoneWebSocketPath}`,
 			lastHello,
 			lastSeenAt,
 			connectedAt,

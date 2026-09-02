@@ -6,6 +6,7 @@ import {
 } from '@kody-bot/connector-kit/urls'
 
 export const defaultHomePublicBaseUrl = 'https://kody-home.doddsfamily.us'
+export const defaultHomeLanListenHost = '192.168.1.234'
 export const homeMcpPath = '/mcp'
 
 export type HomeConnectorConfig = {

@@ -254,6 +254,48 @@ test('a newer deviceId replaces the previous primary socket', async () => {
 	})
 })
 
+test('a delayed hello from an older socket does not replace the newer primary', () => {
+	const phone = createAdapter()
+	const older = new FakePhoneSocket()
+	const newer = new FakePhoneSocket()
+	phone.accept(older)
+	phone.accept(newer)
+	newer.receive({
+		...hello,
+		deviceId: 'pixel-fold',
+		deviceName: 'Kent Fold',
+	})
+	expect(phone.getStatus()).toMatchObject({
+		connected: true,
+		deviceId: 'pixel-fold',
+		lastHello: { deviceName: 'Kent Fold' },
+	})
+	older.receive(hello)
+	expect(older.closed).toBe(true)
+	expect(newer.closed).toBe(false)
+	expect(older.parsedSent()).toEqual([])
+	expect(phone.getStatus()).toMatchObject({
+		connected: true,
+		deviceId: 'pixel-fold',
+		lastHello: { deviceName: 'Kent Fold' },
+	})
+})
+
+test('status URLs use the configured port for loopback and LAN', () => {
+	const phone = createPhoneAdapter({
+		config: createTestHomeConnectorConfig({
+			phoneDeviceToken: 'phone-token',
+			port: 4141,
+			publicBaseUrl: 'https://kody-home.doddsfamily.us',
+		}),
+	})
+	expect(phone.getStatus()).toMatchObject({
+		publicWebSocketUrl: 'wss://kody-home.doddsfamily.us/phone/ws',
+		localWebSocketUrl: 'ws://127.0.0.1:4141/phone/ws',
+		lanWebSocketUrl: 'ws://192.168.1.234:4141/phone/ws',
+	})
+})
+
 test('ping from the phone is answered with pong', async () => {
 	const phone = createAdapter()
 	const socket = await connectPhone(phone)

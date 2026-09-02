@@ -328,7 +328,8 @@ The JSON protocol is one object per text frame at `protocolVersion` 1: phone
 `hello` / server `hello_ack`, server `call` / phone `result`, and optional
 `ping`/`pong`. Default RPC timeout is 25s (`phone_mdns_scan` uses 60s). v1 keeps
 one primary connected phone. The same `deviceId` reconnect replaces the old
-socket; a different `deviceId` keeps the newest and drops the old.
+socket; a different `deviceId` keeps the newest accepted socket. A delayed
+`hello` from an older socket does not steal primary from a newer socket.
 
 The MCP surface is:
 

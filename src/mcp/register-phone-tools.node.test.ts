@@ -35,6 +35,7 @@ function createFakePhone(input: {
 				websocketPath: '/phone/ws',
 				publicWebSocketUrl: 'wss://kody-home.doddsfamily.us/phone/ws',
 				localWebSocketUrl: 'ws://127.0.0.1:4040/phone/ws',
+				lanWebSocketUrl: 'ws://192.168.1.234:4040/phone/ws',
 				lastHello: null,
 				lastSeenAt: null,
 				connectedAt: null,

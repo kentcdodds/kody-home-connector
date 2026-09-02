@@ -117,6 +117,7 @@ export type PhoneConnectionStatus = {
 	websocketPath: typeof phoneWebSocketPath
 	publicWebSocketUrl: string
 	localWebSocketUrl: string
+	lanWebSocketUrl: string
 	lastHello: PhoneHelloInfo | null
 	lastSeenAt: string | null
 	connectedAt: string | null

@@ -80,12 +80,12 @@ function renderPhoneStatusPage(input: {
 							value: html`<code>${status.publicWebSocketUrl}</code>`,
 						},
 						{
-							label: 'LAN WebSocket',
+							label: 'Loopback WebSocket',
 							value: html`<code>${status.localWebSocketUrl}</code>`,
 						},
 						{
-							label: 'NAS WebSocket',
-							value: html`<code>ws://192.168.1.234:4040/phone/ws</code>`,
+							label: 'LAN WebSocket',
+							value: html`<code>${status.lanWebSocketUrl}</code>`,
 						},
 					])}
 				</section>
@@ -141,7 +141,7 @@ function renderPhoneSetupPage(input: {
 						},
 						{
 							label: 'LAN URL',
-							value: html`<code>ws://192.168.1.234:4040/phone/ws</code>`,
+							value: html`<code>${status.lanWebSocketUrl}</code>`,
 						},
 					])}
 				</section>
