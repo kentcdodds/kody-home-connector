@@ -253,6 +253,12 @@ function initializeSchema(db: SqliteDatabase) {
 			updated_at TEXT NOT NULL
 		);
 
+		CREATE TABLE IF NOT EXISTS phone_device_tokens (
+			connector_id TEXT NOT NULL PRIMARY KEY,
+			token TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		);
+
 		CREATE TABLE IF NOT EXISTS sonos_players (
 			connector_id TEXT NOT NULL,
 			player_id TEXT NOT NULL,

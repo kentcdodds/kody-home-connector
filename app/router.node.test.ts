@@ -170,6 +170,7 @@ function createAdapters(config: HomeConnectorConfig) {
 		}),
 		phone: createPhoneAdapter({
 			config,
+			storage,
 		}),
 	}
 }
@@ -1215,8 +1216,51 @@ test('phone status and setup pages never render the device token', async () => {
 		const setupHtml = await setupResponse.text()
 		expect(setupHtml).toContain('PHONE_DEVICE_TOKEN')
 		expect(setupHtml).toContain('Token configured')
+		expect(setupHtml).toContain('Set device token')
 		expect(setupHtml).toContain('ws://192.168.1.234:4040/phone/ws')
 		expect(setupHtml).not.toContain('super-secret-phone-token')
+
+		const saveResponse = await router.fetch('http://example.test/phone/setup', {
+			method: 'POST',
+			headers: {
+				'content-type': 'application/x-www-form-urlencoded',
+			},
+			body: new URLSearchParams({
+				intent: 'set-token',
+				token: 'ui-secret-phone-token',
+			}).toString(),
+		})
+		expect(saveResponse.status).toBe(200)
+		const saveHtml = await saveResponse.text()
+		expect(saveHtml).toContain('Saved phone device token.')
+		expect(saveHtml).toContain('admin UI')
+		expect(saveHtml).not.toContain('ui-secret-phone-token')
+		expect(saveHtml).not.toContain('super-secret-phone-token')
+		expect(phone.getStatus()).toMatchObject({
+			tokenConfigured: true,
+			hasStoredToken: true,
+			tokenSource: 'stored',
+		})
+
+		const crossOriginResponse = await router.fetch(
+			'http://example.test/phone/setup',
+			{
+				method: 'POST',
+				headers: {
+					'content-type': 'application/x-www-form-urlencoded',
+					origin: 'http://attacker.test',
+				},
+				body: new URLSearchParams({
+					intent: 'set-token',
+					token: 'attacker-token',
+				}).toString(),
+			},
+		)
+		expect(crossOriginResponse.status).toBe(200)
+		expect(await crossOriginResponse.text()).toContain(
+			'Rejected cross-origin credential submission.',
+		)
+		expect(phone.getStatus().tokenSource).toBe('stored')
 	} finally {
 		storage.close()
 	}

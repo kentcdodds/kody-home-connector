@@ -1,12 +1,75 @@
 import { type Action } from 'remix/router'
 import { html } from 'remix/html-template'
 import { renderEmptyState } from './admin-ui.ts'
-import { formatJson, renderCodeBlock, renderInfoRows } from './handler-utils.ts'
+import {
+	formatJson,
+	renderBanner,
+	renderCodeBlock,
+	renderInfoRows,
+} from './handler-utils.ts'
 import { render } from './render.ts'
 import { RootLayout } from './root.ts'
 import { routes } from './routes.ts'
 import { type createPhoneAdapter } from '../src/adapters/phone/index.ts'
+import { captureHomeConnectorException } from '../src/sentry.ts'
 import { type HomeConnectorState } from '../src/state.ts'
+
+type Banner = { tone: 'success' | 'error'; message: string } | null
+
+function getAllowedFormOrigins(request: Request) {
+	const requestUrl = new URL(request.url)
+	const origins = new Set([requestUrl.origin])
+	const host = request.headers.get('host')?.trim()
+	if (host) {
+		try {
+			origins.add(`${requestUrl.protocol}//${host}`)
+			if (requestUrl.port && !host.includes(':')) {
+				const hostname = host.split(':')[0] ?? host
+				origins.add(`${requestUrl.protocol}//${hostname}:${requestUrl.port}`)
+			}
+		} catch {
+			// Ignore malformed Host headers; the request URL origin remains valid.
+		}
+	}
+	return origins
+}
+
+function assertSameOriginFormPost(request: Request) {
+	const allowedOrigins = getAllowedFormOrigins(request)
+	const origin = request.headers.get('origin')
+	if (origin && !allowedOrigins.has(origin)) {
+		throw new Error('Rejected cross-origin credential submission.')
+	}
+	const referer = request.headers.get('referer')
+	if (!origin && referer) {
+		try {
+			if (!allowedOrigins.has(new URL(referer).origin)) {
+				throw new Error('Rejected cross-origin credential submission.')
+			}
+		} catch {
+			throw new Error('Rejected cross-origin credential submission.')
+		}
+	}
+}
+
+function tokenSourceLabel(
+	source: ReturnType<
+		ReturnType<typeof createPhoneAdapter>['getStatus']
+	>['tokenSource'],
+) {
+	switch (source) {
+		case 'stored':
+			return 'admin UI'
+		case 'env':
+			return 'PHONE_DEVICE_TOKEN'
+		case null:
+			return 'none'
+		default: {
+			const _never: never = source
+			return _never
+		}
+	}
+}
 
 function renderPhoneStatusPage(input: {
 	state: HomeConnectorState
@@ -26,7 +89,7 @@ function renderPhoneStatusPage(input: {
 					</p>
 					<p>
 						<a href="${routes.phoneSetup.href()}">Phone setup</a>
-						<span class="muted">— PHONE_DEVICE_TOKEN and Access bypass</span>
+						<span class="muted">— device token and Access bypass</span>
 					</p>
 					${renderInfoRows([
 						{
@@ -38,6 +101,10 @@ function renderPhoneStatusPage(input: {
 						{
 							label: 'Token configured',
 							value: status.tokenConfigured ? 'yes' : 'no',
+						},
+						{
+							label: 'Token source',
+							value: tokenSourceLabel(status.tokenSource),
 						},
 						{
 							label: 'Companion',
@@ -102,6 +169,7 @@ function renderPhoneStatusPage(input: {
 function renderPhoneSetupPage(input: {
 	state: HomeConnectorState
 	phone: ReturnType<typeof createPhoneAdapter>
+	banner: Banner
 }) {
 	const status = input.phone.getStatus()
 	return render(
@@ -111,10 +179,10 @@ function renderPhoneSetupPage(input: {
 			body: html`<section class="card">
 					<h1>Android phone setup</h1>
 					<p class="muted">
-						v1 uses an env-only device token. Set
-						<code>PHONE_DEVICE_TOKEN</code> on the connector host and put the
-						same value in the Android companion. The token is never rendered
-						here.
+						Save the shared device token here, then put the same value in the
+						Android companion. The token is encrypted in local SQLite with
+						<code>HOME_CONNECTOR_DATA_KEY</code> and is never rendered back to
+						the browser.
 					</p>
 					<p>
 						<a href="${routes.phoneStatus.href()}">Phone status</a>
@@ -132,6 +200,18 @@ function renderPhoneSetupPage(input: {
 							value: status.tokenConfigured ? 'yes' : 'no',
 						},
 						{
+							label: 'Stored token',
+							value: status.hasStoredToken ? 'yes' : 'no',
+						},
+						{
+							label: 'Env token',
+							value: status.hasEnvToken ? 'yes' : 'no',
+						},
+						{
+							label: 'Token source',
+							value: tokenSourceLabel(status.tokenSource),
+						},
+						{
 							label: 'WebSocket path',
 							value: html`<code>${status.websocketPath}</code>`,
 						},
@@ -144,6 +224,45 @@ function renderPhoneSetupPage(input: {
 							value: html`<code>${status.lanWebSocketUrl}</code>`,
 						},
 					])}
+				</section>
+				${input.banner ? renderBanner(input.banner) : ''}
+				<section class="card">
+					<h2>Set device token</h2>
+					<p class="muted">
+						Use any long random secret. Saving a new token replaces the stored
+						value and disconnects a currently connected phone so it must
+						reconnect with the new token. A stored token takes precedence over
+						<code>PHONE_DEVICE_TOKEN</code>.
+					</p>
+					<form method="POST" class="field-stack">
+						<input type="hidden" name="intent" value="set-token" />
+						<label>
+							Device token
+							<input
+								type="password"
+								name="token"
+								required
+								autocomplete="off"
+								placeholder="Phone device token"
+							/>
+						</label>
+						<div class="form-actions">
+							<button type="submit">Save token</button>
+						</div>
+					</form>
+				</section>
+				<section class="card">
+					<h2>Clear stored token</h2>
+					<p class="muted">
+						Remove the encrypted token from SQLite. An env
+						<code>PHONE_DEVICE_TOKEN</code> fallback still applies if set.
+					</p>
+					${status.hasStoredToken
+						? html`<form method="POST">
+								<input type="hidden" name="intent" value="clear-token" />
+								<button type="submit">Clear stored token</button>
+							</form>`
+						: renderEmptyState('No phone device token is stored locally.')}
 				</section>
 				<section class="card">
 					<h2>Cloudflare Access</h2>
@@ -159,15 +278,6 @@ function renderPhoneSetupPage(input: {
 						Do not put phone control behind Access on <code>/mcp</code>.
 						<code>/mcp</code> stays machine Bypass so Kody can keep calling
 						<code>phone_*</code> tools.
-					</p>
-				</section>
-				<section class="card">
-					<h2>Environment</h2>
-					<p class="muted">
-						Set <code>PHONE_DEVICE_TOKEN</code> in the connector process
-						environment, then restart. This page only reports
-						<code>configured: ${status.tokenConfigured ? 'true' : 'false'}</code
-						>.
 					</p>
 				</section>`,
 		}),
@@ -190,10 +300,62 @@ export function createPhoneSetupHandler(
 	state: HomeConnectorState,
 	phone: ReturnType<typeof createPhoneAdapter>,
 ) {
+	function renderPage(banner: Banner = null) {
+		return renderPhoneSetupPage({ state, phone, banner })
+	}
+
 	return {
 		middleware: [],
-		handler() {
-			return renderPhoneSetupPage({ state, phone })
+		async handler({ request }: { request: Request }) {
+			if (request.method === 'POST') {
+				try {
+					assertSameOriginFormPost(request)
+					const form = await request.formData()
+					const intent = String(form.get('intent') ?? '')
+
+					if (intent === 'set-token') {
+						phone.setDeviceToken(String(form.get('token') ?? ''))
+						return renderPage({
+							tone: 'success',
+							message: 'Saved phone device token.',
+						})
+					}
+
+					if (intent === 'clear-token') {
+						phone.clearStoredDeviceToken()
+						return renderPage({
+							tone: 'success',
+							message: 'Cleared stored phone device token.',
+						})
+					}
+
+					return renderPage({
+						tone: 'error',
+						message: 'Unknown form action.',
+					})
+				} catch (error) {
+					captureHomeConnectorException(error, {
+						tags: {
+							route: '/phone/setup',
+							action: 'form',
+						},
+						contexts: {
+							phone: {
+								connectorId: state.connection.connectorId,
+							},
+						},
+					})
+					return renderPage({
+						tone: 'error',
+						message:
+							error instanceof Error
+								? error.message
+								: `Request failed: ${String(error)}`,
+					})
+				}
+			}
+
+			return renderPage()
 		},
 	} satisfies Action<typeof routes.phoneSetup>
 }
