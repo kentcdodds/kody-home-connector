@@ -76,8 +76,8 @@ The connector exposes these local-device families:
 - Venstar WiFi thermostat status and control over the local REST API
 - TP-Link Kasa KLAP/SHIP 2.0 smart plug discovery and on/off control
 - Android phone companion over WebSocket at `/phone/ws` (status, permissions,
-  calendars, contacts summary, network, mDNS, packages, Settings, Tesla/cast
-  diagnosis)
+  calendars, contacts summary, network, mDNS, packages, battery, Bluetooth,
+  display, system toggles, accounts, Settings, Tesla/cast diagnosis)
 - Island router diagnostics and guarded writes over SSH using one typed command
   catalog
 - Access Networks Unleashed / RUCKUS Unleashed WiFi controller reads and typed
@@ -345,6 +345,12 @@ The MCP surface is:
 - `phone_mdns_scan` (default `_googlecast._tcp`)
 - `phone_packages`
 - `phone_open_app_settings`
+- `phone_battery`
+- `phone_bluetooth` (adapter + bonded names; read-only)
+- `phone_display`
+- `phone_system` (airplane, Wi-Fi on, location mode, private DNS; read-only)
+- `phone_accounts` (type + name only)
+- `phone_open_special_settings` (`app` | `battery` | `notifications`)
 - `phone_diagnose_tesla` (permissions for `com.teslamotors.tesla` plus
   calendars, contacts summary, and network)
 - `phone_diagnose_cast` (network, mDNS `_googlecast._tcp`, and permissions for
@@ -355,10 +361,12 @@ These tools can read calendar metadata and contact counts, and
 no phone is connected, RPC tools return `isError` with structured
 `phone_offline` rather than throwing.
 
-Cloudflare Access Bypass for `kody-home.doddsfamily.us` must include `/phone/ws`
-(same machine list as `/mcp`, `/token`, `/revoke`, `/.well-known`, `/health`).
-Apply that in Cloudflare; this repo does not change Access. A phone cannot
-complete Access login. `/phone/status` and `/phone/setup` stay behind Access.
+Cloudflare Access Bypass for `kody-home.doddsfamily.us` must include `/phone/ws`.
+The MCP machine app is already at the five-destination limit (`/mcp`, `/token`,
+`/revoke`, `/.well-known`, `/health`), so `/phone/ws` is a separate Access app
+named **Kody Home Phone WebSocket** with an Everyone Bypass policy. Apply that
+in Cloudflare; this repo does not change Access. A phone cannot complete Access
+login. `/phone/status` and `/phone/setup` stay behind Access.
 
 ## Island router diagnostics integration
 

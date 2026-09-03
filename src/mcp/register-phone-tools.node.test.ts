@@ -220,3 +220,63 @@ test('phone tool descriptions mention calendar, contacts, and settings blast rad
 	expect(tools.get('phone_contacts_summary')?.description).toMatch(/contact/i)
 	expect(tools.get('phone_open_app_settings')?.description).toMatch(/Settings/)
 })
+
+test('read-only companion tools proxy to the phone adapter', async () => {
+	const { phone, calls } = createFakePhone({
+		readiness: null,
+		onCall: async (tool, args) => ({
+			ok: true,
+			payload: { tool, args },
+		}),
+	})
+	const tools = registerAll(phone)
+	for (const name of [
+		'phone_battery',
+		'phone_bluetooth',
+		'phone_display',
+		'phone_system',
+		'phone_accounts',
+	] as const) {
+		const result = await tools.get(name)?.handler({})
+		expect(result).toMatchObject({
+			structuredContent: {
+				ok: true,
+				payload: { tool: name, args: {} },
+			},
+		})
+	}
+	expect(calls.map((call) => call.tool)).toEqual([
+		'phone_battery',
+		'phone_bluetooth',
+		'phone_display',
+		'phone_system',
+		'phone_accounts',
+	])
+})
+
+test('phone_open_special_settings defaults to app and forwards target', async () => {
+	const { phone, calls } = createFakePhone({
+		readiness: null,
+		onCall: async (tool, args) => ({
+			ok: true,
+			payload: { tool, args },
+		}),
+	})
+	const tools = registerAll(phone)
+	await tools.get('phone_open_special_settings')?.handler({})
+	await tools.get('phone_open_special_settings')?.handler({
+		target: 'battery',
+	})
+	expect(calls).toEqual([
+		{
+			tool: 'phone_open_special_settings',
+			args: { target: 'app' },
+			options: undefined,
+		},
+		{
+			tool: 'phone_open_special_settings',
+			args: { target: 'battery' },
+			options: undefined,
+		},
+	])
+})
