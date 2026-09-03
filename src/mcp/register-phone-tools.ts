@@ -284,6 +284,102 @@ export function registerPhoneHomeConnectorTools(input: {
 
 	registerTool(
 		{
+			name: 'phone_battery',
+			title: 'Get Android Battery Status',
+			description:
+				'Read battery level, charging state, temperature, and unrestricted-battery flag from the connected Android phone.',
+			inputSchema: {},
+			annotations: {
+				readOnlyHint: true,
+			},
+		},
+		async () => await callPhoneTool(phone, 'phone_battery'),
+	)
+
+	registerTool(
+		{
+			name: 'phone_bluetooth',
+			title: 'Get Android Bluetooth Status',
+			description:
+				'Read whether Bluetooth is present and enabled, plus bonded device names. This does not connect or disconnect devices.',
+			inputSchema: {},
+			annotations: {
+				readOnlyHint: true,
+			},
+		},
+		async () => await callPhoneTool(phone, 'phone_bluetooth'),
+	)
+
+	registerTool(
+		{
+			name: 'phone_display',
+			title: 'Get Android Display Metrics',
+			description:
+				'Read pixel size, density, and DPI from the connected Android phone.',
+			inputSchema: {},
+			annotations: {
+				readOnlyHint: true,
+			},
+		},
+		async () => await callPhoneTool(phone, 'phone_display'),
+	)
+
+	registerTool(
+		{
+			name: 'phone_system',
+			title: 'Get Android System Toggles',
+			description:
+				'Read airplane mode, Wi-Fi on/off, location mode, ADB, and private DNS from the connected Android phone. This does not change those toggles.',
+			inputSchema: {},
+			annotations: {
+				readOnlyHint: true,
+			},
+		},
+		async () => await callPhoneTool(phone, 'phone_system'),
+	)
+
+	registerTool(
+		{
+			name: 'phone_accounts',
+			title: 'List Android Accounts',
+			description:
+				'List signed-in account types and names visible to the Android companion. This does not return passwords or auth tokens.',
+			inputSchema: {},
+			annotations: {
+				readOnlyHint: true,
+			},
+		},
+		async () => await callPhoneTool(phone, 'phone_accounts'),
+	)
+
+	const specialSettingsSchema = buildToolInputSchema({
+		target: z
+			.enum(['app', 'battery', 'notifications'])
+			.optional()
+			.describe(
+				'Settings screen to open. Defaults to this companion app. battery opens unrestricted-battery settings; notifications opens this app’s notification settings.',
+			),
+	})
+
+	registerTool(
+		{
+			name: 'phone_open_special_settings',
+			title: 'Open Android Special Settings',
+			description:
+				'Open this companion’s app, battery, or notification Settings screen on the connected phone. Does not launch other apps.',
+			inputSchema: specialSettingsSchema.inputSchema,
+			sdkInputSchema: specialSettingsSchema.sdkInputSchema,
+		},
+		async (args) => {
+			const target = args['target'] == null ? 'app' : String(args['target'])
+			return await callPhoneTool(phone, 'phone_open_special_settings', {
+				target,
+			})
+		},
+	)
+
+	registerTool(
+		{
 			name: 'phone_diagnose_tesla',
 			title: 'Diagnose Tesla Android Integration',
 			description: `Compose Tesla calendar/contacts debugging from the connected phone: permissions for ${teslaPackageName}, calendars, contacts summary, and network. ${calendarContactsNotice}`,
