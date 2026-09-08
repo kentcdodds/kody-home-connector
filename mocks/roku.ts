@@ -10,6 +10,14 @@ const rokuDevices = [
 		controlEnabled: true,
 	},
 	{
+		id: 'roku-court-projector',
+		name: 'Court Projector',
+		location: 'http://192.168.1.98:8060/',
+		lastSeenAt: '2026-03-24T12:00:00.000Z',
+		adopted: true,
+		controlEnabled: true,
+	},
+	{
 		id: 'roku-bedroom',
 		name: 'Bedroom Roku',
 		location: 'http://192.168.1.46:8060/',

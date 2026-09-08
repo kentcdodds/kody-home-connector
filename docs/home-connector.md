@@ -84,6 +84,8 @@ The connector exposes these local-device families:
   high-risk writes over the local AJAX management interface
 - JellyFish Lighting controller discovery, zones, patterns, and daily/calendar
   schedules over the controller's local WebSocket API
+- Court AV through the cage Global Cache iTach IP2IR (HDMI switch, Optoma
+  projector, Chauvet Rotosphere) plus composed Roku/Sonos scene tools
 
 All surfaces are registered as MCP tools on this process and served at `/mcp`.
 
@@ -112,6 +114,47 @@ update that job to call `kody.mcp["home"].bond_get_bridge_health({ bridgeId })`
 before `kody.mcp["home"].bond_get_bridge_version({ bridgeId })`. When health
 says the bridge is cooling down, the monitor should record a skipped/backoff
 sample and avoid the version fetch until `nextRecommendedAttemptAt`.
+
+## Court AV (Global Cache iTach)
+
+The sport-court cage stack is driven from this connector, not from Elan:
+
+- iTach IP2IR at `192.168.1.70:4998` (`GLOBAL_CACHE_HOST` / `GLOBAL_CACHE_PORT`)
+- IR1 stick-on emitter → MROCIOA HDMI switch
+- IR2 stick-on emitter → Optoma projector
+- IR3 hanging blaster → Chauvet Rotosphere (must be `IR_BLASTER`)
+- Court Roku ECP + Sport Court Sonos HDMI/TV input for picture and court audio
+
+Do not bypass the HDMI switch: Roku is on switch IN 1, the switch feeds an HDMI
+audio extractor, and that extractor is the Sport Court Sonos path. Blu-ray is
+switch IN 2.
+
+Named IR commands live in `src/adapters/global-cache/codes.ts`. Reliability:
+
+- HDMI inputs 1 and 2, projector ON / standby / HDMI: proven on the court
+- HDMI inputs 3-5: sequential NEC guesses (`0x4C` / `0x03`-`0x05`)
+- Rotosphere: Flipper IRC-6 conversions. Black Out, Manual, and Red were
+  observed. Auto and most other buttons are **not reliable** and should be
+  re-learned on the iTach pinhole next to the power jack.
+
+MCP surface:
+
+- `globalcache_get_status`
+- `globalcache_list_ir_commands`
+- `globalcache_send_ir`
+- `court_get_status`
+- `court_start_roku` (projector ON, HDMI 1, Sonos HDMI/TV, Roku Home or app)
+- `court_set_hdmi_input`
+- `court_projector_on` / `court_projector_standby`
+- `court_set_rotosphere`
+- `court_shutdown`
+
+`court_start_roku` resolves the Court Projector Roku by name (`/court/i`) or
+`COURT_ROKU_DEVICE_ID`, and Sport Court Sonos by room name or
+`COURT_SONOS_PLAYER_ID`. Adopt those devices first.
+
+There is no Kody workflow package in this repo yet. These tools are the
+connector capabilities that package should call.
 
 ## JellyFish Lighting integration
 
@@ -361,12 +404,13 @@ These tools can read calendar metadata and contact counts, and
 no phone is connected, RPC tools return `isError` with structured
 `phone_offline` rather than throwing.
 
-Cloudflare Access Bypass for `kody-home.doddsfamily.us` must include `/phone/ws`.
-The MCP machine app is already at the five-destination limit (`/mcp`, `/token`,
-`/revoke`, `/.well-known`, `/health`), so `/phone/ws` is a separate Access app
-named **Kody Home Phone WebSocket** with an Everyone Bypass policy. Apply that
-in Cloudflare; this repo does not change Access. A phone cannot complete Access
-login. `/phone/status` and `/phone/setup` stay behind Access.
+Cloudflare Access Bypass for `kody-home.doddsfamily.us` must include
+`/phone/ws`. The MCP machine app is already at the five-destination limit
+(`/mcp`, `/token`, `/revoke`, `/.well-known`, `/health`), so `/phone/ws` is a
+separate Access app named **Kody Home Phone WebSocket** with an Everyone Bypass
+policy. Apply that in Cloudflare; this repo does not change Access. A phone
+cannot complete Access login. `/phone/status` and `/phone/setup` stay behind
+Access.
 
 ## Island router diagnostics integration
 

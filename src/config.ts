@@ -40,6 +40,13 @@ export type HomeConnectorConfig = {
 	kasaUsername: string | null
 	kasaPassword: string | null
 	/**
+	 * Court iTach IP2IR. Defaults to the cage unit at 192.168.1.70:4998.
+	 */
+	globalCacheHost?: string
+	globalCachePort?: number
+	courtRokuDeviceId?: string | null
+	courtSonosPlayerId?: string | null
+	/**
 	 * Optional env fallback for the Android companion token on `/phone/ws`.
 	 * Prefer the encrypted token stored from `/phone/setup`. Never log the raw
 	 * value.
@@ -358,6 +365,11 @@ export function loadHomeConnectorConfig(): HomeConnectorConfig {
 				: 8000,
 		kasaUsername: process.env.KASA_USERNAME?.trim() || null,
 		kasaPassword: process.env.KASA_PASSWORD?.trim() || null,
+		globalCacheHost: process.env.GLOBAL_CACHE_HOST?.trim() || '192.168.1.70',
+		globalCachePort:
+			parseStrictIntegerEnv(process.env.GLOBAL_CACHE_PORT) ?? 4998,
+		courtRokuDeviceId: process.env.COURT_ROKU_DEVICE_ID?.trim() || null,
+		courtSonosPlayerId: process.env.COURT_SONOS_PLAYER_ID?.trim() || null,
 		phoneDeviceToken: process.env.PHONE_DEVICE_TOKEN?.trim() || null,
 		islandRouterHost: process.env.ISLAND_ROUTER_HOST?.trim() || null,
 		islandRouterPort:
