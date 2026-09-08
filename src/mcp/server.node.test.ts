@@ -564,6 +564,16 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 			setupPath: '/bond/setup',
 			bondLocalApiDocsUrl: 'https://docs-local.appbond.com/',
 		})
+		expect(tools.some((tool) => tool.name === 'court_start_roku')).toBe(true)
+		expect(tools.some((tool) => tool.name === 'globalcache_send_ir')).toBe(true)
+		const courtStatus = await mcp.callTool('court_get_status')
+		expect(courtStatus.content[0]?.type).toBe('text')
+		expect(courtStatus.structuredContent).toMatchObject({
+			hdmiInputs: {
+				1: 'proven',
+				2: 'proven',
+			},
+		})
 		const lutronCredentialsTool = tools.find(
 			(tool) => tool.name === 'lutron_set_credentials',
 		)

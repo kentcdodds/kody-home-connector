@@ -5,6 +5,8 @@ import { markSecretInputFields } from '@kody-bot/connector-kit/schema'
 import { z } from 'zod'
 import { type createAccessNetworksUnleashedAdapter } from '../adapters/access-networks-unleashed/index.ts'
 import { type createBondAdapter } from '../adapters/bond/index.ts'
+import { createCourtAdapter } from '../adapters/court/index.ts'
+import { createGlobalCacheAdapter } from '../adapters/global-cache/index.ts'
 import { type createIslandRouterApiAdapter } from '../adapters/island-router-api/index.ts'
 import { type createIslandRouterAdapter } from '../adapters/island-router/index.ts'
 import { type createJellyfishAdapter } from '../adapters/jellyfish/index.ts'
@@ -38,6 +40,8 @@ import {
 } from '../logging/index.ts'
 import { registerAccessNetworksUnleashedHomeConnectorTools } from './register-access-networks-unleashed-tools.ts'
 import { registerBondHomeConnectorTools } from './register-bond-tools.ts'
+import { registerCourtHomeConnectorTools } from './register-court-tools.ts'
+import { registerGlobalCacheHomeConnectorTools } from './register-global-cache-tools.ts'
 import { registerIslandRouterApiHomeConnectorTools } from './register-island-router-api-tools.ts'
 import { registerIslandRouterHomeConnectorTools } from './register-island-router-tools.ts'
 import { registerKasaHomeConnectorTools } from './register-kasa-tools.ts'
@@ -116,6 +120,7 @@ export function createHomeConnectorMcpServer(input: {
 	>
 	kasa: ReturnType<typeof createKasaAdapter>
 	phone: ReturnType<typeof createPhoneAdapter>
+	globalCache?: ReturnType<typeof createGlobalCacheAdapter>
 }): HomeConnectorMcpServer {
 	const roku = createRokuAdapter({
 		config: input.config,
@@ -132,6 +137,18 @@ export function createHomeConnectorMcpServer(input: {
 	const accessNetworksUnleashed = input.accessNetworksUnleashed
 	const kasa = input.kasa
 	const phone = input.phone
+	const globalCache =
+		input.globalCache ??
+		createGlobalCacheAdapter({
+			config: input.config,
+		})
+	const court = createCourtAdapter({
+		config: input.config,
+		state: input.state,
+		globalCache,
+		roku,
+		sonos,
+	})
 
 	const server = new McpServer(
 		{
@@ -140,7 +157,7 @@ export function createHomeConnectorMcpServer(input: {
 		},
 		{
 			instructions:
-				"Home MCP server. Tools support Roku, Samsung TV, Lutron, Sonos, Bond (Olibra Bond Bridge / shades, groups, and RF devices), JellyFish Lighting patterns/zones/daily schedules/calendar schedules, Venstar WiFi thermostat control, TP-Link Kasa KLAP smart plugs, Kent's Android phone companion over WebSocket (phone_* tools for status, permissions, calendars, contacts summary, network, mDNS, packages, battery, Bluetooth, display, system toggles, accounts, Settings, and Tesla/cast diagnosis), Island router status plus a generic allowlisted Island CLI catalog executor, a generic Island Router HTTP API proxy, and a single generic Access Networks / RUCKUS Unleashed WiFi raw-request capability. Use 'home_connector_get_metadata' to read runtime metadata such as APP_COMMIT_SHA, connector id, public MCP URL, and process uptime. Use 'home_connector_list_logs' to inspect the connector's sanitized local operational log history. Use 'jellyfish_get_daily_schedule' before 'jellyfish_set_daily_schedule' because JellyFish schedule writes replace the full list. Use 'kasa_set_credentials', 'kasa_scan_plugs', 'kasa_adopt_plug', then 'kasa_turn_plug_on' or 'kasa_turn_plug_off' for adopted Kasa plugs only. Use 'phone_status' to see whether the Android companion is connected; other phone_* tools RPC over the phone WebSocket and can read calendars/contact counts, battery, Bluetooth, display, system toggles, and accounts, or open Android Settings. Use 'access_networks_unleashed_scan_controllers', 'access_networks_unleashed_adopt_controller', 'access_networks_unleashed_set_credentials', and 'access_networks_unleashed_authenticate_controller' to wire up a controller, then 'access_networks_unleashed_request' to issue authenticated AJAX requests. Use 'router_get_status' for Island SSH readiness and 'router_run_command' for catalog command ids; arbitrary CLI text is never accepted and write-risk entries require a reason plus exact confirmation. Use 'island_router_api_set_pin' before 'island_router_api_request' for the LAN-only Island Router HTTP API proxy; non-GET proxy requests require a reason plus exact confirmation. Island router and Access Networks Unleashed write operations are high risk and must be used only when highly certain. Bond local API tokens are configured only in the admin UI (/bond/setup); use bond_authentication_guide when you need a reminder.",
+				"Home MCP server. Tools support Roku, Samsung TV, Lutron, Sonos, Bond (Olibra Bond Bridge / shades, groups, and RF devices), JellyFish Lighting patterns/zones/daily schedules/calendar schedules, Venstar WiFi thermostat control, TP-Link Kasa KLAP smart plugs, court AV (Optoma projector, MROCIOA HDMI switch, Chauvet Rotosphere, Court Roku, Sport Court Sonos) via the cage Global Cache iTach, Kent's Android phone companion over WebSocket (phone_* tools for status, permissions, calendars, contacts summary, network, mDNS, packages, battery, Bluetooth, display, system toggles, accounts, Settings, and Tesla/cast diagnosis), Island router status plus a generic allowlisted Island CLI catalog executor, a generic Island Router HTTP API proxy, and a single generic Access Networks / RUCKUS Unleashed WiFi raw-request capability. Use 'home_connector_get_metadata' to read runtime metadata such as APP_COMMIT_SHA, connector id, public MCP URL, and process uptime. Use 'home_connector_list_logs' to inspect the connector's sanitized local operational log history. Use 'jellyfish_get_daily_schedule' before 'jellyfish_set_daily_schedule' because JellyFish schedule writes replace the full list. Use 'kasa_set_credentials', 'kasa_scan_plugs', 'kasa_adopt_plug', then 'kasa_turn_plug_on' or 'kasa_turn_plug_off' for adopted Kasa plugs only. Use 'court_start_roku' to bring the sport court up on Roku (projector ON, HDMI 1, Sonos HDMI/TV, optional app launch). Rotosphere IR is incomplete: prefer court_set_rotosphere only with the understanding that Auto and most colors are unreliable Flipper conversions. Use 'phone_status' to see whether the Android companion is connected; other phone_* tools RPC over the phone WebSocket and can read calendars/contact counts, battery, Bluetooth, display, system toggles, and accounts, or open Android Settings. Use 'access_networks_unleashed_scan_controllers', 'access_networks_unleashed_adopt_controller', 'access_networks_unleashed_set_credentials', and 'access_networks_unleashed_authenticate_controller' to wire up a controller, then 'access_networks_unleashed_request' to issue authenticated AJAX requests. Use 'router_get_status' for Island SSH readiness and 'router_run_command' for catalog command ids; arbitrary CLI text is never accepted and write-risk entries require a reason plus exact confirmation. Use 'island_router_api_set_pin' before 'island_router_api_request' for the LAN-only Island Router HTTP API proxy; non-GET proxy requests require a reason plus exact confirmation. Island router and Access Networks Unleashed write operations are high risk and must be used only when highly certain. Bond local API tokens are configured only in the admin UI (/bond/setup); use bond_authentication_guide when you need a reminder.",
 		},
 	)
 
@@ -3509,6 +3526,16 @@ export function createHomeConnectorMcpServer(input: {
 	registerPhoneHomeConnectorTools({
 		registerTool,
 		phone,
+	})
+
+	registerGlobalCacheHomeConnectorTools({
+		registerTool,
+		globalCache,
+	})
+
+	registerCourtHomeConnectorTools({
+		registerTool,
+		court,
 	})
 
 	return {
