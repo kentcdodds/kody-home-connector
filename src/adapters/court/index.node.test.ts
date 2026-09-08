@@ -82,9 +82,11 @@ function createFakeRoku() {
 }
 
 function createFakeSonos() {
-	const selected: Array<string | undefined> = []
+	const selectedAudioInputs: Array<string | undefined> = []
+	const selectedTvInputs: Array<string | undefined> = []
 	return {
-		selected,
+		selectedAudioInputs,
+		selectedTvInputs,
 		adapter: {
 			getStatus() {
 				return {
@@ -99,7 +101,14 @@ function createFakeSonos() {
 				}
 			},
 			async selectAudioInput(playerId?: string) {
-				selected.push(playerId)
+				selectedAudioInputs.push(playerId)
+			},
+			async selectTvInput(playerId?: string) {
+				selectedTvInputs.push(playerId)
+				return {
+					playerId: playerId ?? 'sonos-rincon-804af2a8db1f01400',
+					uri: 'x-sonos-htastream:RINCON_804AF2A8DB1F01400:spdif',
+				}
 			},
 		} as unknown as ReturnType<typeof createSonosAdapter>,
 	}
@@ -121,9 +130,14 @@ test('startRoku powers the projector, selects HDMI 1, routes Sonos, and opens Ho
 
 	const result = await court.startRoku()
 	expect(globalCache.sent).toEqual(['projector-on', 'hdmi-input-1'])
-	expect(sonos.selected).toEqual(['sonos-rincon-804af2a8db1f01400'])
+	expect(sonos.selectedTvInputs).toEqual(['sonos-rincon-804af2a8db1f01400'])
+	expect(sonos.selectedAudioInputs).toEqual([])
 	expect(roku.keys).toEqual(['Home'])
 	expect(result.appId).toBeNull()
+	expect(result.sonosInput).toBe('hdmi-tv-spdif')
+	expect(result.sonosUri).toBe(
+		'x-sonos-htastream:RINCON_804AF2A8DB1F01400:spdif',
+	)
 })
 
 test('startRoku can launch a Roku app by name', async () => {

@@ -5,9 +5,13 @@ import {
 	playSonosLive,
 	removeSonosQueueTrackRangeLive,
 	seekSonosQueueTrackLive,
+	selectSonosTvInputLive,
 	setSonosTransportUriLive,
 	setSonosVolumeLive,
+	sonosLineInUri,
+	sonosTvInputUri,
 } from './soap-client.ts'
+import { type SonosPersistedPlayer } from './types.ts'
 
 type CapturedRequest = {
 	url: string
@@ -197,4 +201,32 @@ test('sonos soap timeouts retry once and annotate dedupe metadata', async () => 
 			},
 		},
 	})
+})
+
+test('selectSonosTvInputLive uses HDMI/TV SPDIF, not analog line-in', async () => {
+	const requests = installSoapFetchMock()
+	const player = {
+		udn: 'uuid:RINCON_804AF2A8DB1F01400',
+	} as SonosPersistedPlayer
+
+	expect(sonosTvInputUri(player.udn)).toBe(
+		'x-sonos-htastream:RINCON_804AF2A8DB1F01400:spdif',
+	)
+	expect(sonosLineInUri(player.udn)).toBe(
+		'x-rincon-stream:RINCON_804AF2A8DB1F01400',
+	)
+
+	await selectSonosTvInputLive({
+		host: 'court-sonos.local',
+		player,
+	})
+
+	expect(requests.map((request) => request.action)).toEqual([
+		'urn:schemas-upnp-org:service:AVTransport:1#SetAVTransportURI',
+		'urn:schemas-upnp-org:service:AVTransport:1#Play',
+	])
+	expect(requests[0]?.body).toContain(
+		'<CurrentURI>x-sonos-htastream:RINCON_804AF2A8DB1F01400:spdif</CurrentURI>',
+	)
+	expect(requests[0]?.body).not.toContain('x-rincon-stream:')
 })

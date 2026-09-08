@@ -3239,6 +3239,25 @@ export function createHomeConnectorMcpServer(input: {
 
 	registerTool(
 		{
+			name: 'sonos_select_tv_input',
+			title: 'Select Sonos TV Input',
+			description:
+				'Switch a Sonos Amp/home-theater player to its HDMI/TV SPDIF input (x-sonos-htastream), not analog line-in.',
+			...playerScopedSchema(),
+		},
+		async (args) => {
+			const playerId =
+				args['playerId'] == null ? undefined : String(args['playerId'])
+			const result = await sonos.selectTvInput(playerId)
+			return structuredTextResult('Selected the Sonos HDMI/TV SPDIF input.', {
+				playerId: result.playerId,
+				uri: result.uri,
+			})
+		},
+	)
+
+	registerTool(
+		{
 			name: 'sonos_set_line_in_level',
 			title: 'Set Sonos Line-In Level',
 			description:

@@ -75,7 +75,7 @@ export function registerCourtHomeConnectorTools(input: {
 			name: 'court_start_roku',
 			title: 'Start Court Roku',
 			description:
-				'Start the sport court on Roku: projector ON, HDMI switch input 1, Sport Court Sonos HDMI/TV input, then Roku Home or a named/id app (YouTube, etc.). Lamp warmup can take 15-30s. Requires an adopted court Roku.',
+				'Start the sport court on Roku: projector ON, HDMI switch input 1, Sport Court Sonos HDMI/TV (SPDIF) input (not analog line-in), then Roku Home or a named/id app (YouTube, etc.). Lamp warmup can take 15-30s. Requires an adopted court Roku.',
 			...buildToolInputSchema({
 				appName: z.string().min(1).optional(),
 				appId: z.string().min(1).optional(),

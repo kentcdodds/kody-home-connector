@@ -21,6 +21,7 @@ import {
 	searchMockSonosLocalLibrary,
 	searchMockSonosSavedQueues,
 	selectMockSonosAudioInput,
+	selectMockSonosTvInput,
 	setMockSonosBass,
 	setMockSonosLineInLevel,
 	setMockSonosLoudness,
@@ -80,6 +81,8 @@ import {
 	removeSonosQueueTrackRangeLive,
 	searchSonosLocalLibraryLive,
 	selectSonosAudioInputLive,
+	selectSonosTvInputLive,
+	sonosTvInputUri,
 	setSonosBassLive,
 	setSonosLineInLevelLive,
 	setSonosLoudnessLive,
@@ -904,6 +907,20 @@ export function createSonosAdapter(input: {
 		})
 	}
 
+	async function selectTvInput(playerId: string | undefined) {
+		const player = resolvePlayer(playerId)
+		const uri = sonosTvInputUri(player.udn)
+		if (input.config.mocksEnabled && isMockSonosHost(player.host)) {
+			selectMockSonosTvInput(player.playerId)
+			return { playerId: player.playerId, uri }
+		}
+		await selectSonosTvInputLive({
+			host: player.host,
+			player,
+		})
+		return { playerId: player.playerId, uri }
+	}
+
 	async function setLineInLevel(
 		playerId: string | undefined,
 		leftLevel: number,
@@ -1219,6 +1236,9 @@ export function createSonosAdapter(input: {
 		},
 		async selectAudioInput(playerId?: string) {
 			await selectAudioInput(playerId)
+		},
+		async selectTvInput(playerId?: string) {
+			return await selectTvInput(playerId)
 		},
 		async setLineInLevel(
 			playerId: string | undefined,

@@ -211,7 +211,7 @@ export function createCourtAdapter(input: {
 			const projector = await input.globalCache.sendIr('projector-on')
 			const hdmi = await input.globalCache.sendIr('hdmi-input-1')
 			const sonosPlayerId = resolveSonosPlayerId(startInput.sonosPlayerId)
-			await input.sonos.selectAudioInput(sonosPlayerId)
+			const sonosTv = await input.sonos.selectTvInput(sonosPlayerId)
 			let rokuResult: unknown
 			if (appId) {
 				rokuResult = await input.roku.launchApp(rokuDevice.deviceId, appId)
@@ -223,11 +223,13 @@ export function createCourtAdapter(input: {
 				rokuName: rokuDevice.name,
 				appId,
 				sonosPlayerId: sonosPlayerId ?? null,
+				sonosInput: 'hdmi-tv-spdif',
+				sonosUri: sonosTv.uri,
 				projector,
 				hdmi,
 				roku: rokuResult,
 				notes:
-					'Projector lamp may take 15-30s. HDMI 1 is the Roku. Sport Court Sonos is on the HDMI/TV (spdif) input. Do not bypass the HDMI switch or court audio is lost.',
+					'Projector lamp may take 15-30s. HDMI 1 is the Roku. Sport Court Sonos is on the HDMI/TV (spdif) input, not analog line-in. Do not bypass the HDMI switch or court audio is lost.',
 			}
 		},
 		async setHdmiInput(hdmiInput: CourtHdmiInput) {

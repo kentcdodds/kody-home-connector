@@ -143,7 +143,8 @@ MCP surface:
 - `globalcache_list_ir_commands`
 - `globalcache_send_ir`
 - `court_get_status`
-- `court_start_roku` (projector ON, HDMI 1, Sonos HDMI/TV, Roku Home or app)
+- `court_start_roku` (projector ON, HDMI 1, Sonos HDMI/TV SPDIF, Roku Home or
+  app)
 - `court_set_hdmi_input`
 - `court_projector_on` / `court_projector_standby`
 - `court_set_rotosphere`
@@ -151,7 +152,8 @@ MCP surface:
 
 `court_start_roku` resolves the Court Projector Roku by name (`/court/i`) or
 `COURT_ROKU_DEVICE_ID`, and Sport Court Sonos by room name or
-`COURT_SONOS_PLAYER_ID`. Adopt those devices first.
+`COURT_SONOS_PLAYER_ID`. Adopt those devices first. Court audio is the Amp's
+HDMI/TV SPDIF input (`x-sonos-htastream:...:spdif`), not analog line-in.
 
 There is no Kody workflow package in this repo yet. These tools are the
 connector capabilities that package should call.

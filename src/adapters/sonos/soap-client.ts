@@ -113,6 +113,14 @@ export function stripSonosUuidPrefix(udn: string) {
 	return udn.replace(/^uuid:/i, '')
 }
 
+export function sonosLineInUri(udn: string) {
+	return `x-rincon-stream:${stripSonosUuidPrefix(udn)}`
+}
+
+export function sonosTvInputUri(udn: string) {
+	return `x-sonos-htastream:${stripSonosUuidPrefix(udn)}:spdif`
+}
+
 export function encodeXml(value: string) {
 	return value
 		.replaceAll('&', '&amp;')
@@ -896,7 +904,7 @@ export async function getSonosAudioInputLive(input: {
 		rightLevel: Number(
 			extractTag(lineLevelXml, 'CurrentRightLineInLevel') ?? '0',
 		),
-		lineInUri: `x-rincon-stream:${stripSonosUuidPrefix(input.player.udn)}`,
+		lineInUri: sonosLineInUri(input.player.udn),
 	} satisfies SonosAudioInputStatus
 }
 
@@ -906,7 +914,18 @@ export async function selectSonosAudioInputLive(input: {
 }) {
 	await setSonosTransportUriLive({
 		host: input.host,
-		uri: `x-rincon-stream:${stripSonosUuidPrefix(input.player.udn)}`,
+		uri: sonosLineInUri(input.player.udn),
+	})
+	await playSonosLive(input.host)
+}
+
+export async function selectSonosTvInputLive(input: {
+	host: string
+	player: SonosPersistedPlayer
+}) {
+	await setSonosTransportUriLive({
+		host: input.host,
+		uri: sonosTvInputUri(input.player.udn),
 	})
 	await playSonosLive(input.host)
 }

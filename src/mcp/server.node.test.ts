@@ -565,6 +565,9 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 			bondLocalApiDocsUrl: 'https://docs-local.appbond.com/',
 		})
 		expect(tools.some((tool) => tool.name === 'court_start_roku')).toBe(true)
+		expect(tools.some((tool) => tool.name === 'sonos_select_tv_input')).toBe(
+			true,
+		)
 		expect(tools.some((tool) => tool.name === 'globalcache_send_ir')).toBe(true)
 		const courtStatus = await mcp.callTool('court_get_status')
 		expect(courtStatus.content[0]?.type).toBe('text')

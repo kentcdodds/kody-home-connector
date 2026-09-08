@@ -950,6 +950,13 @@ export function selectMockSonosAudioInput(playerId: string) {
 	coordinator.transportState = 'PLAYING'
 }
 
+export function selectMockSonosTvInput(playerId: string) {
+	const coordinator = getCoordinatorState(playerId)
+	const player = getPlayerState(playerId)
+	coordinator.currentUri = `x-sonos-htastream:${stripUuidPrefix(player.player.udn)}:spdif`
+	coordinator.transportState = 'PLAYING'
+}
+
 export function setMockSonosLineInLevel(
 	playerId: string,
 	leftLevel: number,
