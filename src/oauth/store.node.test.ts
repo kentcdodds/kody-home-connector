@@ -81,14 +81,33 @@ test('concurrent refresh token revocation succeeds exactly once', async () => {
 		})
 
 		const results = await Promise.all([
-			revokeOAuthToken(storage.db, tokenHash),
-			revokeOAuthToken(storage.db, tokenHash),
-			revokeOAuthToken(storage.db, tokenHash),
+			revokeOAuthToken(storage.db, tokenHash, now),
+			revokeOAuthToken(storage.db, tokenHash, now),
+			revokeOAuthToken(storage.db, tokenHash, now),
 		])
 
 		expect(results.filter(Boolean)).toHaveLength(1)
-		expect(await revokeOAuthToken(storage.db, tokenHash)).toBe(false)
+		expect(await revokeOAuthToken(storage.db, tokenHash, now)).toBe(false)
 		expect(await readActiveOAuthToken(storage.db, tokenHash, now)).toBeNull()
+	} finally {
+		await storage.close()
+	}
+})
+
+test('expired refresh tokens cannot be revoked for rotation', async () => {
+	const storage = await createStorage()
+	const tokenHash = hashOAuthSecret('expired-refresh')
+	try {
+		await insertOAuthToken(storage.db, {
+			tokenHash,
+			tokenKind: 'refresh',
+			clientId: 'client',
+			resource: 'https://example.com/mcp',
+			scope: 'mcp',
+			expiresAt: now,
+			revokedAt: null,
+		})
+		expect(await revokeOAuthToken(storage.db, tokenHash, now)).toBe(false)
 	} finally {
 		await storage.close()
 	}

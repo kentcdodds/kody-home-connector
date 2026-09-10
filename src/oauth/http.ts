@@ -300,10 +300,11 @@ async function handleToken(input: {
 	if (grantType === 'refresh_token') {
 		const refreshToken = String(form.get('refresh_token') ?? '')
 		const clientId = String(form.get('client_id') ?? '')
+		const now = nowSeconds()
 		const record = await readActiveOAuthToken(
 			input.storage.db,
 			hashOAuthSecret(refreshToken),
-			nowSeconds(),
+			now,
 		)
 		if (
 			!record ||
@@ -312,7 +313,7 @@ async function handleToken(input: {
 		) {
 			return jsonError(400, 'invalid_grant', 'Refresh token is invalid.')
 		}
-		if (!(await revokeOAuthToken(input.storage.db, record.tokenHash))) {
+		if (!(await revokeOAuthToken(input.storage.db, record.tokenHash, now))) {
 			return jsonError(400, 'invalid_grant', 'Refresh token is invalid.')
 		}
 		return issueTokenPair({
@@ -368,7 +369,11 @@ async function handleRevoke(input: {
 	const form = await input.request.formData()
 	const token = String(form.get('token') ?? '')
 	if (token) {
-		await revokeOAuthToken(input.storage.db, hashOAuthSecret(token))
+		await revokeOAuthToken(
+			input.storage.db,
+			hashOAuthSecret(token),
+			nowSeconds(),
+		)
 	}
 	return new Response(null, { status: 200 })
 }

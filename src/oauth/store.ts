@@ -131,11 +131,18 @@ export async function readActiveOAuthToken(
 export async function revokeOAuthToken(
 	db: HomeConnectorDatabase,
 	tokenHash: string,
+	nowSeconds: number,
 ): Promise<boolean> {
 	const revoked = await db.updateMany(
 		oauthTokens,
-		{ revoked_at: Math.floor(Date.now() / 1000) },
-		{ where: and({ token_hash: tokenHash }, isNull('revoked_at')) },
+		{ revoked_at: nowSeconds },
+		{
+			where: and(
+				{ token_hash: tokenHash },
+				isNull('revoked_at'),
+				gt('expires_at', nowSeconds),
+			),
+		},
 	)
 	return revoked.affectedRows === 1
 }
