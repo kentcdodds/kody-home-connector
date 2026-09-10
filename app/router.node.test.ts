@@ -235,6 +235,61 @@ test('home route toggles worker snapshot link by connector id', async () => {
 	}
 })
 
+test('read-only routes serve HEAD and reject other methods with 405', async () => {
+	const config = createConfig()
+	const {
+		state,
+		storage,
+		lutron,
+		sonos,
+		samsungTv,
+		bond,
+		accessNetworksUnleashed,
+		islandRouter,
+		islandRouterApi,
+		jellyfish,
+		venstar,
+		kasa,
+		phone,
+	} = createAdapters(config)
+	try {
+		const router = createHomeConnectorRouter(
+			state,
+			config,
+			lutron,
+			samsungTv,
+			sonos,
+			bond,
+			accessNetworksUnleashed,
+			islandRouter,
+			islandRouterApi,
+			jellyfish,
+			venstar,
+			kasa,
+			phone,
+		)
+		const headResponse = await router.fetch('http://example.test/health', {
+			method: 'HEAD',
+		})
+		expect(headResponse.status).toBe(200)
+		expect(headResponse.headers.get('content-type')).toContain(
+			'application/json',
+		)
+		expect(await headResponse.text()).toBe('')
+
+		const postResponse = await router.fetch('http://example.test/health', {
+			method: 'POST',
+		})
+		expect(postResponse.status).toBe(405)
+		expect(postResponse.headers.get('allow')).toBe('GET, HEAD')
+
+		const unknownResponse = await router.fetch('http://example.test/nope')
+		expect(unknownResponse.status).toBe(404)
+	} finally {
+		storage.close()
+	}
+})
+
 test('venstar status scan shows discovered thermostats', async () => {
 	const config = createConfig()
 	const {

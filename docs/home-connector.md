@@ -62,6 +62,15 @@ The Remix admin UI stays on the same HTTP server. Opening `/authorize` during
 CIMD requires Cloudflare Access on the public hostname. The LAN origin is
 trusted.
 
+The admin UI is server-rendered with `remix/html-template` and ships no browser
+JavaScript: native forms submit without hydration, so there is no asset server,
+client entry, or `remix/ui` component runtime to configure. Read-only pages are
+`GET` routes (the router serves `HEAD` and answers other methods with `405`);
+pages that also process form submissions dispatch on `request.method` inside a
+single action. `createRequestListener` runs without `trustProxy` because the
+container is reached directly on the LAN port; only enable it if the process is
+moved exclusively behind a trusted TLS-terminating proxy.
+
 `home_connector_get_metadata`, `/health`, and the admin dashboard report MCP
 URL, listening state, and local tool count.
 

@@ -75,8 +75,8 @@ Worker shared secret for auth. Those Worker reverse-dial settings are gone.
    routes `https://kody-home.doddsfamily.us` through the **Dodds Vault** tunnel.
    MCP/OAuth machine paths (`/mcp`, `/token`, `/revoke`, `/.well-known`,
    `/health`) plus `/phone/ws` (separate Access app) bypass Access. The admin UI
-   and `/authorize` require
-   Cloudflare Access. The LAN origin is trusted and has no extra login.
+   and `/authorize` require Cloudflare Access. The LAN origin is trusted and has
+   no extra login.
 2. In Kody, open `/account/mcp-servers` and add
    `https://kody-home.doddsfamily.us/mcp` with name `home`.
 3. Open the authorization URL, pass Cloudflare Access, and approve Kody.
