@@ -619,7 +619,7 @@ export function createHomeConnectorMcpServer(input: {
 				},
 			},
 			async (args) => {
-				const logs = input.logger!.listLogs({
+				const logs = await input.logger!.listLogs({
 					level: normalizeLogLevel(args['level']),
 					event: typeof args['event'] === 'string' ? args['event'] : undefined,
 					query: typeof args['query'] === 'string' ? args['query'] : undefined,
@@ -854,7 +854,7 @@ export function createHomeConnectorMcpServer(input: {
 		},
 		async () => {
 			const result = await jellyfish.scan()
-			const status = jellyfish.getStatus()
+			const status = await jellyfish.getStatus()
 			return structuredTextResult(
 				result.length === 0
 					? 'No JellyFish controllers were discovered.'
@@ -880,7 +880,7 @@ export function createHomeConnectorMcpServer(input: {
 			},
 		},
 		async () => {
-			const controllers = jellyfish.listControllers()
+			const controllers = await jellyfish.listControllers()
 			return structuredTextResult(
 				controllers.length === 0
 					? 'No JellyFish controllers are currently known.'
@@ -1133,7 +1133,7 @@ export function createHomeConnectorMcpServer(input: {
 		},
 		async () => {
 			const discovered = await venstar.scan()
-			const status = venstar.getStatus()
+			const status = await venstar.getStatus()
 			return structuredTextResult(
 				discovered.length === 0
 					? 'No Venstar thermostats were discovered.'
@@ -1186,7 +1186,7 @@ export function createHomeConnectorMcpServer(input: {
 			}),
 		},
 		async (args) => {
-			const thermostat = venstar.removeThermostat(String(args['ip']))
+			const thermostat = await venstar.removeThermostat(String(args['ip']))
 			return structuredTextResult(
 				`Removed ${thermostat.name} (${thermostat.ip}) from managed Venstar thermostats.`,
 				{
@@ -1705,7 +1705,7 @@ export function createHomeConnectorMcpServer(input: {
 			},
 		},
 		async () => {
-			const processors = lutron.getStatus().processors
+			const processors = (await lutron.getStatus()).processors
 			return {
 				content: [
 					{
@@ -1774,11 +1774,15 @@ export function createHomeConnectorMcpServer(input: {
 			sdkInputSchema: lutronCredentialsSchema.sdkInputSchema,
 		},
 		async (args) => {
-			return await handleExpectedLutronError(() => {
+			return await handleExpectedLutronError(async () => {
 				const processorId = String(args['processorId'] ?? '')
 				const username = String(args['username'] ?? '')
 				const password = String(args['password'] ?? '')
-				const result = lutron.setCredentials(processorId, username, password)
+				const result = await lutron.setCredentials(
+					processorId,
+					username,
+					password,
+				)
 				return {
 					content: [
 						{
@@ -2067,7 +2071,7 @@ export function createHomeConnectorMcpServer(input: {
 			},
 		},
 		async () => {
-			const devices = samsungTv.getStatus().allDevices
+			const devices = (await samsungTv.getStatus()).allDevices
 			return {
 				content: [
 					{
@@ -2128,7 +2132,7 @@ export function createHomeConnectorMcpServer(input: {
 			}),
 		},
 		async (args) => {
-			const device = samsungTv.adoptDevice(String(args['deviceId'] ?? ''))
+			const device = await samsungTv.adoptDevice(String(args['deviceId'] ?? ''))
 			return {
 				content: [
 					{
@@ -2495,7 +2499,7 @@ export function createHomeConnectorMcpServer(input: {
 		},
 		async (args) => {
 			const playerId = String(args['playerId'] ?? '')
-			const player = sonos.adoptPlayer(playerId)
+			const player = await sonos.adoptPlayer(playerId)
 			return structuredTextResult(
 				`Adopted Sonos player ${player.roomName}.`,
 				player,

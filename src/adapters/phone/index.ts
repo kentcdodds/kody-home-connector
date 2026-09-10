@@ -240,17 +240,17 @@ export function createPhoneAdapter(input: {
 		return input.config.phoneDeviceToken
 	}
 
-	function getStoredToken() {
+	async function getStoredToken() {
 		if (!input.storage) return null
 		return getPhoneDeviceToken(input.storage, connectorId)
 	}
 
-	function getExpectedToken() {
-		return getStoredToken() ?? getEnvToken()
+	async function getExpectedToken() {
+		return (await getStoredToken()) ?? getEnvToken()
 	}
 
-	function getTokenSource() {
-		if (getStoredToken()) return 'stored' as const
+	async function getTokenSource() {
+		if (await getStoredToken()) return 'stored' as const
 		if (getEnvToken()) return 'env' as const
 		return null
 	}
@@ -438,8 +438,8 @@ export function createPhoneAdapter(input: {
 		})
 	}
 
-	function getCallReadiness(): PhoneStructuredError | null {
-		if (!getExpectedToken()) {
+	async function getCallReadiness(): Promise<PhoneStructuredError | null> {
+		if (!(await getExpectedToken())) {
 			return structuredError(phoneTokenNotConfiguredError)
 		}
 		if (!primary?.hello) {
@@ -448,15 +448,15 @@ export function createPhoneAdapter(input: {
 		return null
 	}
 
-	function call(
+	async function call(
 		tool: string,
 		args: Record<string, unknown> = {},
 		options: { timeoutMs?: number } = {},
 	): Promise<PhoneCallResult> {
-		const blocked = getCallReadiness()
-		if (blocked) return Promise.resolve(blocked)
+		const blocked = await getCallReadiness()
+		if (blocked) return blocked
 		const session = primary
-		if (!session) return Promise.resolve(structuredError(phoneOfflineError))
+		if (!session) return structuredError(phoneOfflineError)
 
 		const id = createCallId()
 		const timeoutMs = options.timeoutMs ?? defaultTimeoutMs
@@ -489,10 +489,10 @@ export function createPhoneAdapter(input: {
 		})
 	}
 
-	function authorizeUpgrade(request: PhoneUpgradeRequest) {
+	async function authorizeUpgrade(request: PhoneUpgradeRequest) {
 		return authorizePhoneUpgrade({
 			request,
-			expectedToken: getExpectedToken(),
+			expectedToken: await getExpectedToken(),
 		})
 	}
 
@@ -503,8 +503,8 @@ export function createPhoneAdapter(input: {
 		return input.storage
 	}
 
-	function setDeviceToken(token: string) {
-		savePhoneDeviceToken({
+	async function setDeviceToken(token: string) {
+		await savePhoneDeviceToken({
 			storage: requireStorage(),
 			connectorId,
 			token,
@@ -512,17 +512,17 @@ export function createPhoneAdapter(input: {
 		dropAllSessions()
 	}
 
-	function clearStoredDeviceToken() {
-		clearPhoneDeviceToken(requireStorage(), connectorId)
+	async function clearStoredDeviceToken() {
+		await clearPhoneDeviceToken(requireStorage(), connectorId)
 		dropAllSessions()
 	}
 
-	function getStatus(): PhoneConnectionStatus {
-		const tokenSource = getTokenSource()
+	async function getStatus(): Promise<PhoneConnectionStatus> {
+		const tokenSource = await getTokenSource()
 		return {
 			tokenConfigured: Boolean(tokenSource),
 			hasStoredToken: input.storage
-				? hasStoredPhoneDeviceToken(input.storage, connectorId)
+				? await hasStoredPhoneDeviceToken(input.storage, connectorId)
 				: false,
 			hasEnvToken: Boolean(getEnvToken()),
 			tokenSource,
@@ -550,7 +550,7 @@ export function createPhoneAdapter(input: {
 	}
 }
 
-export function handlePhoneHttpUpgrade(input: {
+export async function handlePhoneHttpUpgrade(input: {
 	request: IncomingMessage
 	socket: PhoneHttpUpgradeSocket
 	head: Buffer
@@ -566,7 +566,7 @@ export function handlePhoneHttpUpgrade(input: {
 		return false
 	}
 
-	const auth = input.phone.authorizeUpgrade(input.request)
+	const auth = await input.phone.authorizeUpgrade(input.request)
 	if (!auth.ok) {
 		rejectHttpUpgrade(input.socket, auth.status, auth.statusText)
 		return true
@@ -600,16 +600,18 @@ export function attachPhoneWebSocketUpgrade(input: {
 	const webSocketServer =
 		input.webSocketServer ?? new WebSocketServer({ noServer: true })
 	input.server.on('upgrade', (request, socket, head) => {
-		const handled = handlePhoneHttpUpgrade({
+		handlePhoneHttpUpgrade({
 			request,
 			socket,
 			head,
 			phone: input.phone,
 			webSocketServer,
-		})
-		if (!handled) {
-			socket.destroy()
-		}
+		}).then(
+			(handled) => {
+				if (!handled) socket.destroy()
+			},
+			() => socket.destroy(),
+		)
 	})
 	return webSocketServer
 }

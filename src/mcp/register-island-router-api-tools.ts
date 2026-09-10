@@ -90,7 +90,7 @@ export function registerIslandRouterApiHomeConnectorTools(input: {
 			},
 		},
 		async () => {
-			const status = islandRouterApi.getStatus()
+			const status = await islandRouterApi.getStatus()
 			return structuredTextResult(
 				status.configured
 					? 'Island Router API proxy is configured.'

@@ -1,4 +1,7 @@
+import { type TableRow } from 'remix/data-table'
 import { type HomeConnectorStorage } from '../../storage/index.ts'
+import { venstarThermostats } from '../../storage/schema.ts'
+import { compareNoCase } from '../../storage/sort.ts'
 
 export type VenstarPersistedThermostat = {
 	name: string
@@ -6,15 +9,8 @@ export type VenstarPersistedThermostat = {
 	lastSeenAt: string | null
 }
 
-type VenstarThermostatRow = {
-	connector_id: string
-	ip: string
-	name: string
-	last_seen_at: string | null
-}
-
 function mapVenstarThermostatRow(
-	row: VenstarThermostatRow,
+	row: TableRow<typeof venstarThermostats>,
 ): VenstarPersistedThermostat {
 	return {
 		name: row.name,
@@ -23,109 +19,65 @@ function mapVenstarThermostatRow(
 	}
 }
 
-function selectVenstarThermostatRows(
+export async function listVenstarThermostats(
 	storage: HomeConnectorStorage,
 	connectorId: string,
 ) {
-	const statement = storage.db.query(`
-		SELECT connector_id, ip, name, last_seen_at
-		FROM venstar_thermostats
-		WHERE connector_id = ?
-		ORDER BY name COLLATE NOCASE, ip
-	`)
-	return statement.all(connectorId) as Array<VenstarThermostatRow>
+	const rows = await storage.db.findMany(venstarThermostats, {
+		where: { connector_id: connectorId },
+	})
+	return rows
+		.sort((a, b) => compareNoCase(a.name, b.name) || compareNoCase(a.ip, b.ip))
+		.map(mapVenstarThermostatRow)
 }
 
-function getUpsertVenstarThermostatStatement(storage: HomeConnectorStorage) {
-	return storage.db.query(`
-		INSERT INTO venstar_thermostats (
-			connector_id,
-			ip,
-			name,
-			last_seen_at,
-			updated_at
-		) VALUES (?, ?, ?, ?, ?)
-		ON CONFLICT(connector_id, ip) DO UPDATE SET
-			name = excluded.name,
-			last_seen_at = excluded.last_seen_at,
-			updated_at = excluded.updated_at
-	`)
-}
-
-function getDeleteVenstarThermostatStatement(storage: HomeConnectorStorage) {
-	return storage.db.query(`
-		DELETE FROM venstar_thermostats
-		WHERE connector_id = ? AND ip = ?
-	`)
-}
-
-function getUpdateVenstarLastSeenStatement(storage: HomeConnectorStorage) {
-	return storage.db.query(`
-		UPDATE venstar_thermostats
-		SET last_seen_at = ?, updated_at = CURRENT_TIMESTAMP
-		WHERE connector_id = ? AND ip = ?
-	`)
-}
-
-export function listVenstarThermostats(
-	storage: HomeConnectorStorage,
-	connectorId: string,
-) {
-	return selectVenstarThermostatRows(storage, connectorId).map(
-		mapVenstarThermostatRow,
-	)
-}
-
-export function getVenstarThermostat(
+export async function getVenstarThermostat(
 	storage: HomeConnectorStorage,
 	connectorId: string,
 	ip: string,
 ) {
-	return (
-		listVenstarThermostats(storage, connectorId).find(
-			(thermostat) => thermostat.ip === ip,
-		) ?? null
-	)
+	const row = await storage.db.find(venstarThermostats, {
+		connector_id: connectorId,
+		ip,
+	})
+	return row ? mapVenstarThermostatRow(row) : null
 }
 
-export function upsertVenstarThermostat(input: {
+export async function upsertVenstarThermostat(input: {
 	storage: HomeConnectorStorage
 	connectorId: string
 	name: string
 	ip: string
 	lastSeenAt?: string | null
 }) {
-	const now = new Date().toISOString()
-	getUpsertVenstarThermostatStatement(input.storage).run(
-		input.connectorId,
-		input.ip,
-		input.name,
-		input.lastSeenAt ?? null,
-		now,
-	)
+	await input.storage.db.query(venstarThermostats).upsert({
+		connector_id: input.connectorId,
+		ip: input.ip,
+		name: input.name,
+		last_seen_at: input.lastSeenAt ?? null,
+	})
 	return getVenstarThermostat(input.storage, input.connectorId, input.ip)
 }
 
-export function removeVenstarThermostat(input: {
+export async function removeVenstarThermostat(input: {
 	storage: HomeConnectorStorage
 	connectorId: string
 	ip: string
 }) {
-	getDeleteVenstarThermostatStatement(input.storage).run(
-		input.connectorId,
-		input.ip,
-	)
+	await input.storage.db.deleteMany(venstarThermostats, {
+		where: { connector_id: input.connectorId, ip: input.ip },
+	})
 }
 
-export function updateVenstarLastSeen(input: {
+export async function updateVenstarLastSeen(input: {
 	storage: HomeConnectorStorage
 	connectorId: string
 	ip: string
 	lastSeenAt: string | null
 }) {
-	getUpdateVenstarLastSeenStatement(input.storage).run(
-		input.lastSeenAt,
-		input.connectorId,
-		input.ip,
+	await input.storage.db.updateMany(
+		venstarThermostats,
+		{ last_seen_at: input.lastSeenAt },
+		{ where: { connector_id: input.connectorId, ip: input.ip } },
 	)
 }

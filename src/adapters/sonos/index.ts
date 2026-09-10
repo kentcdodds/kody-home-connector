@@ -177,11 +177,11 @@ export function createSonosAdapter(input: {
 		return listSonosPlayers(input.storage, input.config.homeConnectorId)
 	}
 
-	function getAdoptedPlayers() {
-		return getKnownPlayers().filter((player) => player.adopted)
+	async function getAdoptedPlayers() {
+		return (await getKnownPlayers()).filter((player) => player.adopted)
 	}
 
-	function resolvePlayer(playerId?: string) {
+	async function resolvePlayer(playerId?: string) {
 		if (playerId) {
 			return requireSonosPlayer(
 				input.storage,
@@ -189,9 +189,9 @@ export function createSonosAdapter(input: {
 				playerId,
 			)
 		}
-		const adoptedPlayers = getAdoptedPlayers()
+		const adoptedPlayers = await getAdoptedPlayers()
 		if (adoptedPlayers.length === 1) return adoptedPlayers[0]
-		const allPlayers = getKnownPlayers()
+		const allPlayers = await getKnownPlayers()
 		if (allPlayers.length === 1) return allPlayers[0]
 		if (adoptedPlayers.length > 1 || allPlayers.length > 1) {
 			throw createSonosCallerError(
@@ -205,16 +205,16 @@ export function createSonosAdapter(input: {
 		)
 	}
 
-	function resolveHouseholdPlayer(playerId?: string) {
+	async function resolveHouseholdPlayer(playerId?: string) {
 		if (playerId) {
-			const player = resolvePlayer(playerId)
+			const player = await resolvePlayer(playerId)
 			if (player.adopted) return player
-			const adoptedPlayers = getAdoptedPlayers()
+			const adoptedPlayers = await getAdoptedPlayers()
 			return adoptedPlayers[0] ?? player
 		}
-		const adoptedPlayers = getAdoptedPlayers()
+		const adoptedPlayers = await getAdoptedPlayers()
 		if (adoptedPlayers[0]) return adoptedPlayers[0]
-		const allPlayers = getKnownPlayers()
+		const allPlayers = await getKnownPlayers()
 		if (allPlayers[0]) return allPlayers[0]
 		throw createSonosCallerError(
 			'No Sonos players are currently known. Run sonos_scan_players first.',
@@ -223,18 +223,18 @@ export function createSonosAdapter(input: {
 	}
 
 	async function listGroups(playerId?: string) {
-		const householdPlayer = resolveHouseholdPlayer(playerId)
+		const householdPlayer = await resolveHouseholdPlayer(playerId)
 		if (input.config.mocksEnabled && isMockSonosHost(householdPlayer.host)) {
 			return listMockSonosGroups()
 		}
 		return await getSonosGroupsLive({
 			host: householdPlayer.host,
-			players: getKnownPlayers(),
+			players: await getKnownPlayers(),
 		})
 	}
 
 	async function listPlayersWithGroups() {
-		const players = getKnownPlayers()
+		const players = await getKnownPlayers()
 		const groups =
 			players.length === 0 ? [] : await listGroups(players[0]?.playerId)
 		const groupByPlayerId = new Map<string, SonosGroup>()
@@ -252,7 +252,7 @@ export function createSonosAdapter(input: {
 	}
 
 	async function getPlayerStatus(playerId?: string) {
-		const player = resolvePlayer(playerId)
+		const player = await resolvePlayer(playerId)
 		if (input.config.mocksEnabled && isMockSonosHost(player.host)) {
 			return getMockSonosPlayerStatus(player.playerId)
 		}
@@ -318,11 +318,13 @@ export function createSonosAdapter(input: {
 		if (
 			input.config.mocksEnabled &&
 			group.coordinatorPlayerId &&
-			isMockSonosHost(resolvePlayer(group.coordinatorPlayerId).host)
+			isMockSonosHost((await resolvePlayer(group.coordinatorPlayerId)).host)
 		) {
 			return getMockSonosGroupStatus(groupId)
 		}
-		const coordinator = resolvePlayer(group.coordinatorPlayerId ?? undefined)
+		const coordinator = await resolvePlayer(
+			group.coordinatorPlayerId ?? undefined,
+		)
 		const [transport, media, position] = await Promise.all([
 			getSonosTransportInfoLive(coordinator.host),
 			getSonosMediaInfoLive(coordinator.host),
@@ -343,7 +345,7 @@ export function createSonosAdapter(input: {
 	}
 
 	async function listFavorites(playerId?: string) {
-		const householdPlayer = resolveHouseholdPlayer(playerId)
+		const householdPlayer = await resolveHouseholdPlayer(playerId)
 		if (input.config.mocksEnabled && isMockSonosHost(householdPlayer.host)) {
 			return listMockSonosFavorites()
 		}
@@ -354,7 +356,7 @@ export function createSonosAdapter(input: {
 		if (!query.trim()) {
 			return await listFavorites(playerId)
 		}
-		const householdPlayer = resolveHouseholdPlayer(playerId)
+		const householdPlayer = await resolveHouseholdPlayer(playerId)
 		if (input.config.mocksEnabled && isMockSonosHost(householdPlayer.host)) {
 			return searchMockSonosFavorites(query)
 		}
@@ -364,7 +366,7 @@ export function createSonosAdapter(input: {
 	}
 
 	async function listSavedQueues(playerId?: string) {
-		const householdPlayer = resolveHouseholdPlayer(playerId)
+		const householdPlayer = await resolveHouseholdPlayer(playerId)
 		if (input.config.mocksEnabled && isMockSonosHost(householdPlayer.host)) {
 			return listMockSonosSavedQueues()
 		}
@@ -375,7 +377,7 @@ export function createSonosAdapter(input: {
 		if (!query.trim()) {
 			return await listSavedQueues(playerId)
 		}
-		const householdPlayer = resolveHouseholdPlayer(playerId)
+		const householdPlayer = await resolveHouseholdPlayer(playerId)
 		if (input.config.mocksEnabled && isMockSonosHost(householdPlayer.host)) {
 			return searchMockSonosSavedQueues(query)
 		}
@@ -385,7 +387,7 @@ export function createSonosAdapter(input: {
 	}
 
 	async function listQueue(playerId?: string) {
-		const player = resolvePlayer(playerId)
+		const player = await resolvePlayer(playerId)
 		if (input.config.mocksEnabled && isMockSonosHost(player.host)) {
 			return listMockSonosQueue(player.playerId)
 		}
@@ -396,7 +398,7 @@ export function createSonosAdapter(input: {
 	}
 
 	async function clearQueue(playerId?: string) {
-		const player = resolvePlayer(playerId)
+		const player = await resolvePlayer(playerId)
 		if (input.config.mocksEnabled && isMockSonosHost(player.host)) {
 			clearMockSonosQueue(player.playerId)
 			return
@@ -410,7 +412,7 @@ export function createSonosAdapter(input: {
 		queueItemId?: string
 		position?: number
 	}) {
-		const player = resolvePlayer(inputArgs.playerId)
+		const player = await resolvePlayer(inputArgs.playerId)
 		if (input.config.mocksEnabled && isMockSonosHost(player.host)) {
 			removeMockSonosQueueTrack({
 				playerId: player.playerId,
@@ -514,7 +516,7 @@ export function createSonosAdapter(input: {
 		favoriteId?: string
 		title?: string
 	}) {
-		const player = resolvePlayer(inputArgs.playerId)
+		const player = await resolvePlayer(inputArgs.playerId)
 		if (input.config.mocksEnabled && isMockSonosHost(player.host)) {
 			return enqueueMockSonosFavorite({
 				playerId: player.playerId,
@@ -539,7 +541,7 @@ export function createSonosAdapter(input: {
 		) {
 			return player
 		}
-		return resolvePlayer(group.coordinatorPlayerId)
+		return await resolvePlayer(group.coordinatorPlayerId)
 	}
 
 	async function buildQueueUri(inputArgs: {
@@ -581,7 +583,7 @@ export function createSonosAdapter(input: {
 		clearQueue?: boolean
 		playNow?: boolean
 	}): Promise<SonosQueueEnqueueResult> {
-		const player = resolvePlayer(inputArgs.playerId)
+		const player = await resolvePlayer(inputArgs.playerId)
 		const prepared = await buildQueueUri({
 			playerId: player.playerId,
 			uri: inputArgs.uri,
@@ -656,7 +658,7 @@ export function createSonosAdapter(input: {
 		metadata?: string | null
 		description?: string | null
 	}): Promise<SonosCreatedFavorite> {
-		const householdPlayer = resolveHouseholdPlayer(inputArgs.playerId)
+		const householdPlayer = await resolveHouseholdPlayer(inputArgs.playerId)
 		const prepared = await buildQueueUri({
 			playerId: householdPlayer.playerId,
 			uri: inputArgs.uri,
@@ -683,7 +685,7 @@ export function createSonosAdapter(input: {
 		playerId?: string
 		favoriteId: string
 	}) {
-		const householdPlayer = resolveHouseholdPlayer(inputArgs.playerId)
+		const householdPlayer = await resolveHouseholdPlayer(inputArgs.playerId)
 		if (input.config.mocksEnabled && isMockSonosHost(householdPlayer.host)) {
 			deleteMockSonosFavorite(inputArgs.favoriteId)
 			return
@@ -699,7 +701,7 @@ export function createSonosAdapter(input: {
 		favoriteId?: string
 		title?: string
 	}) {
-		const player = resolvePlayer(inputArgs.playerId)
+		const player = await resolvePlayer(inputArgs.playerId)
 		if (input.config.mocksEnabled && isMockSonosHost(player.host)) {
 			return playMockSonosFavorite({
 				playerId: player.playerId,
@@ -724,7 +726,7 @@ export function createSonosAdapter(input: {
 		savedQueueId?: string
 		title?: string
 	}) {
-		const player = resolvePlayer(inputArgs.playerId)
+		const player = await resolvePlayer(inputArgs.playerId)
 		if (input.config.mocksEnabled && isMockSonosHost(player.host)) {
 			return enqueueMockSonosSavedQueue({
 				playerId: player.playerId,
@@ -743,7 +745,7 @@ export function createSonosAdapter(input: {
 		savedQueueId?: string
 		title?: string
 	}) {
-		const player = resolvePlayer(inputArgs.playerId)
+		const player = await resolvePlayer(inputArgs.playerId)
 		if (input.config.mocksEnabled && isMockSonosHost(player.host)) {
 			return playMockSonosSavedQueue({
 				playerId: player.playerId,
@@ -764,7 +766,7 @@ export function createSonosAdapter(input: {
 	}
 
 	async function play(playerId?: string) {
-		const player = resolvePlayer(playerId)
+		const player = await resolvePlayer(playerId)
 		if (input.config.mocksEnabled && isMockSonosHost(player.host)) {
 			playMockSonos(player.playerId)
 			return
@@ -773,7 +775,7 @@ export function createSonosAdapter(input: {
 	}
 
 	async function pause(playerId?: string) {
-		const player = resolvePlayer(playerId)
+		const player = await resolvePlayer(playerId)
 		if (input.config.mocksEnabled && isMockSonosHost(player.host)) {
 			pauseMockSonos(player.playerId)
 			return
@@ -782,7 +784,7 @@ export function createSonosAdapter(input: {
 	}
 
 	async function stop(playerId?: string) {
-		const player = resolvePlayer(playerId)
+		const player = await resolvePlayer(playerId)
 		if (input.config.mocksEnabled && isMockSonosHost(player.host)) {
 			stopMockSonos(player.playerId)
 			return
@@ -791,7 +793,7 @@ export function createSonosAdapter(input: {
 	}
 
 	async function nextTrack(playerId?: string) {
-		const player = resolvePlayer(playerId)
+		const player = await resolvePlayer(playerId)
 		if (input.config.mocksEnabled && isMockSonosHost(player.host)) {
 			nextMockSonosTrack(player.playerId)
 			return
@@ -800,7 +802,7 @@ export function createSonosAdapter(input: {
 	}
 
 	async function previousTrack(playerId?: string) {
-		const player = resolvePlayer(playerId)
+		const player = await resolvePlayer(playerId)
 		if (input.config.mocksEnabled && isMockSonosHost(player.host)) {
 			previousMockSonosTrack(player.playerId)
 			return
@@ -809,7 +811,7 @@ export function createSonosAdapter(input: {
 	}
 
 	async function seek(playerId: string | undefined, position: string) {
-		const player = resolvePlayer(playerId)
+		const player = await resolvePlayer(playerId)
 		if (input.config.mocksEnabled && isMockSonosHost(player.host)) {
 			seekMockSonosTrack(player.playerId, position)
 			return
@@ -818,7 +820,7 @@ export function createSonosAdapter(input: {
 	}
 
 	async function setPlayMode(playerId: string | undefined, playMode: string) {
-		const player = resolvePlayer(playerId)
+		const player = await resolvePlayer(playerId)
 		if (input.config.mocksEnabled && isMockSonosHost(player.host)) {
 			setMockSonosPlayMode(player.playerId, playMode)
 			return
@@ -827,7 +829,7 @@ export function createSonosAdapter(input: {
 	}
 
 	async function setVolume(playerId: string | undefined, volume: number) {
-		const player = resolvePlayer(playerId)
+		const player = await resolvePlayer(playerId)
 		if (input.config.mocksEnabled && isMockSonosHost(player.host)) {
 			setMockSonosVolume(player.playerId, volume)
 			return
@@ -836,7 +838,7 @@ export function createSonosAdapter(input: {
 	}
 
 	async function adjustVolume(playerId: string | undefined, delta: number) {
-		const player = resolvePlayer(playerId)
+		const player = await resolvePlayer(playerId)
 		if (input.config.mocksEnabled && isMockSonosHost(player.host)) {
 			adjustMockSonosVolume(player.playerId, delta)
 			return
@@ -845,7 +847,7 @@ export function createSonosAdapter(input: {
 	}
 
 	async function setMute(playerId: string | undefined, muted: boolean) {
-		const player = resolvePlayer(playerId)
+		const player = await resolvePlayer(playerId)
 		if (input.config.mocksEnabled && isMockSonosHost(player.host)) {
 			setMockSonosMute(player.playerId, muted)
 			return
@@ -857,8 +859,8 @@ export function createSonosAdapter(input: {
 		playerId: string
 		coordinatorPlayerId: string
 	}) {
-		const player = resolvePlayer(inputArgs.playerId)
-		const coordinator = resolvePlayer(inputArgs.coordinatorPlayerId)
+		const player = await resolvePlayer(inputArgs.playerId)
+		const coordinator = await resolvePlayer(inputArgs.coordinatorPlayerId)
 		if (input.config.mocksEnabled && isMockSonosHost(player.host)) {
 			groupMockSonosPlayers({
 				playerId: player.playerId,
@@ -873,7 +875,7 @@ export function createSonosAdapter(input: {
 	}
 
 	async function ungroupPlayer(playerId: string) {
-		const player = resolvePlayer(playerId)
+		const player = await resolvePlayer(playerId)
 		if (input.config.mocksEnabled && isMockSonosHost(player.host)) {
 			ungroupMockSonosPlayer(player.playerId)
 			return
@@ -882,7 +884,7 @@ export function createSonosAdapter(input: {
 	}
 
 	async function getAudioInput(playerId: string | undefined) {
-		const player = resolvePlayer(playerId)
+		const player = await resolvePlayer(playerId)
 		if (input.config.mocksEnabled && isMockSonosHost(player.host)) {
 			return getMockSonosAudioInput(player.playerId)
 		}
@@ -893,7 +895,7 @@ export function createSonosAdapter(input: {
 	}
 
 	async function selectAudioInput(playerId: string | undefined) {
-		const player = resolvePlayer(playerId)
+		const player = await resolvePlayer(playerId)
 		if (input.config.mocksEnabled && isMockSonosHost(player.host)) {
 			selectMockSonosAudioInput(player.playerId)
 			return
@@ -909,7 +911,7 @@ export function createSonosAdapter(input: {
 		leftLevel: number,
 		rightLevel: number,
 	) {
-		const player = resolvePlayer(playerId)
+		const player = await resolvePlayer(playerId)
 		if (input.config.mocksEnabled && isMockSonosHost(player.host)) {
 			setMockSonosLineInLevel(player.playerId, leftLevel, rightLevel)
 			return
@@ -925,8 +927,8 @@ export function createSonosAdapter(input: {
 		sourcePlayerId: string
 		coordinatorPlayerId: string
 	}) {
-		const sourcePlayer = resolvePlayer(inputArgs.sourcePlayerId)
-		const coordinator = resolvePlayer(inputArgs.coordinatorPlayerId)
+		const sourcePlayer = await resolvePlayer(inputArgs.sourcePlayerId)
+		const coordinator = await resolvePlayer(inputArgs.coordinatorPlayerId)
 		if (input.config.mocksEnabled && isMockSonosHost(sourcePlayer.host)) {
 			startMockSonosLineInToGroup({
 				sourcePlayerId: sourcePlayer.playerId,
@@ -944,8 +946,8 @@ export function createSonosAdapter(input: {
 		sourcePlayerId: string
 		coordinatorPlayerId: string
 	}) {
-		const sourcePlayer = resolvePlayer(inputArgs.sourcePlayerId)
-		const coordinator = resolvePlayer(inputArgs.coordinatorPlayerId)
+		const sourcePlayer = await resolvePlayer(inputArgs.sourcePlayerId)
+		const coordinator = await resolvePlayer(inputArgs.coordinatorPlayerId)
 		if (input.config.mocksEnabled && isMockSonosHost(sourcePlayer.host)) {
 			stopMockSonosLineInToGroup(sourcePlayer.playerId)
 			return
@@ -962,7 +964,7 @@ export function createSonosAdapter(input: {
 		category?: SonosLibraryCategory
 		limit?: number
 	}) {
-		const householdPlayer = resolveHouseholdPlayer(inputArgs.playerId)
+		const householdPlayer = await resolveHouseholdPlayer(inputArgs.playerId)
 		if (input.config.mocksEnabled && isMockSonosHost(householdPlayer.host)) {
 			return searchMockSonosLocalLibrary(inputArgs.query, inputArgs.category)
 		}
@@ -980,7 +982,7 @@ export function createSonosAdapter(input: {
 		query?: string
 		limit?: number
 	}) {
-		const householdPlayer = resolveHouseholdPlayer(inputArgs.playerId)
+		const householdPlayer = await resolveHouseholdPlayer(inputArgs.playerId)
 		if (input.config.mocksEnabled && isMockSonosHost(householdPlayer.host)) {
 			const entries = listMockSonosLibraryEntries(inputArgs.category)
 			return inputArgs.query
@@ -1007,7 +1009,7 @@ export function createSonosAdapter(input: {
 		artist?: string | null
 		album?: string | null
 	}) {
-		const player = resolvePlayer(inputArgs.playerId)
+		const player = await resolvePlayer(inputArgs.playerId)
 		if (input.config.mocksEnabled && isMockSonosHost(player.host)) {
 			playMockSonosUri({
 				playerId: player.playerId,
@@ -1027,7 +1029,7 @@ export function createSonosAdapter(input: {
 	}
 
 	async function setBass(playerId: string | undefined, bass: number) {
-		const player = resolvePlayer(playerId)
+		const player = await resolvePlayer(playerId)
 		if (input.config.mocksEnabled && isMockSonosHost(player.host)) {
 			setMockSonosBass(player.playerId, bass)
 			return
@@ -1036,7 +1038,7 @@ export function createSonosAdapter(input: {
 	}
 
 	async function setTreble(playerId: string | undefined, treble: number) {
-		const player = resolvePlayer(playerId)
+		const player = await resolvePlayer(playerId)
 		if (input.config.mocksEnabled && isMockSonosHost(player.host)) {
 			setMockSonosTreble(player.playerId, treble)
 			return
@@ -1045,7 +1047,7 @@ export function createSonosAdapter(input: {
 	}
 
 	async function setLoudness(playerId: string | undefined, loudness: boolean) {
-		const player = resolvePlayer(playerId)
+		const player = await resolvePlayer(playerId)
 		if (input.config.mocksEnabled && isMockSonosHost(player.host)) {
 			setMockSonosLoudness(player.playerId, loudness)
 			return
@@ -1068,8 +1070,8 @@ export function createSonosAdapter(input: {
 		async listGroups(playerId?: string) {
 			return await listGroups(playerId)
 		},
-		adoptPlayer(playerId: string) {
-			const player = adoptSonosPlayer(
+		async adoptPlayer(playerId: string) {
+			const player = await adoptSonosPlayer(
 				input.storage,
 				input.config.homeConnectorId,
 				playerId,
@@ -1082,8 +1084,8 @@ export function createSonosAdapter(input: {
 			}
 			return player
 		},
-		getStatus() {
-			const players = getKnownPlayers()
+		async getStatus() {
+			const players = await getKnownPlayers()
 			return {
 				adopted: players.filter((player) => player.adopted),
 				discovered: players.filter((player) => !player.adopted),

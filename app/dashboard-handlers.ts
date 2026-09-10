@@ -235,19 +235,30 @@ async function loadDashboardSnapshot(
 ): Promise<DashboardSnapshot> {
 	const rokuAdopted = getAdoptedRokuDevices(deps.state)
 	const rokuDiscovered = getDiscoveredRokuDevices(deps.state)
-	const lutronStatus = deps.lutron.getStatus()
-	const samsungStatus = deps.samsungTv.getStatus()
-	const sonosStatus = deps.sonos.getStatus()
-	const bondStatus = deps.bond.getStatus()
-	const jellyfishStatus = deps.jellyfish.getStatus()
-	const venstarDiscoveryStatus = deps.venstar.getStatus()
-	const accessNetworksUnleashedControllers =
-		deps.accessNetworksUnleashed.listControllers()
-	const accessNetworksUnleashedAdoptedController =
-		deps.accessNetworksUnleashed.getAdoptedController()
-	const kasaStatus = deps.kasa.getStatus()
-	const phoneStatus = deps.phone.getStatus()
-	const [venstarStatus, loadedIslandRouterStatus] = await Promise.all([
+	const [
+		lutronStatus,
+		samsungStatus,
+		sonosStatus,
+		bondStatus,
+		jellyfishStatus,
+		venstarDiscoveryStatus,
+		accessNetworksUnleashedControllers,
+		accessNetworksUnleashedAdoptedController,
+		kasaStatus,
+		phoneStatus,
+		venstarStatus,
+		loadedIslandRouterStatus,
+	] = await Promise.all([
+		deps.lutron.getStatus(),
+		deps.samsungTv.getStatus(),
+		deps.sonos.getStatus(),
+		deps.bond.getStatus(),
+		deps.jellyfish.getStatus(),
+		deps.venstar.getStatus(),
+		deps.accessNetworksUnleashed.listControllers(),
+		deps.accessNetworksUnleashed.getAdoptedController(),
+		deps.kasa.getStatus(),
+		deps.phone.getStatus(),
 		deps.venstar.listThermostatsWithStatus(),
 		input.islandRouterStatus
 			? Promise.resolve(input.islandRouterStatus)
@@ -264,7 +275,7 @@ async function loadDashboardSnapshot(
 		connected: islandRouterStatus.connected,
 		errorCount: islandRouterStatus.errors.length,
 	})
-	const islandRouterApiStatus = deps.islandRouterApi.getStatus()
+	const islandRouterApiStatus = await deps.islandRouterApi.getStatus()
 
 	return {
 		connectionTone: getConnectionTone(deps.state),

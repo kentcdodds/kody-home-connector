@@ -152,11 +152,11 @@ export function createCourtAdapter(input: {
 	roku: ReturnType<typeof createRokuAdapter>
 	sonos: ReturnType<typeof createSonosAdapter>
 }) {
-	function resolveSonosPlayerId(sonosPlayerId?: string) {
+	async function resolveSonosPlayerId(sonosPlayerId?: string) {
 		const requested =
 			sonosPlayerId?.trim() || input.config.courtSonosPlayerId?.trim() || ''
 		if (requested) return requested
-		const players = input.sonos.getStatus().allPlayers
+		const players = (await input.sonos.getStatus()).allPlayers
 		const matches = players.filter((player) => {
 			const haystack = `${player.roomName} ${player.friendlyName} ${player.displayName}`
 			return /sport\s*court/i.test(haystack)
@@ -210,7 +210,7 @@ export function createCourtAdapter(input: {
 			})
 			const projector = await input.globalCache.sendIr('projector-on')
 			const hdmi = await input.globalCache.sendIr('hdmi-input-1')
-			const sonosPlayerId = resolveSonosPlayerId(startInput.sonosPlayerId)
+			const sonosPlayerId = await resolveSonosPlayerId(startInput.sonosPlayerId)
 			await input.sonos.selectAudioInput(sonosPlayerId)
 			let rokuResult: unknown
 			if (appId) {

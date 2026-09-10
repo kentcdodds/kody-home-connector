@@ -1,24 +1,14 @@
+import { type TableRow } from 'remix/data-table'
 import { type HomeConnectorStorage } from '../../storage/index.ts'
+import { jellyfishControllers } from '../../storage/schema.ts'
+import { compareNoCase, compareText } from '../../storage/sort.ts'
 import {
 	type JellyfishDiscoveredController,
 	type JellyfishPersistedController,
 } from './types.ts'
 
-type JellyfishControllerRow = {
-	connector_id: string
-	controller_id: string
-	name: string
-	hostname: string
-	host: string
-	port: number
-	firmware_version: string | null
-	last_seen_at: string | null
-	last_connected_at: string | null
-	last_error: string | null
-}
-
 function mapJellyfishControllerRow(
-	row: JellyfishControllerRow,
+	row: TableRow<typeof jellyfishControllers>,
 ): JellyfishPersistedController {
 	return {
 		controllerId: row.controller_id,
@@ -33,137 +23,63 @@ function mapJellyfishControllerRow(
 	}
 }
 
-function getListControllersStatement(storage: HomeConnectorStorage) {
-	return storage.db.query(`
-		SELECT
-			connector_id,
-			controller_id,
-			name,
-			hostname,
-			host,
-			port,
-			firmware_version,
-			last_seen_at,
-			last_connected_at,
-			last_error
-		FROM jellyfish_controllers
-		WHERE connector_id = ?
-		ORDER BY name COLLATE NOCASE, controller_id
-	`)
-}
-
-function getUpsertControllerStatement(storage: HomeConnectorStorage) {
-	return storage.db.query(`
-		INSERT INTO jellyfish_controllers (
-			connector_id,
-			controller_id,
-			name,
-			hostname,
-			host,
-			port,
-			firmware_version,
-			last_seen_at,
-			last_connected_at,
-			last_error,
-			updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(connector_id, controller_id) DO UPDATE SET
-			name = excluded.name,
-			hostname = excluded.hostname,
-			host = excluded.host,
-			port = excluded.port,
-			firmware_version = excluded.firmware_version,
-			last_seen_at = excluded.last_seen_at,
-			updated_at = excluded.updated_at
-	`)
-}
-
-function getUpdateControllerConnectionStatement(storage: HomeConnectorStorage) {
-	return storage.db.query(`
-		UPDATE jellyfish_controllers
-		SET
-			host = ?,
-			port = ?,
-			last_connected_at = ?,
-			last_error = ?,
-			updated_at = CURRENT_TIMESTAMP
-		WHERE connector_id = ? AND controller_id = ?
-	`)
-}
-
-function getControllerByIdStatement(storage: HomeConnectorStorage) {
-	return storage.db.query(`
-		SELECT
-			connector_id,
-			controller_id,
-			name,
-			hostname,
-			host,
-			port,
-			firmware_version,
-			last_seen_at,
-			last_connected_at,
-			last_error
-		FROM jellyfish_controllers
-		WHERE connector_id = ? AND controller_id = ?
-	`)
-}
-
-export function listJellyfishControllers(
+export async function listJellyfishControllers(
 	storage: HomeConnectorStorage,
 	connectorId: string,
 ) {
-	return (
-		getListControllersStatement(storage).all(
-			connectorId,
-		) as Array<JellyfishControllerRow>
-	).map(mapJellyfishControllerRow)
+	const rows = await storage.db.findMany(jellyfishControllers, {
+		where: { connector_id: connectorId },
+	})
+	return rows
+		.sort(
+			(a, b) =>
+				compareNoCase(a.name, b.name) ||
+				compareText(a.controller_id, b.controller_id),
+		)
+		.map(mapJellyfishControllerRow)
 }
 
-export function getJellyfishController(
+export async function getJellyfishController(
 	storage: HomeConnectorStorage,
 	connectorId: string,
 	controllerId: string,
 ) {
-	const row = getControllerByIdStatement(storage).get(
-		connectorId,
-		controllerId,
-	) as JellyfishControllerRow | undefined
+	const row = await storage.db.find(jellyfishControllers, {
+		connector_id: connectorId,
+		controller_id: controllerId,
+	})
 	return row ? mapJellyfishControllerRow(row) : null
 }
 
-export function upsertDiscoveredJellyfishControllers(input: {
+export async function upsertDiscoveredJellyfishControllers(input: {
 	storage: HomeConnectorStorage
 	connectorId: string
 	controllers: Array<JellyfishDiscoveredController>
 }) {
-	const now = new Date().toISOString()
-	const existing = new Map(
-		listJellyfishControllers(input.storage, input.connectorId).map(
-			(controller) => [controller.controllerId, controller],
-		),
-	)
-	const statement = getUpsertControllerStatement(input.storage)
 	for (const controller of input.controllers) {
-		const current = existing.get(controller.controllerId)
-		statement.run(
-			input.connectorId,
-			controller.controllerId,
-			controller.name,
-			controller.hostname,
-			controller.host,
-			controller.port,
-			controller.firmwareVersion,
-			controller.lastSeenAt,
-			current?.lastConnectedAt ?? null,
-			current?.lastError ?? null,
-			now,
+		const values = {
+			name: controller.name,
+			hostname: controller.hostname,
+			host: controller.host,
+			port: controller.port,
+			firmware_version: controller.firmwareVersion,
+			last_seen_at: controller.lastSeenAt,
+		}
+		await input.storage.db.query(jellyfishControllers).upsert(
+			{
+				connector_id: input.connectorId,
+				controller_id: controller.controllerId,
+				last_connected_at: null,
+				last_error: null,
+				...values,
+			},
+			{ update: values },
 		)
 	}
 	return listJellyfishControllers(input.storage, input.connectorId)
 }
 
-export function updateJellyfishControllerConnection(input: {
+export async function updateJellyfishControllerConnection(input: {
 	storage: HomeConnectorStorage
 	connectorId: string
 	controllerId: string
@@ -172,13 +88,20 @@ export function updateJellyfishControllerConnection(input: {
 	lastConnectedAt: string | null
 	lastError: string | null
 }) {
-	getUpdateControllerConnectionStatement(input.storage).run(
-		input.host,
-		input.port,
-		input.lastConnectedAt,
-		input.lastError,
-		input.connectorId,
-		input.controllerId,
+	await input.storage.db.updateMany(
+		jellyfishControllers,
+		{
+			host: input.host,
+			port: input.port,
+			last_connected_at: input.lastConnectedAt,
+			last_error: input.lastError,
+		},
+		{
+			where: {
+				connector_id: input.connectorId,
+				controller_id: input.controllerId,
+			},
+		},
 	)
 	return getJellyfishController(
 		input.storage,

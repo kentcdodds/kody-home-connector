@@ -49,11 +49,11 @@ function mapPersistedToManaged(
 	}
 }
 
-function requireConfiguredThermostats(
+async function requireConfiguredThermostats(
 	storage: HomeConnectorStorage,
 	connectorId: string,
 ) {
-	const thermostats = listVenstarThermostats(storage, connectorId)
+	const thermostats = await listVenstarThermostats(storage, connectorId)
 	if (thermostats.length === 0) {
 		throw new Error(
 			'No Venstar thermostats are configured yet. Scan and add one from the home connector UI first.',
@@ -62,12 +62,12 @@ function requireConfiguredThermostats(
 	return thermostats
 }
 
-function resolveThermostat(input: {
+async function resolveThermostat(input: {
 	storage: HomeConnectorStorage
 	connectorId: string
 	identifier?: string
-}): VenstarPersistedThermostat {
-	const thermostats = requireConfiguredThermostats(
+}): Promise<VenstarPersistedThermostat> {
+	const thermostats = await requireConfiguredThermostats(
 		input.storage,
 		input.connectorId,
 	)
@@ -160,7 +160,7 @@ export function createVenstarAdapter(input: {
 	async function withLastSeen<
 		T extends { thermostat: VenstarPersistedThermostat },
 	>(result: T, lastSeenAt = new Date().toISOString()) {
-		updateVenstarLastSeen({
+		await updateVenstarLastSeen({
 			storage,
 			connectorId,
 			ip: result.thermostat.ip,
@@ -170,7 +170,7 @@ export function createVenstarAdapter(input: {
 	}
 
 	async function addThermostat(input: { name: string; ip: string }) {
-		const thermostat = upsertVenstarThermostat({
+		const thermostat = await upsertVenstarThermostat({
 			storage,
 			connectorId,
 			name: input.name.trim(),
@@ -199,7 +199,7 @@ export function createVenstarAdapter(input: {
 	async function addAllDiscoveredThermostats() {
 		const added: Array<VenstarManagedThermostat> = []
 		for (const thermostat of state.venstarDiscoveredThermostats) {
-			const exists = listVenstarThermostats(storage, connectorId).some(
+			const exists = (await listVenstarThermostats(storage, connectorId)).some(
 				(current) =>
 					normalizeThermostatIp(current.ip) ===
 					normalizeThermostatIp(thermostat.ip),
@@ -215,8 +215,8 @@ export function createVenstarAdapter(input: {
 		return added
 	}
 
-	function removeThermostat(ip: string) {
-		const existing = getVenstarThermostat(
+	async function removeThermostat(ip: string) {
+		const existing = await getVenstarThermostat(
 			storage,
 			connectorId,
 			normalizeThermostatIp(ip),
@@ -224,7 +224,7 @@ export function createVenstarAdapter(input: {
 		if (!existing) {
 			throw new Error(`Configured Venstar thermostat "${ip}" was not found.`)
 		}
-		removeVenstarThermostat({
+		await removeVenstarThermostat({
 			storage,
 			connectorId,
 			ip: existing.ip,
@@ -236,10 +236,10 @@ export function createVenstarAdapter(input: {
 		async scan() {
 			return (await scanVenstarThermostats(state, config)).thermostats
 		},
-		getStatus() {
-			const configured = listVenstarThermostats(storage, connectorId).map(
-				mapPersistedToManaged,
-			)
+		async getStatus() {
+			const configured = (
+				await listVenstarThermostats(storage, connectorId)
+			).map(mapPersistedToManaged)
 			const configuredIps = new Set(
 				configured.map((thermostat) => normalizeThermostatIp(thermostat.ip)),
 			)
@@ -253,8 +253,8 @@ export function createVenstarAdapter(input: {
 				diagnostics: state.venstarDiscoveryDiagnostics,
 			}
 		},
-		listThermostats() {
-			return listVenstarThermostats(storage, connectorId).map(
+		async listThermostats() {
+			return (await listVenstarThermostats(storage, connectorId)).map(
 				mapPersistedToManaged,
 			)
 		},
@@ -270,11 +270,12 @@ export function createVenstarAdapter(input: {
 				}
 			>
 		> {
+			const thermostats = await listVenstarThermostats(storage, connectorId)
 			return await Promise.all(
-				listVenstarThermostats(storage, connectorId).map(async (thermostat) => {
+				thermostats.map(async (thermostat) => {
 					try {
 						const info = await fetchVenstarInfo(thermostat)
-						updateVenstarLastSeen({
+						await updateVenstarLastSeen({
 							storage,
 							connectorId,
 							ip: thermostat.ip,
@@ -298,7 +299,7 @@ export function createVenstarAdapter(input: {
 			)
 		},
 		async getInfo(identifier?: string) {
-			const thermostat = resolveThermostat({
+			const thermostat = await resolveThermostat({
 				storage,
 				connectorId,
 				identifier,
@@ -314,7 +315,7 @@ export function createVenstarAdapter(input: {
 			thermostat: VenstarPersistedThermostat
 			sensors: VenstarSensorsResponse
 		}> {
-			const thermostat = resolveThermostat({
+			const thermostat = await resolveThermostat({
 				storage,
 				connectorId,
 				identifier,
@@ -326,7 +327,7 @@ export function createVenstarAdapter(input: {
 			thermostat: VenstarPersistedThermostat
 			runtimes: VenstarRuntimesResponse
 		}> {
-			const thermostat = resolveThermostat({
+			const thermostat = await resolveThermostat({
 				storage,
 				connectorId,
 				identifier,
@@ -338,7 +339,7 @@ export function createVenstarAdapter(input: {
 			request: VenstarControlRequest & { thermostat?: string },
 		) {
 			const { thermostat: identifier, ...payload } = request
-			const thermostat = resolveThermostat({
+			const thermostat = await resolveThermostat({
 				storage,
 				connectorId,
 				identifier,
@@ -358,7 +359,7 @@ export function createVenstarAdapter(input: {
 			request: VenstarSettingsRequest & { thermostat?: string },
 		) {
 			const { thermostat: identifier, ...payload } = request
-			const thermostat = resolveThermostat({
+			const thermostat = await resolveThermostat({
 				storage,
 				connectorId,
 				identifier,

@@ -72,7 +72,7 @@ function renderBondDiscoveryDiagnostics(
 
 function renderBondStatusPage(input: {
 	state: HomeConnectorState
-	status: ReturnType<ReturnType<typeof createBondAdapter>['getStatus']>
+	status: Awaited<ReturnType<ReturnType<typeof createBondAdapter>['getStatus']>>
 	scanMessage?: string | null
 	scanError?: string | null
 }) {
@@ -155,14 +155,14 @@ export function createBondStatusHandler(
 			if (request.method === 'POST') {
 				try {
 					const bridges = await bond.scan()
-					const status = bond.getStatus()
+					const status = await bond.getStatus()
 					return renderBondStatusPage({
 						state,
 						status,
 						scanMessage: `Scan complete. Discovered ${bridges.length} Bond bridge(s).`,
 					})
 				} catch (error) {
-					const status = bond.getStatus()
+					const status = await bond.getStatus()
 					captureHomeConnectorException(error, {
 						tags: {
 							route: '/bond/status',
@@ -188,7 +188,7 @@ export function createBondStatusHandler(
 			}
 			return renderBondStatusPage({
 				state,
-				status: bond.getStatus(),
+				status: await bond.getStatus(),
 			})
 		},
 	} satisfies Action<typeof routes.bondStatus>
@@ -196,7 +196,7 @@ export function createBondStatusHandler(
 
 function renderBondSetupPage(input: {
 	state: HomeConnectorState
-	status: ReturnType<ReturnType<typeof createBondAdapter>['getStatus']>
+	status: Awaited<ReturnType<ReturnType<typeof createBondAdapter>['getStatus']>>
 	banner?: { tone: 'success' | 'error'; message: string } | null
 }) {
 	const bridges = input.status.bridges
@@ -351,7 +351,7 @@ export function createBondSetupHandler(
 						if (!token) {
 							throw new Error('Paste your Bond token before saving.')
 						}
-						bond.setToken(bridgeId, token)
+						await bond.setToken(bridgeId, token)
 						banner = {
 							tone: 'success',
 							message: `Saved token for bridge ${bridgeId}.`,
@@ -371,7 +371,7 @@ export function createBondSetupHandler(
 						if (!bridgeId) {
 							throw new Error('Choose a bridge.')
 						}
-						const bridge = bond.adoptBridge(bridgeId)
+						const bridge = await bond.adoptBridge(bridgeId)
 						banner = {
 							tone: 'success',
 							message: `Adopted bridge ${bridge.instanceName} (${bridge.bridgeId}).`,
@@ -406,7 +406,7 @@ export function createBondSetupHandler(
 
 			return renderBondSetupPage({
 				state,
-				status: bond.getStatus(),
+				status: await bond.getStatus(),
 				banner,
 			})
 		},

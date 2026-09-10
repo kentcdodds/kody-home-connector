@@ -155,7 +155,9 @@ function renderLutronProcessorList(
 
 function renderLutronStatusPage(input: {
 	state: HomeConnectorState
-	status: ReturnType<ReturnType<typeof createLutronAdapter>['getStatus']>
+	status: Awaited<
+		ReturnType<ReturnType<typeof createLutronAdapter>['getStatus']>
+	>
 	scanMessage?: string | null
 	scanError?: string | null
 }) {
@@ -236,13 +238,13 @@ export function createLutronStatusHandler(
 					const processors = await lutron.scan()
 					return renderLutronStatusPage({
 						state,
-						status: lutron.getStatus(),
+						status: await lutron.getStatus(),
 						scanMessage: `Scan complete. Discovered ${processors.length} Lutron processor(s).`,
 					})
 				} catch (error) {
 					return renderLutronStatusPage({
 						state,
-						status: lutron.getStatus(),
+						status: await lutron.getStatus(),
 						scanError:
 							error instanceof Error
 								? `Scan failed: ${error.message}`
@@ -253,7 +255,7 @@ export function createLutronStatusHandler(
 
 			return renderLutronStatusPage({
 				state,
-				status: lutron.getStatus(),
+				status: await lutron.getStatus(),
 			})
 		},
 	} satisfies Action<typeof routes.lutronStatus>
@@ -266,7 +268,7 @@ export function createLutronSetupHandler(
 	return {
 		middleware: [],
 		async handler() {
-			const status = lutron.getStatus()
+			const status = await lutron.getStatus()
 			const diagnostics = [
 				`MCP URL: ${state.connection.mcpUrl}`,
 				`Connector ID: ${state.connection.connectorId}`,
@@ -661,7 +663,9 @@ function renderSamsungTvDiscoveryDiagnostics(
 
 function renderSamsungTvStatusPage(input: {
 	state: HomeConnectorState
-	status: ReturnType<ReturnType<typeof createSamsungTvAdapter>['getStatus']>
+	status: Awaited<
+		ReturnType<ReturnType<typeof createSamsungTvAdapter>['getStatus']>
+	>
 	scanMessage?: string | null
 	scanError?: string | null
 }) {
@@ -735,13 +739,13 @@ export function createSamsungTvStatusHandler(
 					const devices = await samsungTv.scan()
 					return renderSamsungTvStatusPage({
 						state,
-						status: samsungTv.getStatus(),
+						status: await samsungTv.getStatus(),
 						scanMessage: `Scan complete. Discovered ${devices.length} Samsung TV device(s).`,
 					})
 				} catch (error) {
 					return renderSamsungTvStatusPage({
 						state,
-						status: samsungTv.getStatus(),
+						status: await samsungTv.getStatus(),
 						scanError:
 							error instanceof Error
 								? `Scan failed: ${error.message}`
@@ -752,7 +756,7 @@ export function createSamsungTvStatusHandler(
 
 			return renderSamsungTvStatusPage({
 				state,
-				status: samsungTv.getStatus(),
+				status: await samsungTv.getStatus(),
 			})
 		},
 	} satisfies Action<typeof routes.samsungTvStatus>
@@ -765,7 +769,7 @@ export function createSamsungTvSetupHandler(
 	return {
 		middleware: [],
 		async handler() {
-			const status = samsungTv.getStatus()
+			const status = await samsungTv.getStatus()
 			const diagnostics = [
 				`MCP URL: ${state.connection.mcpUrl}`,
 				`Connector ID: ${state.connection.connectorId}`,

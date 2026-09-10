@@ -377,7 +377,7 @@ function getBondBridgeNextAction(bridge: BondPersistedBridge) {
 }
 
 function countRecentConsecutiveBridgeFailures(
-	logs: ReturnType<typeof listRecentBondRequestLogs>,
+	logs: Awaited<ReturnType<typeof listRecentBondRequestLogs>>,
 ) {
 	let failures = 0
 	let sawCooldown = false
@@ -629,8 +629,8 @@ export function createBondAdapter(input: {
 		return state
 	}
 
-	function markBridgeSeen(bridge: BondPersistedBridge) {
-		updateBondBridgeLastSeen({
+	async function markBridgeSeen(bridge: BondPersistedBridge) {
+		await updateBondBridgeLastSeen({
 			storage: input.storage,
 			connectorId,
 			bridgeId: bridge.bridgeId,
@@ -638,8 +638,8 @@ export function createBondAdapter(input: {
 		})
 	}
 
-	function pruneRequestLogs(bridgeId: string) {
-		pruneBondRequestLogs({
+	async function pruneRequestLogs(bridgeId: string) {
+		await pruneBondRequestLogs({
 			storage: input.storage,
 			connectorId,
 			bridgeId,
@@ -647,15 +647,18 @@ export function createBondAdapter(input: {
 		})
 	}
 
-	function runBestEffortPersistence(description: string, fn: () => void) {
+	async function runBestEffortPersistence(
+		description: string,
+		fn: () => Promise<void>,
+	) {
 		try {
-			fn()
+			await fn()
 		} catch (error) {
 			console.warn(`Bond reliability persistence failed: ${description}`, error)
 		}
 	}
 
-	function writeRequestLog(inputLog: {
+	async function writeRequestLog(inputLog: {
 		bridge: BondPersistedBridge
 		operation: string
 		status: BondRequestLogStatus
@@ -666,7 +669,7 @@ export function createBondAdapter(input: {
 	}) {
 		const finishedAtMs = Date.now()
 		const error = inputLog.error instanceof Error ? inputLog.error : undefined
-		insertBondRequestLog(input.storage, {
+		await insertBondRequestLog(input.storage, {
 			connectorId,
 			bridgeId: inputLog.bridge.bridgeId,
 			operation: inputLog.operation,
@@ -680,22 +683,22 @@ export function createBondAdapter(input: {
 				inputLog.error == null ? null : formatBondFailureReason(inputLog.error),
 			networkFailure: isBondNetworkFailure(inputLog.error),
 		})
-		pruneRequestLogs(inputLog.bridge.bridgeId)
+		await pruneRequestLogs(inputLog.bridge.bridgeId)
 	}
 
 	function writeRequestLogBestEffort(
 		inputLog: Parameters<typeof writeRequestLog>[0],
 	) {
-		runBestEffortPersistence('write request log', () => {
-			writeRequestLog(inputLog)
-		})
+		return runBestEffortPersistence('write request log', () =>
+			writeRequestLog(inputLog),
+		)
 	}
 
-	function syncPersistedCooldown(
+	async function syncPersistedCooldown(
 		bridge: BondPersistedBridge,
 		queueState: BondQueueState,
 	) {
-		const persisted = getBondReliabilityState(
+		const persisted = await getBondReliabilityState(
 			input.storage,
 			connectorId,
 			bridge.bridgeId,
@@ -710,9 +713,9 @@ export function createBondAdapter(input: {
 		}
 	}
 
-	function getBridgeHealthSnapshot(bridge: BondPersistedBridge) {
+	async function getBridgeHealthSnapshot(bridge: BondPersistedBridge) {
 		const queueState = getQueueState(bridge.bridgeId)
-		syncPersistedCooldown(bridge, queueState)
+		await syncPersistedCooldown(bridge, queueState)
 		const now = Date.now()
 		const cooldownUntilMs =
 			queueState.cooldownUntil > now ? queueState.cooldownUntil : 0
@@ -723,7 +726,7 @@ export function createBondAdapter(input: {
 		const nextRecommendedAttemptAt =
 			cooldownUntilMs > 0 ? new Date(cooldownUntilMs).toISOString() : null
 		const bridgeContext = getBondBridgeConnectionContext(bridge)
-		const persisted = getBondReliabilityState(
+		const persisted = await getBondReliabilityState(
 			input.storage,
 			connectorId,
 			bridge.bridgeId,
@@ -763,7 +766,7 @@ export function createBondAdapter(input: {
 		const startedAt = new Date(startedAtMs).toISOString()
 		const baseUrlsTried: Array<string> = []
 		try {
-			syncPersistedCooldown(requestInput.bridge, queueState)
+			await syncPersistedCooldown(requestInput.bridge, queueState)
 			const now = Date.now()
 			if (queueState.cooldownUntil > now) {
 				const error = createBondCooldownError({
@@ -772,7 +775,7 @@ export function createBondAdapter(input: {
 					operation: requestInput.operation,
 					cooldownUntil: queueState.cooldownUntil,
 				})
-				writeRequestLogBestEffort({
+				await writeRequestLogBestEffort({
 					bridge: requestInput.bridge,
 					operation: requestInput.operation,
 					status: 'cooldown',
@@ -792,17 +795,17 @@ export function createBondAdapter(input: {
 				connectorId,
 				attemptedBaseUrls: baseUrlsTried,
 			})
-			runBestEffortPersistence('mark bridge seen', () => {
-				markBridgeSeen(requestInput.bridge)
-			})
-			runBestEffortPersistence('clear reliability cooldown', () => {
+			await runBestEffortPersistence('mark bridge seen', () =>
+				markBridgeSeen(requestInput.bridge),
+			)
+			await runBestEffortPersistence('clear reliability cooldown', () =>
 				clearBondReliabilityCooldown({
 					storage: input.storage,
 					connectorId,
 					bridgeId: requestInput.bridge.bridgeId,
-				})
-			})
-			writeRequestLogBestEffort({
+				}),
+			)
+			await writeRequestLogBestEffort({
 				bridge: requestInput.bridge,
 				operation: requestInput.operation,
 				status: 'success',
@@ -817,7 +820,7 @@ export function createBondAdapter(input: {
 				(!(error instanceof Error) || error.name !== 'BondCircuitBreakerError')
 			) {
 				const consecutiveFailures = countRecentConsecutiveBridgeFailures(
-					listRecentBondRequestLogs({
+					await listRecentBondRequestLogs({
 						storage: input.storage,
 						connectorId,
 						bridgeId: requestInput.bridge.bridgeId,
@@ -833,7 +836,7 @@ export function createBondAdapter(input: {
 					queueState.cooldownUntil,
 					cooldownUntil,
 				)
-				runBestEffortPersistence('save reliability failure', () => {
+				await runBestEffortPersistence('save reliability failure', () =>
 					saveBondReliabilityFailure({
 						storage: input.storage,
 						connectorId,
@@ -841,14 +844,14 @@ export function createBondAdapter(input: {
 						cooldownUntil: new Date(queueState.cooldownUntil).toISOString(),
 						failureAt: nowIso(),
 						failureReason: formatBondFailureReason(error),
-					})
-				})
+					}),
+				)
 			}
 			if (
 				!(error instanceof Error) ||
 				error.name !== 'BondCircuitBreakerError'
 			) {
-				writeRequestLogBestEffort({
+				await writeRequestLogBestEffort({
 					bridge: requestInput.bridge,
 					operation: requestInput.operation,
 					status: 'failure',
@@ -871,17 +874,19 @@ export function createBondAdapter(input: {
 		return await runQueuedBondBridgeRequest(requestInput)
 	}
 
-	function listPublicBridges(): Array<BondPersistedBridge> {
+	function listPublicBridges(): Promise<Array<BondPersistedBridge>> {
 		return listBondBridges(input.storage, connectorId)
 	}
 
-	function resolveBridge(bridgeId?: string): BondPersistedBridge {
+	async function resolveBridge(
+		bridgeId?: string,
+	): Promise<BondPersistedBridge> {
 		if (bridgeId) {
 			return requireBondBridge(input.storage, connectorId, bridgeId)
 		}
-		const adopted = listPublicBridges().filter((bridge) => bridge.adopted)
+		const all = await listPublicBridges()
+		const adopted = all.filter((bridge) => bridge.adopted)
 		if (adopted.length === 1) return adopted[0]
-		const all = listPublicBridges()
 		if (all.length === 1) return all[0]
 		if (adopted.length > 1 || all.length > 1) {
 			throw createBondOperatorError(
@@ -895,8 +900,10 @@ export function createBondAdapter(input: {
 		)
 	}
 
-	function requireAdoptedBridge(bridgeId?: string): BondPersistedBridge {
-		const bridge = resolveBridge(bridgeId)
+	async function requireAdoptedBridge(
+		bridgeId?: string,
+	): Promise<BondPersistedBridge> {
+		const bridge = await resolveBridge(bridgeId)
 		if (!bridge.adopted) {
 			throw createBondOperatorError(
 				`Bond bridge "${bridge.bridgeId}" must be adopted before control.`,
@@ -907,8 +914,8 @@ export function createBondAdapter(input: {
 		return bridge
 	}
 
-	function requireToken(bridge: BondPersistedBridge) {
-		const token = getBondTokenSecret(
+	async function requireToken(bridge: BondPersistedBridge) {
+		const token = await getBondTokenSecret(
 			input.storage,
 			connectorId,
 			bridge.bridgeId,
@@ -1025,8 +1032,8 @@ export function createBondAdapter(input: {
 	}
 
 	const bondApi = {
-		getStatus() {
-			const bridges = listPublicBridges()
+		async getStatus() {
+			const bridges = await listPublicBridges()
 			return {
 				bridges,
 				diagnostics: input.state.bondDiscoveryDiagnostics,
@@ -1036,22 +1043,22 @@ export function createBondAdapter(input: {
 		},
 		async scan() {
 			const discovered = await scanBondBridges(input.state, input.config)
-			upsertDiscoveredBondBridges(input.storage, connectorId, discovered)
+			await upsertDiscoveredBondBridges(input.storage, connectorId, discovered)
 			return listPublicBridges()
 		},
 		adoptBridge(bridgeId: string) {
 			return adoptBondBridge(input.storage, connectorId, bridgeId)
 		},
-		releaseBridge(bridgeId: string) {
-			releaseBondBridge(input.storage, connectorId, bridgeId)
+		async releaseBridge(bridgeId: string) {
+			await releaseBondBridge(input.storage, connectorId, bridgeId)
 		},
-		pruneDiscoveredBridges() {
-			pruneNonAdoptedBondBridges(input.storage, connectorId)
+		async pruneDiscoveredBridges() {
+			await pruneNonAdoptedBondBridges(input.storage, connectorId)
 			return listPublicBridges()
 		},
-		setToken(bridgeId: string, token: string) {
-			requireBondBridge(input.storage, connectorId, bridgeId)
-			saveBondToken({
+		async setToken(bridgeId: string, token: string) {
+			await requireBondBridge(input.storage, connectorId, bridgeId)
+			await saveBondToken({
 				storage: input.storage,
 				connectorId,
 				bridgeId,
@@ -1072,25 +1079,25 @@ export function createBondAdapter(input: {
 				connection,
 			)
 		},
-		getBridgeHealth(bridgeId?: string) {
-			const bridge = resolveBridge(bridgeId)
+		async getBridgeHealth(bridgeId?: string) {
+			const bridge = await resolveBridge(bridgeId)
 			return getBridgeHealthSnapshot(bridge)
 		},
-		getReliabilityStatus(
+		async getReliabilityStatus(
 			inputStatus: {
 				bridgeId?: string
 				limit?: number
 			} = {},
 		) {
-			const bridge = resolveBridge(inputStatus.bridgeId)
+			const bridge = await resolveBridge(inputStatus.bridgeId)
 			const queueState = getQueueState(bridge.bridgeId)
-			syncPersistedCooldown(bridge, queueState)
+			await syncPersistedCooldown(bridge, queueState)
 			const limit =
 				inputStatus.limit == null
 					? 50
 					: Math.max(1, Math.min(200, Math.floor(inputStatus.limit)))
 			return {
-				health: getBridgeHealthSnapshot(bridge),
+				health: await getBridgeHealthSnapshot(bridge),
 				config: {
 					requestPaceMs,
 					circuitBreakerCooldownMs,
@@ -1110,12 +1117,12 @@ export function createBondAdapter(input: {
 							? new Date(queueState.cooldownUntil).toISOString()
 							: null,
 				},
-				persisted: getBondReliabilityState(
+				persisted: await getBondReliabilityState(
 					input.storage,
 					connectorId,
 					bridge.bridgeId,
 				),
-				recentRequestLogs: listRecentBondRequestLogs({
+				recentRequestLogs: await listRecentBondRequestLogs({
 					storage: input.storage,
 					connectorId,
 					bridgeId: bridge.bridgeId,
@@ -1124,7 +1131,7 @@ export function createBondAdapter(input: {
 			}
 		},
 		async fetchBridgeVersion(bridgeId?: string) {
-			const bridge = resolveBridge(bridgeId)
+			const bridge = await resolveBridge(bridgeId)
 			return await withTrackedBondBridgeRequest({
 				bridge,
 				operation: 'fetch bridge version',
@@ -1132,8 +1139,8 @@ export function createBondAdapter(input: {
 			})
 		},
 		async getTokenStatus(bridgeId?: string) {
-			const bridge = resolveBridge(bridgeId)
-			const existing = getBondTokenSecret(
+			const bridge = await resolveBridge(bridgeId)
+			const existing = await getBondTokenSecret(
 				input.storage,
 				connectorId,
 				bridge.bridgeId,
@@ -1151,8 +1158,8 @@ export function createBondAdapter(input: {
 		},
 		async syncTokenFromBridge(bridgeId?: string) {
 			const bridge = bridgeId
-				? requireBondBridge(input.storage, connectorId, bridgeId)
-				: resolveBridge()
+				? await requireBondBridge(input.storage, connectorId, bridgeId)
+				: await resolveBridge()
 			const raw = (await withTrackedBondBridgeRequest({
 				bridge,
 				operation: 'retrieve token from bridge',
@@ -1171,7 +1178,7 @@ export function createBondAdapter(input: {
 					{ bond_bridge_id: bridge.bridgeId },
 				)
 			}
-			saveBondToken({
+			await saveBondToken({
 				storage: input.storage,
 				connectorId,
 				bridgeId: bridge.bridgeId,
@@ -1182,16 +1189,16 @@ export function createBondAdapter(input: {
 			return { bridgeId: bridge.bridgeId, stored: true }
 		},
 		async listDevices(bridgeId?: string) {
-			const bridge = requireAdoptedBridge(bridgeId)
-			const token = requireToken(bridge)
+			const bridge = await requireAdoptedBridge(bridgeId)
+			const token = await requireToken(bridge)
 			return await listDeviceSummaries(bridge, token)
 		},
 		async getDevice(
 			bridgeId: string | undefined,
 			deviceId: string,
 		): Promise<Record<string, unknown>> {
-			const bridge = requireAdoptedBridge(bridgeId)
-			const token = requireToken(bridge)
+			const bridge = await requireAdoptedBridge(bridgeId)
+			const token = await requireToken(bridge)
 			return await withTrackedBondBridgeRequest({
 				bridge,
 				operation: `fetch device ${deviceId}`,
@@ -1207,8 +1214,8 @@ export function createBondAdapter(input: {
 			bridgeId: string | undefined,
 			deviceId: string,
 		): Promise<Record<string, unknown>> {
-			const bridge = requireAdoptedBridge(bridgeId)
-			const token = requireToken(bridge)
+			const bridge = await requireAdoptedBridge(bridgeId)
+			const token = await requireToken(bridge)
 			return await readDeviceStateWithCoalescing(bridge, token, deviceId)
 		},
 		async invokeDeviceAction(input: {
@@ -1218,8 +1225,8 @@ export function createBondAdapter(input: {
 			action: string
 			argument?: number | string | boolean | null
 		}) {
-			const bridge = requireAdoptedBridge(input.bridgeId)
-			const token = requireToken(bridge)
+			const bridge = await requireAdoptedBridge(input.bridgeId)
+			const token = await requireToken(bridge)
 			const deviceId = await resolveDeviceId(
 				bridge,
 				token,
@@ -1342,8 +1349,8 @@ export function createBondAdapter(input: {
 			})
 		},
 		async listGroups(bridgeId?: string) {
-			const bridge = requireAdoptedBridge(bridgeId)
-			const token = requireToken(bridge)
+			const bridge = await requireAdoptedBridge(bridgeId)
+			const token = await requireToken(bridge)
 			return await withTrackedBondBridgeRequest({
 				bridge,
 				operation: 'list groups',
@@ -1357,8 +1364,8 @@ export function createBondAdapter(input: {
 			})
 		},
 		async getGroup(bridgeId: string | undefined, groupId: string) {
-			const bridge = requireAdoptedBridge(bridgeId)
-			const token = requireToken(bridge)
+			const bridge = await requireAdoptedBridge(bridgeId)
+			const token = await requireToken(bridge)
 			return await withTrackedBondBridgeRequest({
 				bridge,
 				operation: `fetch group ${groupId}`,
@@ -1371,8 +1378,8 @@ export function createBondAdapter(input: {
 			})
 		},
 		async getGroupState(bridgeId: string | undefined, groupId: string) {
-			const bridge = requireAdoptedBridge(bridgeId)
-			const token = requireToken(bridge)
+			const bridge = await requireAdoptedBridge(bridgeId)
+			const token = await requireToken(bridge)
 			return await withTrackedBondBridgeRequest({
 				bridge,
 				operation: `fetch group ${groupId} state`,
@@ -1390,8 +1397,8 @@ export function createBondAdapter(input: {
 			action: string
 			argument?: number | string | boolean | null
 		}) {
-			const bridge = requireAdoptedBridge(input.bridgeId)
-			const token = requireToken(bridge)
+			const bridge = await requireAdoptedBridge(input.bridgeId)
+			const token = await requireToken(bridge)
 			const doc = await withTrackedBondBridgeRequest({
 				bridge,
 				operation: `fetch group ${input.groupId} before action`,

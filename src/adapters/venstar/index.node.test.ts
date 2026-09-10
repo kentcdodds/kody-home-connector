@@ -17,17 +17,17 @@ function createConfig() {
 	return loadHomeConnectorConfig()
 }
 
-function createVenstarFixture() {
+async function createVenstarFixture() {
 	const config = createConfig()
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
-	upsertVenstarThermostat({
+	const storage = await createHomeConnectorStorage(config)
+	await upsertVenstarThermostat({
 		storage,
 		connectorId: config.homeConnectorId,
 		name: 'Hallway',
 		ip: '192.168.10.40',
 	})
-	upsertVenstarThermostat({
+	await upsertVenstarThermostat({
 		storage,
 		connectorId: config.homeConnectorId,
 		name: 'Office',
@@ -48,19 +48,19 @@ function createVenstarFixture() {
 installHomeConnectorMockServer()
 
 test('venstar list returns managed thermostats with status', async () => {
-	const { storage, venstar } = createVenstarFixture()
+	const { storage, venstar } = await createVenstarFixture()
 	try {
 		const result = await venstar.listThermostatsWithStatus()
 
 		expect(result).toHaveLength(2)
 		expect(result[0]?.summary?.spacetemp).toBeDefined()
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })
 
 test('venstar control validates auto mode setpoints', async () => {
-	const { storage, venstar } = createVenstarFixture()
+	const { storage, venstar } = await createVenstarFixture()
 	try {
 		await expect(
 			venstar.controlThermostat({
@@ -71,12 +71,12 @@ test('venstar control validates auto mode setpoints', async () => {
 			}),
 		).rejects.toThrow('Auto mode requires cooltemp')
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })
 
 test('venstar settings updates complete in mock mode', async () => {
-	const { storage, venstar } = createVenstarFixture()
+	const { storage, venstar } = await createVenstarFixture()
 	try {
 		const result = await venstar.setSettings({
 			thermostat: 'Office',
@@ -87,12 +87,12 @@ test('venstar settings updates complete in mock mode', async () => {
 
 		expect(result.response.success).toBe(true)
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })
 
 test('venstar scan discovers thermostats and records diagnostics', async () => {
-	const { state, storage, venstar } = createVenstarFixture()
+	const { state, storage, venstar } = await createVenstarFixture()
 	try {
 		const result = await venstar.scan()
 
@@ -101,7 +101,7 @@ test('venstar scan discovers thermostats and records diagnostics', async () => {
 			name: 'Hallway',
 			ip: '192.168.10.40',
 		})
-		expect(venstar.getStatus()).toMatchObject({
+		expect(await venstar.getStatus()).toMatchObject({
 			discovered: [],
 			diagnostics: expect.objectContaining({
 				protocol: 'subnet',
@@ -109,6 +109,6 @@ test('venstar scan discovers thermostats and records diagnostics', async () => {
 		})
 		expect(state.venstarDiscoveredThermostats).toHaveLength(2)
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })

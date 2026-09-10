@@ -124,8 +124,8 @@ export function createAccessNetworksUnleashedAdapter(input: {
 		return listAccessNetworksUnleashedPublicControllers(storage, connectorId)
 	}
 
-	function getAdoptedController() {
-		const controller = getAdoptedAccessNetworksUnleashedController(
+	async function getAdoptedController() {
+		const controller = await getAdoptedAccessNetworksUnleashedController(
 			storage,
 			connectorId,
 		)
@@ -134,8 +134,8 @@ export function createAccessNetworksUnleashedAdapter(input: {
 			: null
 	}
 
-	function requireController(controllerId: string) {
-		const controller = getAccessNetworksUnleashedController(
+	async function requireController(controllerId: string) {
+		const controller = await getAccessNetworksUnleashedController(
 			storage,
 			connectorId,
 			controllerId,
@@ -148,8 +148,8 @@ export function createAccessNetworksUnleashedAdapter(input: {
 		return controller
 	}
 
-	function requireAdoptedController() {
-		const controller = getAdoptedAccessNetworksUnleashedController(
+	async function requireAdoptedController() {
+		const controller = await getAdoptedAccessNetworksUnleashedController(
 			storage,
 			connectorId,
 		)
@@ -161,8 +161,8 @@ export function createAccessNetworksUnleashedAdapter(input: {
 		return controller
 	}
 
-	function requireControllerWithCredentials() {
-		const controller = requireAdoptedController()
+	async function requireControllerWithCredentials() {
+		const controller = await requireAdoptedController()
 		if (!controller.username || !controller.password) {
 			throw new Error(
 				'The adopted Access Networks Unleashed controller is missing stored credentials. Run access_networks_unleashed_set_credentials first.',
@@ -174,8 +174,8 @@ export function createAccessNetworksUnleashedAdapter(input: {
 	let cachedClientKey: string | null = null
 	let cachedClient: AccessNetworksUnleashedClient | null = null
 
-	function createClient() {
-		const controller = requireControllerWithCredentials()
+	async function createClient() {
+		const controller = await requireControllerWithCredentials()
 		const cacheKey = JSON.stringify({
 			controllerId: controller.controllerId,
 			host: controller.host,
@@ -197,10 +197,10 @@ export function createAccessNetworksUnleashedAdapter(input: {
 
 	return {
 		requestConfirmation: accessNetworksUnleashedRequestConfirmation,
-		getConfigStatus() {
+		async getConfigStatus() {
 			return getConfigStatus(
 				config,
-				getAdoptedAccessNetworksUnleashedController(storage, connectorId),
+				await getAdoptedAccessNetworksUnleashedController(storage, connectorId),
 			)
 		},
 		getDiscoveryDiagnostics() {
@@ -212,7 +212,7 @@ export function createAccessNetworksUnleashedAdapter(input: {
 			if (input.scanControllers) {
 				const result = await input.scanControllers()
 				state.accessNetworksUnleashedDiscoveryDiagnostics = result.diagnostics
-				upsertDiscoveredAccessNetworksUnleashedControllers(
+				await upsertDiscoveredAccessNetworksUnleashedControllers(
 					storage,
 					connectorId,
 					result.controllers,
@@ -220,16 +220,16 @@ export function createAccessNetworksUnleashedAdapter(input: {
 				return listControllers()
 			}
 			const result = await scanAccessNetworksUnleashedControllers(state, config)
-			upsertDiscoveredAccessNetworksUnleashedControllers(
+			await upsertDiscoveredAccessNetworksUnleashedControllers(
 				storage,
 				connectorId,
 				result.controllers,
 			)
 			return listControllers()
 		},
-		adoptController(request: ControllerSelectionRequest) {
-			const controller = requireController(request.controllerId)
-			adoptAccessNetworksUnleashedController(
+		async adoptController(request: ControllerSelectionRequest) {
+			const controller = await requireController(request.controllerId)
+			await adoptAccessNetworksUnleashedController(
 				storage,
 				connectorId,
 				controller.controllerId,
@@ -241,9 +241,9 @@ export function createAccessNetworksUnleashedAdapter(input: {
 				adopted: true,
 			})
 		},
-		removeController(request: ControllerSelectionRequest) {
-			const controller = requireController(request.controllerId)
-			removeAccessNetworksUnleashedController({
+		async removeController(request: ControllerSelectionRequest) {
+			const controller = await requireController(request.controllerId)
+			await removeAccessNetworksUnleashedController({
 				storage,
 				connectorId,
 				controllerId: controller.controllerId,
@@ -252,11 +252,11 @@ export function createAccessNetworksUnleashedAdapter(input: {
 			cachedClientKey = null
 			return toAccessNetworksUnleashedPublicController(controller)
 		},
-		setCredentials(request: ControllerCredentialsRequest) {
-			requireController(request.controllerId)
+		async setCredentials(request: ControllerCredentialsRequest) {
+			await requireController(request.controllerId)
 			const username = assertNonEmpty(request.username, 'username')
 			const password = assertNonEmpty(request.password, 'password')
-			saveAccessNetworksUnleashedCredentials({
+			await saveAccessNetworksUnleashedCredentials({
 				storage,
 				connectorId,
 				controllerId: request.controllerId,
@@ -266,13 +266,13 @@ export function createAccessNetworksUnleashedAdapter(input: {
 			cachedClient = null
 			cachedClientKey = null
 			return toAccessNetworksUnleashedPublicController(
-				requireController(request.controllerId),
+				await requireController(request.controllerId),
 			)
 		},
 		async authenticate(controllerId?: string) {
 			const controller = controllerId
-				? requireController(controllerId)
-				: requireAdoptedController()
+				? await requireController(controllerId)
+				: await requireAdoptedController()
 			if (!controller.username || !controller.password) {
 				throw new Error(
 					`Access Networks Unleashed controller "${controller.controllerId}" is missing stored credentials. Run access_networks_unleashed_set_credentials first.`,
@@ -292,7 +292,7 @@ export function createAccessNetworksUnleashedAdapter(input: {
 					comp: 'system',
 					xmlBody: '<sysinfo/>',
 				})
-				updateAccessNetworksUnleashedAuthStatus({
+				await updateAccessNetworksUnleashedAuthStatus({
 					storage,
 					connectorId,
 					controllerId: controller.controllerId,
@@ -300,7 +300,7 @@ export function createAccessNetworksUnleashedAdapter(input: {
 					lastAuthError: null,
 				})
 			} catch (error) {
-				updateAccessNetworksUnleashedAuthStatus({
+				await updateAccessNetworksUnleashedAuthStatus({
 					storage,
 					connectorId,
 					controllerId: controller.controllerId,
@@ -310,7 +310,7 @@ export function createAccessNetworksUnleashedAdapter(input: {
 				throw error
 			}
 			return toAccessNetworksUnleashedPublicController(
-				requireController(controller.controllerId),
+				await requireController(controller.controllerId),
 			)
 		},
 		async request(
@@ -327,8 +327,8 @@ export function createAccessNetworksUnleashedAdapter(input: {
 			if (typeof xmlBody !== 'string') {
 				throw new Error('xmlBody must be a string of inner ajax-request XML.')
 			}
-			const client = createClient()
-			const adoptedController = requireControllerWithCredentials()
+			const client = await createClient()
+			const adoptedController = await requireControllerWithCredentials()
 			try {
 				const result = await client.request({
 					action: request.action,
@@ -337,7 +337,7 @@ export function createAccessNetworksUnleashedAdapter(input: {
 					updater: request.updater,
 					allowInsecureTls: request.allowInsecureTls,
 				})
-				updateAccessNetworksUnleashedAuthStatus({
+				await updateAccessNetworksUnleashedAuthStatus({
 					storage,
 					connectorId,
 					controllerId: adoptedController.controllerId,
@@ -351,7 +351,7 @@ export function createAccessNetworksUnleashedAdapter(input: {
 				// device-side command rejection) should not appear later as bad
 				// credentials or a stale session.
 				if (isAuthFailure(error)) {
-					updateAccessNetworksUnleashedAuthStatus({
+					await updateAccessNetworksUnleashedAuthStatus({
 						storage,
 						connectorId,
 						controllerId: adoptedController.controllerId,

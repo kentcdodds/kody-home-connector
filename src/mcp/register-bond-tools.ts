@@ -103,7 +103,7 @@ export function registerBondHomeConnectorTools(input: {
 			},
 		},
 		async () => {
-			const status = bond.getStatus()
+			const status = await bond.getStatus()
 			const lines = status.bridges.map(
 				(b) =>
 					`- ${b.instanceName} (${b.bridgeId}) host=${b.host}:${String(b.port)} adopted=${String(b.adopted)} token=${String(b.hasStoredToken)}`,
@@ -145,7 +145,7 @@ export function registerBondHomeConnectorTools(input: {
 				],
 				structuredContent: {
 					bridges,
-					diagnostics: bond.getStatus().diagnostics,
+					diagnostics: (await bond.getStatus()).diagnostics,
 				},
 			}
 		},
@@ -163,7 +163,7 @@ export function registerBondHomeConnectorTools(input: {
 		},
 		async (args) => {
 			const bridgeId = String(args['bridgeId'] ?? '')
-			const bridge = bond.adoptBridge(bridgeId)
+			const bridge = await bond.adoptBridge(bridgeId)
 			return {
 				content: [
 					{
@@ -188,7 +188,7 @@ export function registerBondHomeConnectorTools(input: {
 		},
 		async (args) => {
 			const bridgeId = String(args['bridgeId'] ?? '')
-			bond.releaseBridge(bridgeId)
+			await bond.releaseBridge(bridgeId)
 			return {
 				content: [
 					{
@@ -210,7 +210,7 @@ export function registerBondHomeConnectorTools(input: {
 			inputSchema: {},
 		},
 		async () => {
-			const bridges = bond.pruneDiscoveredBridges()
+			const bridges = await bond.pruneDiscoveredBridges()
 			return {
 				content: [
 					{
@@ -239,7 +239,10 @@ export function registerBondHomeConnectorTools(input: {
 			const bridgeId = String(args['bridgeId'] ?? '')
 			const host = String(args['host'] ?? '')
 			const port = args['port'] == null ? undefined : Number(args['port'])
-			const bridge = bond.updateBridgeConnection(bridgeId, { host, port })
+			const bridge = await bond.updateBridgeConnection(bridgeId, {
+				host,
+				port,
+			})
 			return {
 				content: [
 					{
@@ -296,7 +299,7 @@ export function registerBondHomeConnectorTools(input: {
 			const bridgeId =
 				args['bridgeId'] == null ? undefined : String(args['bridgeId'])
 			const limit = args['limit'] == null ? undefined : Number(args['limit'])
-			const status = bond.getReliabilityStatus({ bridgeId, limit })
+			const status = await bond.getReliabilityStatus({ bridgeId, limit })
 			return {
 				content: [
 					{
@@ -324,7 +327,7 @@ export function registerBondHomeConnectorTools(input: {
 		async (args) => {
 			const bridgeId =
 				args['bridgeId'] == null ? undefined : String(args['bridgeId'])
-			const health = bond.getBridgeHealth(bridgeId)
+			const health = await bond.getBridgeHealth(bridgeId)
 			return {
 				content: [
 					{

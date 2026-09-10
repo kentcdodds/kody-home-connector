@@ -133,8 +133,10 @@ function renderAccessNetworksUnleashedDiscoveryDiagnostics(
 
 function renderAccessNetworksUnleashedStatusPage(input: {
 	state: HomeConnectorState
-	configStatus: ReturnType<
-		ReturnType<typeof createAccessNetworksUnleashedAdapter>['getConfigStatus']
+	configStatus: Awaited<
+		ReturnType<
+			ReturnType<typeof createAccessNetworksUnleashedAdapter>['getConfigStatus']
+		>
 	>
 	controllers: Array<AccessNetworksUnleashedPublicController>
 	diagnostics: AccessNetworksUnleashedDiscoveryDiagnostics | null
@@ -238,8 +240,10 @@ function renderAccessNetworksUnleashedStatusPage(input: {
 function renderAccessNetworksUnleashedSetupPage(input: {
 	state: HomeConnectorState
 	controllers: Array<AccessNetworksUnleashedPublicController>
-	configStatus: ReturnType<
-		ReturnType<typeof createAccessNetworksUnleashedAdapter>['getConfigStatus']
+	configStatus: Awaited<
+		ReturnType<
+			ReturnType<typeof createAccessNetworksUnleashedAdapter>['getConfigStatus']
+		>
 	>
 	diagnostics: AccessNetworksUnleashedDiscoveryDiagnostics | null
 	banner: Banner
@@ -428,11 +432,14 @@ export function createAccessNetworksUnleashedStatusHandler(
 		typeof createAccessNetworksUnleashedAdapter
 	>,
 ) {
-	function renderPage(banner?: { scanMessage?: string; scanError?: string }) {
+	async function renderPage(banner?: {
+		scanMessage?: string
+		scanError?: string
+	}) {
 		return renderAccessNetworksUnleashedStatusPage({
 			state,
-			configStatus: accessNetworksUnleashed.getConfigStatus(),
-			controllers: accessNetworksUnleashed.listControllers(),
+			configStatus: await accessNetworksUnleashed.getConfigStatus(),
+			controllers: await accessNetworksUnleashed.listControllers(),
 			diagnostics: accessNetworksUnleashed.getDiscoveryDiagnostics(),
 			scanMessage: banner?.scanMessage,
 			scanError: banner?.scanError,
@@ -483,11 +490,11 @@ export function createAccessNetworksUnleashedSetupHandler(
 		typeof createAccessNetworksUnleashedAdapter
 	>,
 ) {
-	function renderPage(banner: Banner = null) {
+	async function renderPage(banner: Banner = null) {
 		return renderAccessNetworksUnleashedSetupPage({
 			state,
-			controllers: accessNetworksUnleashed.listControllers(),
-			configStatus: accessNetworksUnleashed.getConfigStatus(),
+			controllers: await accessNetworksUnleashed.listControllers(),
+			configStatus: await accessNetworksUnleashed.getConfigStatus(),
 			diagnostics: accessNetworksUnleashed.getDiscoveryDiagnostics(),
 			banner,
 		})
@@ -506,7 +513,7 @@ export function createAccessNetworksUnleashedSetupHandler(
 						if (!controllerId) {
 							throw new Error('Choose a controller to adopt.')
 						}
-						const controller = accessNetworksUnleashed.adoptController({
+						const controller = await accessNetworksUnleashed.adoptController({
 							controllerId,
 						})
 						return renderPage({
@@ -523,7 +530,7 @@ export function createAccessNetworksUnleashedSetupHandler(
 						}
 						const username = String(form.get('username') ?? '')
 						const password = String(form.get('password') ?? '')
-						const controller = accessNetworksUnleashed.setCredentials({
+						const controller = await accessNetworksUnleashed.setCredentials({
 							controllerId,
 							username,
 							password,
@@ -550,7 +557,7 @@ export function createAccessNetworksUnleashedSetupHandler(
 						if (!controllerId) {
 							throw new Error('Choose a controller to remove.')
 						}
-						const controller = accessNetworksUnleashed.removeController({
+						const controller = await accessNetworksUnleashed.removeController({
 							controllerId,
 						})
 						return renderPage({

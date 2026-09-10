@@ -10,8 +10,8 @@ import { RootLayout } from './root.ts'
 import { routes } from './routes.ts'
 
 function renderJellyfishControllerList(
-	controllers: ReturnType<
-		ReturnType<typeof createJellyfishAdapter>['listControllers']
+	controllers: Awaited<
+		ReturnType<ReturnType<typeof createJellyfishAdapter>['listControllers']>
 	>,
 ) {
 	if (controllers.length === 0) {
@@ -119,8 +119,8 @@ async function loadJellyfishStatusData(
 	}
 
 	return {
-		status: jellyfish.getStatus(),
-		controllers: jellyfish.listControllers(),
+		status: await jellyfish.getStatus(),
+		controllers: await jellyfish.listControllers(),
 		zones,
 		zonesError,
 		patterns,
@@ -130,9 +130,11 @@ async function loadJellyfishStatusData(
 
 function renderJellyfishStatusPage(input: {
 	state: HomeConnectorState
-	status: ReturnType<ReturnType<typeof createJellyfishAdapter>['getStatus']>
-	controllers: ReturnType<
-		ReturnType<typeof createJellyfishAdapter>['listControllers']
+	status: Awaited<
+		ReturnType<ReturnType<typeof createJellyfishAdapter>['getStatus']>
+	>
+	controllers: Awaited<
+		ReturnType<ReturnType<typeof createJellyfishAdapter>['listControllers']>
 	>
 	zones: Array<{
 		name: string
@@ -282,7 +284,7 @@ export function createJellyfishSetupHandler(
 	return {
 		middleware: [],
 		async handler() {
-			const status = jellyfish.getStatus()
+			const status = await jellyfish.getStatus()
 			return render(
 				RootLayout({
 					title: 'home connector - jellyfish setup',

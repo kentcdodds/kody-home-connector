@@ -104,7 +104,7 @@ export function registerAccessNetworksUnleashedHomeConnectorTools(input: {
 			},
 		},
 		async () => {
-			const controllers = accessNetworksUnleashed.listControllers()
+			const controllers = await accessNetworksUnleashed.listControllers()
 			return structuredTextResult(
 				controllers.length === 0
 					? 'No Access Networks Unleashed controllers are currently known.'
@@ -135,7 +135,7 @@ export function registerAccessNetworksUnleashedHomeConnectorTools(input: {
 			sdkInputSchema: controllerIdSchema.sdkInputSchema,
 		},
 		async (args) => {
-			const controller = accessNetworksUnleashed.adoptController({
+			const controller = await accessNetworksUnleashed.adoptController({
 				controllerId: String(args['controllerId'] ?? ''),
 			})
 			return structuredTextResult(
@@ -157,7 +157,7 @@ export function registerAccessNetworksUnleashedHomeConnectorTools(input: {
 			sdkInputSchema: controllerIdSchema.sdkInputSchema,
 		},
 		async (args) => {
-			const controller = accessNetworksUnleashed.removeController({
+			const controller = await accessNetworksUnleashed.removeController({
 				controllerId: String(args['controllerId'] ?? ''),
 			})
 			return structuredTextResult(
@@ -188,7 +188,7 @@ export function registerAccessNetworksUnleashedHomeConnectorTools(input: {
 			sdkInputSchema: credentialsSchema.sdkInputSchema,
 		},
 		async (args) => {
-			const controller = accessNetworksUnleashed.setCredentials({
+			const controller = await accessNetworksUnleashed.setCredentials({
 				controllerId: String(args['controllerId'] ?? ''),
 				username: String(args['username'] ?? ''),
 				password: String(args['password'] ?? ''),

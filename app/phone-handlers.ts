@@ -53,8 +53,8 @@ function assertSameOriginFormPost(request: Request) {
 }
 
 function tokenSourceLabel(
-	source: ReturnType<
-		ReturnType<typeof createPhoneAdapter>['getStatus']
+	source: Awaited<
+		ReturnType<ReturnType<typeof createPhoneAdapter>['getStatus']>
 	>['tokenSource'],
 ) {
 	switch (source) {
@@ -71,11 +71,11 @@ function tokenSourceLabel(
 	}
 }
 
-function renderPhoneStatusPage(input: {
+async function renderPhoneStatusPage(input: {
 	state: HomeConnectorState
 	phone: ReturnType<typeof createPhoneAdapter>
 }) {
-	const status = input.phone.getStatus()
+	const status = await input.phone.getStatus()
 	return render(
 		RootLayout({
 			title: 'home connector - phone status',
@@ -166,12 +166,12 @@ function renderPhoneStatusPage(input: {
 	)
 }
 
-function renderPhoneSetupPage(input: {
+async function renderPhoneSetupPage(input: {
 	state: HomeConnectorState
 	phone: ReturnType<typeof createPhoneAdapter>
 	banner: Banner
 }) {
-	const status = input.phone.getStatus()
+	const status = await input.phone.getStatus()
 	return render(
 		RootLayout({
 			title: 'home connector - phone setup',
@@ -314,7 +314,7 @@ export function createPhoneSetupHandler(
 					const intent = String(form.get('intent') ?? '')
 
 					if (intent === 'set-token') {
-						phone.setDeviceToken(String(form.get('token') ?? ''))
+						await phone.setDeviceToken(String(form.get('token') ?? ''))
 						return renderPage({
 							tone: 'success',
 							message: 'Saved phone device token.',
@@ -322,7 +322,7 @@ export function createPhoneSetupHandler(
 					}
 
 					if (intent === 'clear-token') {
-						phone.clearStoredDeviceToken()
+						await phone.clearStoredDeviceToken()
 						return renderPage({
 							tone: 'success',
 							message: 'Cleared stored phone device token.',

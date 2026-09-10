@@ -1,25 +1,16 @@
+import { and, notInList, type TableRow } from 'remix/data-table'
 import { type HomeConnectorStorage } from '../../storage/index.ts'
 import { decryptSecret, encryptSecret } from '../../storage/encrypted-secret.ts'
+import {
+	accessNetworksUnleashedControllers,
+	accessNetworksUnleashedCredentials,
+} from '../../storage/schema.ts'
+import { compareNoCase, compareText } from '../../storage/sort.ts'
 import {
 	type AccessNetworksUnleashedDiscoveredController,
 	type AccessNetworksUnleashedPersistedController,
 	type AccessNetworksUnleashedPublicController,
 } from './types.ts'
-
-type AccessNetworksUnleashedControllerRow = {
-	connector_id: string
-	controller_id: string
-	name: string
-	host: string
-	login_url: string
-	raw_discovery_json: string | null
-	adopted: number
-	last_seen_at: string | null
-	username: string | null
-	password: string | null
-	last_authenticated_at: string | null
-	last_auth_error: string | null
-}
 
 function encryptPassword(password: string, sharedSecret: string | null) {
 	return encryptSecret({
@@ -36,7 +27,8 @@ function decryptPassword(password: string | null, sharedSecret: string | null) {
 
 function mapControllerRow(
 	storage: HomeConnectorStorage,
-	row: AccessNetworksUnleashedControllerRow,
+	row: TableRow<typeof accessNetworksUnleashedControllers>,
+	credentials: TableRow<typeof accessNetworksUnleashedCredentials> | undefined,
 ): AccessNetworksUnleashedPersistedController {
 	return {
 		controllerId: row.controller_id,
@@ -48,10 +40,13 @@ function mapControllerRow(
 			? (JSON.parse(row.raw_discovery_json) as Record<string, unknown>)
 			: null,
 		adopted: Boolean(row.adopted),
-		username: row.username,
-		password: decryptPassword(row.password, storage.sharedSecret),
-		lastAuthenticatedAt: row.last_authenticated_at,
-		lastAuthError: row.last_auth_error,
+		username: credentials?.username ?? null,
+		password: decryptPassword(
+			credentials?.password ?? null,
+			storage.sharedSecret,
+		),
+		lastAuthenticatedAt: credentials?.last_authenticated_at ?? null,
+		lastAuthError: credentials?.last_auth_error ?? null,
 	}
 }
 
@@ -68,155 +63,43 @@ function toPublicController(
 	}
 }
 
-function selectControllerRows(
-	storage: HomeConnectorStorage,
-	connectorId: string,
-): Array<AccessNetworksUnleashedControllerRow> {
-	const statement = storage.db.query(`
-		SELECT
-			controller.connector_id,
-			controller.controller_id,
-			controller.name,
-			controller.host,
-			controller.login_url,
-			controller.raw_discovery_json,
-			controller.adopted,
-			controller.last_seen_at,
-			credentials.username,
-			credentials.password,
-			credentials.last_authenticated_at,
-			credentials.last_auth_error
-		FROM access_networks_unleashed_controllers AS controller
-		LEFT JOIN access_networks_unleashed_credentials AS credentials
-			ON credentials.connector_id = controller.connector_id
-			AND credentials.controller_id = controller.controller_id
-		WHERE controller.connector_id = ?
-		ORDER BY controller.name COLLATE NOCASE, controller.controller_id
-	`)
-	return statement.all(
-		connectorId,
-	) as Array<AccessNetworksUnleashedControllerRow>
-}
-
-function getUpsertControllerStatement(storage: HomeConnectorStorage) {
-	return storage.db.query(`
-		INSERT INTO access_networks_unleashed_controllers (
-			connector_id,
-			controller_id,
-			name,
-			host,
-			login_url,
-			raw_discovery_json,
-			adopted,
-			last_seen_at,
-			updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(connector_id, controller_id) DO UPDATE SET
-			name = excluded.name,
-			host = excluded.host,
-			login_url = excluded.login_url,
-			raw_discovery_json = excluded.raw_discovery_json,
-			last_seen_at = excluded.last_seen_at,
-			updated_at = excluded.updated_at
-	`)
-}
-
-function getDeleteMissingControllersStatement(storage: HomeConnectorStorage) {
-	return storage.db.query(`
-		DELETE FROM access_networks_unleashed_controllers AS controller
-		WHERE controller.connector_id = ?
-			AND controller.controller_id NOT IN (
-				SELECT value
-				FROM json_each(?)
-			)
-			AND controller.adopted = 0
-			AND NOT EXISTS (
-				SELECT 1
-				FROM access_networks_unleashed_credentials AS credentials
-				WHERE credentials.connector_id = controller.connector_id
-					AND credentials.controller_id = controller.controller_id
-			)
-	`)
-}
-
-function getClearAdoptedControllerStatement(storage: HomeConnectorStorage) {
-	return storage.db.query(`
-		UPDATE access_networks_unleashed_controllers
-		SET adopted = 0,
-			updated_at = CURRENT_TIMESTAMP
-		WHERE connector_id = ? AND adopted = 1
-	`)
-}
-
-function getMarkControllerAdoptedStatement(storage: HomeConnectorStorage) {
-	return storage.db.query(`
-		UPDATE access_networks_unleashed_controllers
-		SET adopted = 1,
-			updated_at = CURRENT_TIMESTAMP
-		WHERE connector_id = ? AND controller_id = ?
-	`)
-}
-
-function getDeleteControllerStatement(storage: HomeConnectorStorage) {
-	return storage.db.query(`
-		DELETE FROM access_networks_unleashed_controllers
-		WHERE connector_id = ? AND controller_id = ?
-	`)
-}
-
-function getDeleteCredentialsStatement(storage: HomeConnectorStorage) {
-	return storage.db.query(`
-		DELETE FROM access_networks_unleashed_credentials
-		WHERE connector_id = ? AND controller_id = ?
-	`)
-}
-
-function getUpsertCredentialsStatement(storage: HomeConnectorStorage) {
-	return storage.db.query(`
-		INSERT INTO access_networks_unleashed_credentials (
-			connector_id,
-			controller_id,
-			username,
-			password,
-			last_authenticated_at,
-			last_auth_error,
-			updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(connector_id, controller_id) DO UPDATE SET
-			username = excluded.username,
-			password = excluded.password,
-			last_authenticated_at = excluded.last_authenticated_at,
-			last_auth_error = excluded.last_auth_error,
-			updated_at = excluded.updated_at
-	`)
-}
-
-function getUpdateAuthStatusStatement(storage: HomeConnectorStorage) {
-	return storage.db.query(`
-		UPDATE access_networks_unleashed_credentials
-		SET last_authenticated_at = ?,
-			last_auth_error = ?,
-			updated_at = CURRENT_TIMESTAMP
-		WHERE connector_id = ? AND controller_id = ?
-	`)
-}
-
-export function listAccessNetworksUnleashedControllers(
+export async function listAccessNetworksUnleashedControllers(
 	storage: HomeConnectorStorage,
 	connectorId: string,
 ) {
-	return selectControllerRows(storage, connectorId).map((row) =>
-		mapControllerRow(storage, row),
+	const controllers = await storage.db.findMany(
+		accessNetworksUnleashedControllers,
+		{ where: { connector_id: connectorId } },
 	)
+	const credentials = await storage.db.findMany(
+		accessNetworksUnleashedCredentials,
+		{ where: { connector_id: connectorId } },
+	)
+	const credentialsByController = new Map(
+		credentials.map((row) => [row.controller_id, row]),
+	)
+	return controllers
+		.sort(
+			(a, b) =>
+				compareNoCase(a.name, b.name) ||
+				compareText(a.controller_id, b.controller_id),
+		)
+		.map((row) =>
+			mapControllerRow(
+				storage,
+				row,
+				credentialsByController.get(row.controller_id),
+			),
+		)
 }
 
-export function listAccessNetworksUnleashedPublicControllers(
+export async function listAccessNetworksUnleashedPublicControllers(
 	storage: HomeConnectorStorage,
 	connectorId: string,
 ) {
-	return listAccessNetworksUnleashedControllers(storage, connectorId).map(
-		toPublicController,
-	)
+	return (
+		await listAccessNetworksUnleashedControllers(storage, connectorId)
+	).map(toPublicController)
 }
 
 export function toAccessNetworksUnleashedPublicController(
@@ -225,68 +108,93 @@ export function toAccessNetworksUnleashedPublicController(
 	return toPublicController(controller)
 }
 
-export function getAccessNetworksUnleashedController(
+export async function getAccessNetworksUnleashedController(
 	storage: HomeConnectorStorage,
 	connectorId: string,
 	controllerId: string,
 ) {
-	return (
-		listAccessNetworksUnleashedControllers(storage, connectorId).find(
-			(controller) => controller.controllerId === controllerId,
-		) ?? null
+	const key = { connector_id: connectorId, controller_id: controllerId }
+	const row = await storage.db.find(accessNetworksUnleashedControllers, key)
+	if (!row) return null
+	const credentials = await storage.db.find(
+		accessNetworksUnleashedCredentials,
+		key,
 	)
+	return mapControllerRow(storage, row, credentials ?? undefined)
 }
 
-export function getAdoptedAccessNetworksUnleashedController(
+export async function getAdoptedAccessNetworksUnleashedController(
 	storage: HomeConnectorStorage,
 	connectorId: string,
 ) {
 	return (
-		listAccessNetworksUnleashedControllers(storage, connectorId).find(
+		(await listAccessNetworksUnleashedControllers(storage, connectorId)).find(
 			(controller) => controller.adopted,
 		) ?? null
 	)
 }
 
-export function upsertDiscoveredAccessNetworksUnleashedControllers(
+export async function upsertDiscoveredAccessNetworksUnleashedControllers(
 	storage: HomeConnectorStorage,
 	connectorId: string,
 	controllers: Array<AccessNetworksUnleashedDiscoveredController>,
 ) {
 	const existing = new Map(
-		listAccessNetworksUnleashedControllers(storage, connectorId).map(
+		(await listAccessNetworksUnleashedControllers(storage, connectorId)).map(
 			(controller) => [controller.controllerId, controller],
 		),
 	)
-	const now = new Date().toISOString()
-	const upsertStatement = getUpsertControllerStatement(storage)
 	for (const controller of controllers) {
-		upsertStatement.run(
-			connectorId,
-			controller.controllerId,
-			controller.name,
-			controller.host,
-			controller.loginUrl,
-			controller.rawDiscovery ? JSON.stringify(controller.rawDiscovery) : null,
-			existing.get(controller.controllerId)?.adopted ? 1 : 0,
-			controller.lastSeenAt,
-			now,
+		const values = {
+			name: controller.name,
+			host: controller.host,
+			login_url: controller.loginUrl,
+			raw_discovery_json: controller.rawDiscovery
+				? JSON.stringify(controller.rawDiscovery)
+				: null,
+			last_seen_at: controller.lastSeenAt,
+		}
+		await storage.db.query(accessNetworksUnleashedControllers).upsert(
+			{
+				connector_id: connectorId,
+				controller_id: controller.controllerId,
+				adopted: existing.get(controller.controllerId)?.adopted ? 1 : 0,
+				...values,
+			},
+			{ update: values },
 		)
 	}
-	const controllerIds = JSON.stringify(
-		controllers.map((controller) => controller.controllerId),
+	const credentialed = await storage.db.findMany(
+		accessNetworksUnleashedCredentials,
+		{ where: { connector_id: connectorId } },
 	)
-	getDeleteMissingControllersStatement(storage).run(connectorId, controllerIds)
+	await storage.db.deleteMany(accessNetworksUnleashedControllers, {
+		where: and(
+			{ connector_id: connectorId, adopted: 0 },
+			notInList('controller_id', [
+				...controllers.map((controller) => controller.controllerId),
+				...credentialed.map((row) => row.controller_id),
+			]),
+		),
+	})
 	return listAccessNetworksUnleashedControllers(storage, connectorId)
 }
 
-export function adoptAccessNetworksUnleashedController(
+export async function adoptAccessNetworksUnleashedController(
 	storage: HomeConnectorStorage,
 	connectorId: string,
 	controllerId: string,
 ) {
-	getClearAdoptedControllerStatement(storage).run(connectorId)
-	getMarkControllerAdoptedStatement(storage).run(connectorId, controllerId)
+	await storage.db.updateMany(
+		accessNetworksUnleashedControllers,
+		{ adopted: 0 },
+		{ where: { connector_id: connectorId, adopted: 1 } },
+	)
+	await storage.db.updateMany(
+		accessNetworksUnleashedControllers,
+		{ adopted: 1 },
+		{ where: { connector_id: connectorId, controller_id: controllerId } },
+	)
 	return getAccessNetworksUnleashedController(
 		storage,
 		connectorId,
@@ -294,22 +202,24 @@ export function adoptAccessNetworksUnleashedController(
 	)
 }
 
-export function removeAccessNetworksUnleashedController(input: {
+export async function removeAccessNetworksUnleashedController(input: {
 	storage: HomeConnectorStorage
 	connectorId: string
 	controllerId: string
 }) {
-	getDeleteCredentialsStatement(input.storage).run(
-		input.connectorId,
-		input.controllerId,
-	)
-	getDeleteControllerStatement(input.storage).run(
-		input.connectorId,
-		input.controllerId,
-	)
+	const where = {
+		connector_id: input.connectorId,
+		controller_id: input.controllerId,
+	}
+	await input.storage.db.deleteMany(accessNetworksUnleashedCredentials, {
+		where,
+	})
+	await input.storage.db.deleteMany(accessNetworksUnleashedControllers, {
+		where,
+	})
 }
 
-export function saveAccessNetworksUnleashedCredentials(input: {
+export async function saveAccessNetworksUnleashedCredentials(input: {
 	storage: HomeConnectorStorage
 	connectorId: string
 	controllerId: string
@@ -318,29 +228,34 @@ export function saveAccessNetworksUnleashedCredentials(input: {
 	lastAuthenticatedAt?: string | null
 	lastAuthError?: string | null
 }) {
-	const now = new Date().toISOString()
-	getUpsertCredentialsStatement(input.storage).run(
-		input.connectorId,
-		input.controllerId,
-		input.username,
-		encryptPassword(input.password, input.storage.sharedSecret),
-		input.lastAuthenticatedAt ?? null,
-		input.lastAuthError ?? null,
-		now,
-	)
+	await input.storage.db.query(accessNetworksUnleashedCredentials).upsert({
+		connector_id: input.connectorId,
+		controller_id: input.controllerId,
+		username: input.username,
+		password: encryptPassword(input.password, input.storage.sharedSecret),
+		last_authenticated_at: input.lastAuthenticatedAt ?? null,
+		last_auth_error: input.lastAuthError ?? null,
+	})
 }
 
-export function updateAccessNetworksUnleashedAuthStatus(input: {
+export async function updateAccessNetworksUnleashedAuthStatus(input: {
 	storage: HomeConnectorStorage
 	connectorId: string
 	controllerId: string
 	lastAuthenticatedAt: string | null
 	lastAuthError: string | null
 }) {
-	getUpdateAuthStatusStatement(input.storage).run(
-		input.lastAuthenticatedAt,
-		input.lastAuthError,
-		input.connectorId,
-		input.controllerId,
+	await input.storage.db.updateMany(
+		accessNetworksUnleashedCredentials,
+		{
+			last_authenticated_at: input.lastAuthenticatedAt,
+			last_auth_error: input.lastAuthError,
+		},
+		{
+			where: {
+				connector_id: input.connectorId,
+				controller_id: input.controllerId,
+			},
+		},
 	)
 }

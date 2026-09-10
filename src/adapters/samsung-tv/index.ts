@@ -108,9 +108,11 @@ export function createSamsungTvAdapter(input: {
 			}),
 			deviceId: device.deviceId,
 		}
-		upsertDiscoveredSamsungTvs(input.storage, input.config.homeConnectorId, [
-			updatedDevice,
-		])
+		await upsertDiscoveredSamsungTvs(
+			input.storage,
+			input.config.homeConnectorId,
+			[updatedDevice],
+		)
 		return requireSamsungTvDevice(
 			input.storage,
 			input.config.homeConnectorId,
@@ -127,8 +129,8 @@ export function createSamsungTvAdapter(input: {
 				result.devices,
 			)
 		},
-		getStatus() {
-			const devices = listDevices()
+		async getStatus() {
+			const devices = await listDevices()
 			return {
 				discovered: devices.filter((device) => !device.adopted),
 				adopted: devices.filter((device) => device.adopted),
@@ -137,8 +139,8 @@ export function createSamsungTvAdapter(input: {
 				diagnostics: input.state.samsungTvDiscoveryDiagnostics,
 			}
 		},
-		adoptDevice(deviceId: string) {
-			const device = adoptSamsungTvDevice(
+		async adoptDevice(deviceId: string) {
+			const device = await adoptSamsungTvDevice(
 				input.storage,
 				input.config.homeConnectorId,
 				deviceId,
@@ -149,7 +151,7 @@ export function createSamsungTvAdapter(input: {
 			return device
 		},
 		async getDeviceInfo(deviceId: string) {
-			const device = requireSamsungTvDevice(
+			const device = await requireSamsungTvDevice(
 				input.storage,
 				input.config.homeConnectorId,
 				deviceId,
@@ -157,7 +159,7 @@ export function createSamsungTvAdapter(input: {
 			return await refreshDeviceInfo(device)
 		},
 		async pairDevice(deviceId: string) {
-			const device = requireSamsungTvDevice(
+			const device = await requireSamsungTvDevice(
 				input.storage,
 				input.config.homeConnectorId,
 				deviceId,
@@ -173,7 +175,7 @@ export function createSamsungTvAdapter(input: {
 						'Samsung TV pairing completed without returning a token.',
 					)
 				}
-				saveSamsungTvToken({
+				await saveSamsungTvToken({
 					storage: input.storage,
 					connectorId: input.config.homeConnectorId,
 					deviceId: device.deviceId,
@@ -187,7 +189,7 @@ export function createSamsungTvAdapter(input: {
 					deviceId,
 				)
 			} catch (error) {
-				updateSamsungTvTokenError({
+				await updateSamsungTvTokenError({
 					storage: input.storage,
 					connectorId: input.config.homeConnectorId,
 					deviceId: device.deviceId,
@@ -198,7 +200,7 @@ export function createSamsungTvAdapter(input: {
 		},
 		async pressKey(deviceId: string, key: string, times = 1) {
 			const device = requireControllableSamsungTvDevice(
-				requireSamsungTvDevice(
+				await requireSamsungTvDevice(
 					input.storage,
 					input.config.homeConnectorId,
 					deviceId,
@@ -213,7 +215,7 @@ export function createSamsungTvAdapter(input: {
 				mocksEnabled: input.config.mocksEnabled,
 			})
 			if (result.token) {
-				saveSamsungTvToken({
+				await saveSamsungTvToken({
 					storage: input.storage,
 					connectorId: input.config.homeConnectorId,
 					deviceId: device.deviceId,
@@ -232,7 +234,7 @@ export function createSamsungTvAdapter(input: {
 		},
 		async powerOff(deviceId: string) {
 			const result = await this.pressKey(deviceId, 'KEY_POWEROFF')
-			updateSamsungTvPowerState({
+			await updateSamsungTvPowerState({
 				storage: input.storage,
 				connectorId: input.config.homeConnectorId,
 				deviceId,
@@ -245,7 +247,7 @@ export function createSamsungTvAdapter(input: {
 		},
 		async powerOn(deviceId: string) {
 			const device = requireControllableSamsungTvDevice(
-				requireSamsungTvDevice(
+				await requireSamsungTvDevice(
 					input.storage,
 					input.config.homeConnectorId,
 					deviceId,
@@ -262,7 +264,7 @@ export function createSamsungTvAdapter(input: {
 				macAddress: device.macAddress,
 				mocksEnabled: input.config.mocksEnabled,
 			})
-			updateSamsungTvPowerState({
+			await updateSamsungTvPowerState({
 				storage: input.storage,
 				connectorId: input.config.homeConnectorId,
 				deviceId,
@@ -275,7 +277,7 @@ export function createSamsungTvAdapter(input: {
 			}
 		},
 		async getKnownAppsStatus(deviceId: string) {
-			const device = requireSamsungTvDevice(
+			const device = await requireSamsungTvDevice(
 				input.storage,
 				input.config.homeConnectorId,
 				deviceId,
@@ -311,7 +313,7 @@ export function createSamsungTvAdapter(input: {
 		},
 		async launchApp(deviceId: string, appId: string) {
 			const device = requireControllableSamsungTvDevice(
-				requireSamsungTvDevice(
+				await requireSamsungTvDevice(
 					input.storage,
 					input.config.homeConnectorId,
 					deviceId,
@@ -331,7 +333,7 @@ export function createSamsungTvAdapter(input: {
 		},
 		async getArtMode(deviceId: string) {
 			const device = requireControllableSamsungTvDevice(
-				requireSamsungTvDevice(
+				await requireSamsungTvDevice(
 					input.storage,
 					input.config.homeConnectorId,
 					deviceId,
@@ -344,7 +346,7 @@ export function createSamsungTvAdapter(input: {
 				mocksEnabled: input.config.mocksEnabled,
 			})
 			if (result.token) {
-				saveSamsungTvToken({
+				await saveSamsungTvToken({
 					storage: input.storage,
 					connectorId: input.config.homeConnectorId,
 					deviceId: device.deviceId,
@@ -360,7 +362,7 @@ export function createSamsungTvAdapter(input: {
 		},
 		async setArtMode(deviceId: string, mode: 'on' | 'off') {
 			const device = requireControllableSamsungTvDevice(
-				requireSamsungTvDevice(
+				await requireSamsungTvDevice(
 					input.storage,
 					input.config.homeConnectorId,
 					deviceId,
@@ -374,7 +376,7 @@ export function createSamsungTvAdapter(input: {
 				mocksEnabled: input.config.mocksEnabled,
 			})
 			if (result.token) {
-				saveSamsungTvToken({
+				await saveSamsungTvToken({
 					storage: input.storage,
 					connectorId: input.config.homeConnectorId,
 					deviceId: device.deviceId,
@@ -390,7 +392,7 @@ export function createSamsungTvAdapter(input: {
 			}
 		},
 		async getSummary() {
-			const devices = listDevices()
+			const devices = await listDevices()
 			const adopted = devices.filter((device) => device.adopted)
 			const detailed = []
 			for (const device of adopted) {
@@ -403,7 +405,7 @@ export function createSamsungTvAdapter(input: {
 							mocksEnabled: input.config.mocksEnabled,
 						})
 						if (result.token) {
-							saveSamsungTvToken({
+							await saveSamsungTvToken({
 								storage: input.storage,
 								connectorId: input.config.homeConnectorId,
 								deviceId: device.deviceId,
