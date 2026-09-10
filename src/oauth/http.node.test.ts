@@ -11,11 +11,11 @@ function createCodeChallenge(verifier: string) {
 	return createHash('sha256').update(verifier).digest('base64url')
 }
 
-function createOAuthApp() {
+async function createOAuthApp() {
 	const config = createTestHomeConnectorConfig({
 		publicBaseUrl: 'https://kody-home.doddsfamily.us',
 	})
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const oauth = createHomeMcpOAuthHandler({ config, storage })
 	return { config, storage, oauth }
 }
@@ -28,7 +28,7 @@ async function dispatch(
 }
 
 test('authorization server metadata advertises CIMD and no DCR', async () => {
-	const { storage, oauth } = createOAuthApp()
+	const { storage, oauth } = await createOAuthApp()
 	try {
 		const response = await dispatch(
 			oauth,
@@ -44,12 +44,12 @@ test('authorization server metadata advertises CIMD and no DCR', async () => {
 		)
 		expect(body.registration_endpoint).toBeUndefined()
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })
 
 test('protected resource metadata points at the MCP URL', async () => {
-	const { storage, oauth, config } = createOAuthApp()
+	const { storage, oauth, config } = await createOAuthApp()
 	try {
 		const response = await dispatch(
 			oauth,
@@ -65,12 +65,12 @@ test('protected resource metadata points at the MCP URL', async () => {
 		expect(body.resource).toBe(config.mcpUrl)
 		expect(body.authorization_servers).toContain(config.publicBaseUrl)
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })
 
 test('/mcp without a bearer token returns 401 with resource_metadata', async () => {
-	const { storage, oauth, config } = createOAuthApp()
+	const { storage, oauth, config } = await createOAuthApp()
 	try {
 		const response = await oauth.authenticateMcp(
 			new Request(config.mcpUrl, { method: 'POST' }),
@@ -84,12 +84,12 @@ test('/mcp without a bearer token returns 401 with resource_metadata', async () 
 		expect(challenge).toContain('resource_metadata')
 		expect(challenge).toContain('oauth-protected-resource')
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })
 
 test('CIMD authorize + PKCE issues a bearer token for the MCP resource', async () => {
-	const { storage, oauth, config } = createOAuthApp()
+	const { storage, oauth, config } = await createOAuthApp()
 	const verifier = 'a'.repeat(43)
 	const challenge = createCodeChallenge(verifier)
 	const originalFetch = globalThis.fetch
@@ -172,6 +172,6 @@ test('CIMD authorize + PKCE issues a bearer token for the MCP resource', async (
 		expect(auth.resource?.toString().replace(/\/$/, '')).toBe(config.mcpUrl)
 	} finally {
 		globalThis.fetch = originalFetch
-		storage.close()
+		await storage.close()
 	}
 })

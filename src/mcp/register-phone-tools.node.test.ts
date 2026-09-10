@@ -28,7 +28,7 @@ function createFakePhone(input: {
 		options?: { timeoutMs?: number }
 	}> = []
 	const phone = {
-		getStatus() {
+		async getStatus() {
 			return {
 				tokenConfigured: true,
 				connected: false,
@@ -43,7 +43,7 @@ function createFakePhone(input: {
 				...input.status,
 			}
 		},
-		getCallReadiness() {
+		async getCallReadiness() {
 			return input.readiness === undefined
 				? {
 						ok: false as const,
@@ -213,7 +213,7 @@ test('phone_diagnose_tesla and phone_diagnose_cast compose fan-out RPCs', async 
 	).toEqual({ timeoutMs: phoneMdnsScanTimeoutMs })
 })
 
-test('phone tool descriptions mention calendar, contacts, and settings blast radius', () => {
+test('phone tool descriptions mention calendar, contacts, and settings blast radius', async () => {
 	const { phone } = createFakePhone({ readiness: null })
 	const tools = registerAll(phone)
 	expect(tools.get('phone_calendars')?.description).toMatch(/calendar/i)

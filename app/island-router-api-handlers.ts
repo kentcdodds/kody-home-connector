@@ -15,7 +15,7 @@ type IslandRouterApiAdapter = ReturnType<typeof createIslandRouterApiAdapter>
 
 function renderIslandRouterApiStatusPage(input: {
 	state: HomeConnectorState
-	status: ReturnType<IslandRouterApiAdapter['getStatus']>
+	status: Awaited<ReturnType<IslandRouterApiAdapter['getStatus']>>
 }) {
 	const { status } = input
 	return render(
@@ -83,7 +83,7 @@ function renderIslandRouterApiStatusPage(input: {
 
 function renderIslandRouterApiSetupPage(input: {
 	state: HomeConnectorState
-	status: ReturnType<IslandRouterApiAdapter['getStatus']>
+	status: Awaited<ReturnType<IslandRouterApiAdapter['getStatus']>>
 	banner: Banner
 }) {
 	const { status } = input
@@ -180,7 +180,7 @@ export function createIslandRouterApiStatusHandler(
 		async handler() {
 			return renderIslandRouterApiStatusPage({
 				state,
-				status: islandRouterApi.getStatus(),
+				status: await islandRouterApi.getStatus(),
 			})
 		},
 	} satisfies Action<typeof routes.islandRouterApiStatus>
@@ -190,10 +190,10 @@ export function createIslandRouterApiSetupHandler(
 	state: HomeConnectorState,
 	islandRouterApi: IslandRouterApiAdapter,
 ) {
-	function renderPage(banner: Banner = null) {
+	async function renderPage(banner: Banner = null) {
 		return renderIslandRouterApiSetupPage({
 			state,
-			status: islandRouterApi.getStatus(),
+			status: await islandRouterApi.getStatus(),
 			banner,
 		})
 	}
@@ -207,7 +207,7 @@ export function createIslandRouterApiSetupHandler(
 					const intent = String(form.get('intent') ?? '')
 
 					if (intent === 'set-pin') {
-						islandRouterApi.setPin(String(form.get('pin') ?? ''))
+						await islandRouterApi.setPin(String(form.get('pin') ?? ''))
 						return renderPage({
 							tone: 'success',
 							message: 'Saved Island Router API PIN.',
@@ -215,7 +215,7 @@ export function createIslandRouterApiSetupHandler(
 					}
 
 					if (intent === 'clear-pin') {
-						islandRouterApi.clearPin()
+						await islandRouterApi.clearPin()
 						return renderPage({
 							tone: 'success',
 							message: 'Cleared Island Router API PIN.',

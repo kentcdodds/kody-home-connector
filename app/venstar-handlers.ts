@@ -44,7 +44,7 @@ async function readPostedFormData(request: Request, fallbackAction: string) {
 }
 
 async function handleVenstarMutation(input: {
-	handler: string
+	action: string
 	formData: FormData
 	venstar: ReturnType<typeof createVenstarAdapter>
 }) {
@@ -95,7 +95,7 @@ async function handleVenstarMutation(input: {
 			'thermostatIp',
 			'Thermostat IP',
 		)
-		const thermostat = venstar.removeThermostat(thermostatIp)
+		const thermostat = await venstar.removeThermostat(thermostatIp)
 		return {
 			message: `Removed ${thermostat.name} (${thermostat.ip}) from managed thermostats.`,
 		}
@@ -178,8 +178,8 @@ function renderConfiguredThermostatEditor(
 }
 
 function renderDiscoveredThermostatList(
-	thermostats: ReturnType<
-		ReturnType<typeof createVenstarAdapter>['getStatus']
+	thermostats: Awaited<
+		Awaited<ReturnType<ReturnType<typeof createVenstarAdapter>['getStatus']>>
 	>['discovered'],
 ) {
 	if (thermostats.length === 0) {
@@ -258,7 +258,9 @@ function renderVenstarDiscoveryDiagnostics(
 function renderVenstarStatusPage(input: {
 	state: HomeConnectorState
 	config: HomeConnectorConfig
-	status: ReturnType<ReturnType<typeof createVenstarAdapter>['getStatus']>
+	status: Awaited<
+		ReturnType<ReturnType<typeof createVenstarAdapter>['getStatus']>
+	>
 	thermostats: Awaited<
 		ReturnType<
 			ReturnType<typeof createVenstarAdapter>['listThermostatsWithStatus']
@@ -375,7 +377,7 @@ export function createVenstarStatusHandler(
 					return renderVenstarStatusPage({
 						state,
 						config,
-						status: venstar.getStatus(),
+						status: await venstar.getStatus(),
 						thermostats: await venstar.listThermostatsWithStatus(),
 						scanMessage: result.message,
 					})
@@ -395,7 +397,7 @@ export function createVenstarStatusHandler(
 					return renderVenstarStatusPage({
 						state,
 						config,
-						status: venstar.getStatus(),
+						status: await venstar.getStatus(),
 						thermostats: await venstar.listThermostatsWithStatus(),
 						scanError:
 							error instanceof Error
@@ -408,7 +410,7 @@ export function createVenstarStatusHandler(
 			return renderVenstarStatusPage({
 				state,
 				config,
-				status: venstar.getStatus(),
+				status: await venstar.getStatus(),
 				thermostats: await venstar.listThermostatsWithStatus(),
 			})
 		},
@@ -420,12 +422,12 @@ export function createVenstarSetupHandler(
 	config: HomeConnectorConfig,
 	venstar: ReturnType<typeof createVenstarAdapter>,
 ) {
-	function renderVenstarSetupPage(input: {
+	async function renderVenstarSetupPage(input: {
 		saveMessage?: string | null
 		saveError?: string | null
 	}) {
-		const thermostats = venstar.listThermostats()
-		const status = venstar.getStatus()
+		const thermostats = await venstar.listThermostats()
+		const status = await venstar.getStatus()
 		return render(
 			RootLayout({
 				title: 'home connector - venstar setup',

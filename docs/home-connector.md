@@ -608,6 +608,54 @@ directory with `HOME_CONNECTOR_DATA_PATH` or the full file path with
 This persistence is intentionally local to the connector host so that pairing
 survives process restarts without pushing device-local secrets into Kody.
 
+### Data layer
+
+Persistence goes through `remix/data-table` with the SQLite driver
+(`remix/data-table/sqlite`, backed by `node:sqlite`):
+
+- `src/storage/schema.ts` declares every table with `table()` / `column`.
+  Repository modules import these table objects and use the typed CRUD helpers
+  (`db.find`, `db.findMany`, `db.create`, `db.update`, `db.deleteMany`, ...) or
+  `db.query(table)` for filtered reads. Row types come from
+  `TableRow<typeof table>`; there are no hand-written row types or casts.
+- `src/storage/index.ts` opens the database (`createHomeConnectorDatabase`) and
+  runs pending migrations before the process serves its first request
+  (`createHomeConnectorStorage`). Docker deploys have no separate migrate step,
+  so startup migration is the production path.
+- All reads and writes are async. Adapter methods that touch storage return
+  promises, and `HomeConnectorLogger` queues its writes and exposes `flush()`.
+- Tests use `new DatabaseSync(':memory:')` through
+  `createTestHomeConnectorConfig({ dbPath: ':memory:' })`.
+
+### Migrations
+
+Migrations live in `db/migrations/<YYYYMMDDHHmmss>_<slug>/up.sql` (plus an
+optional `down.sql`). They are SQL-first and journaled in the
+`data_table_migrations` table. To change the schema, add a new directory with
+the next timestamp; never edit an applied migration.
+
+`20260910000000_baseline_schema` recreates the schema that earlier releases
+built at startup with `CREATE TABLE IF NOT EXISTS`. Every statement is
+idempotent, so the first boot of this release adopts an existing database
+(tables already present, only the journal row is added) and creates a fresh
+database identically. The baseline has no `down.sql` because rolling it back
+would drop live data.
+
+`remix.json` configures the `remix db` CLI for humans and CI. The CLI reads the
+database file from `HOME_CONNECTOR_DB_PATH` and does not apply the app's
+`HOME_CONNECTOR_DATA_PATH` / `~/.kody/home-connector` default, so point it at
+the file explicitly:
+
+```sh
+HOME_CONNECTOR_DB_PATH=~/.kody/home-connector/home-connector.sqlite npx remix db status
+HOME_CONNECTOR_DB_PATH=... npx remix db migrate
+HOME_CONNECTOR_DB_PATH=... npx remix db rollback --dry-run
+HOME_CONNECTOR_DB_PATH=... npx remix db reset --force   # destructive: wipes the file
+```
+
+SQLite migrations have no cross-process lock, so run the CLI while the connector
+is stopped.
+
 ## Discovery and mocks
 
 Samsung discovery defaults to `mdns://_samsungmsf._tcp.local`.

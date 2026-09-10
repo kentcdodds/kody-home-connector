@@ -333,7 +333,7 @@ test('island router adapter returns status with parsed interface speed and duple
 	)
 })
 
-test('island router command catalog covers documented command metadata', () => {
+test('island router command catalog covers documented command metadata', async () => {
 	const catalogIds = islandRouterCommandCatalog.map((entry) => entry.id)
 	expect(catalogIds).toEqual(
 		new Set(catalogIds).size === catalogIds.length ? catalogIds : [],
@@ -755,7 +755,7 @@ test('island router write command rendering uses catalog contexts without automa
 	)
 })
 
-test('parsers handle documented Island command output shapes used by status and packages', () => {
+test('parsers handle documented Island command output shapes used by status and packages', async () => {
 	const summaries = parseIslandRouterInterfaceSummaries(
 		['en0 up 1G full', 'en1 down 2.5G full'].join('\n'),
 		['show interface summary'],
@@ -853,7 +853,7 @@ test('parsers handle documented Island command output shapes used by status and 
 	])
 })
 
-test('parser handles real Island CLI transcript shape with prompt echoes and goodbye', () => {
+test('parser handles real Island CLI transcript shape with prompt echoes and goodbye', async () => {
 	const commandLines = ['terminal length 0', 'show version']
 	const stdout = [
 		'Island Pro (IL-0002-01) serial number 08008A020104 Version 3.2.3',

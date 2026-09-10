@@ -499,19 +499,19 @@ export function createJellyfishAdapter(input: {
 
 	async function scanAndPersist() {
 		const result = await scanJellyfishControllers(state, config)
-		upsertDiscoveredJellyfishControllers({
+		await upsertDiscoveredJellyfishControllers({
 			storage,
 			connectorId,
 			controllers: result.controllers,
 		})
 		return {
-			controllers: getKnownControllers(storage, connectorId),
+			controllers: await getKnownControllers(storage, connectorId),
 			diagnostics: result.diagnostics,
 		}
 	}
 
 	async function resolveController() {
-		const known = getKnownControllers(storage, connectorId)
+		const known = await getKnownControllers(storage, connectorId)
 		if (known.length === 1) return known[0]!
 
 		const rescanned = await scanAndPersist()
@@ -554,19 +554,19 @@ export function createJellyfishAdapter(input: {
 			})
 			const now = new Date().toISOString()
 			const controller =
-				recordControllerConnection({
+				(await recordControllerConnection({
 					controllerId: input.controller.controllerId,
 					host: input.controller.host,
 					port: input.controller.port,
 					lastConnectedAt: now,
 					lastError: null,
-				}) ?? input.controller
+				})) ?? input.controller
 			return {
 				controller,
 				response,
 			}
 		} catch (error) {
-			recordControllerConnection({
+			await recordControllerConnection({
 				controllerId: input.controller.controllerId,
 				host: input.controller.host,
 				port: input.controller.port,
@@ -594,11 +594,11 @@ export function createJellyfishAdapter(input: {
 				throw error
 			}
 			const retryController =
-				getJellyfishController(
+				(await getJellyfishController(
 					storage,
 					connectorId,
 					rescanned.controllers[0]!.controllerId,
-				) ?? rescanned.controllers[0]!
+				)) ?? rescanned.controllers[0]!
 			if (
 				retryController.controllerId === input.controller.controllerId &&
 				retryController.host === input.controller.host &&
@@ -752,9 +752,9 @@ export function createJellyfishAdapter(input: {
 		listControllers() {
 			return getKnownControllers(storage, connectorId)
 		},
-		getStatus() {
+		async getStatus() {
 			return {
-				controllers: getKnownControllers(storage, connectorId),
+				controllers: await getKnownControllers(storage, connectorId),
 				discovered: state.jellyfishDiscoveredControllers,
 				diagnostics: state.jellyfishDiscoveryDiagnostics,
 			}

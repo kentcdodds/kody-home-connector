@@ -80,7 +80,7 @@ function mockJsonResponse(body: Record<string, unknown>) {
 test('bond falls back to the discovered IP when the stored .local host stops resolving', async () => {
 	const config = createConfig()
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const bond = createBondAdapter({
 		config,
 		state,
@@ -100,7 +100,7 @@ test('bond falls back to the discovered IP when the stored .local host stops res
 	globalThis.fetch = fetchMock as typeof fetch
 
 	try {
-		upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
+		await upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
 			{
 				bridgeId: 'BONDTEST1',
 				bondid: 'BONDTEST1',
@@ -123,16 +123,16 @@ test('bond falls back to the discovered IP when the stored .local host stops res
 				},
 			},
 		])
-		adoptBondBridge(storage, config.homeConnectorId, 'BONDTEST1')
-		bond.setToken('BONDTEST1', 'bond-token')
+		await adoptBondBridge(storage, config.homeConnectorId, 'BONDTEST1')
+		await bond.setToken('BONDTEST1', 'bond-token')
 
-		const before = bond
-			.getStatus()
-			.bridges.find((bridge) => bridge.bridgeId === 'BONDTEST1')
+		const before = (await bond.getStatus()).bridges.find(
+			(bridge) => bridge.bridgeId === 'BONDTEST1',
+		)
 		const result = await bond.getDeviceState('BONDTEST1', 'mockdev1')
-		const after = bond
-			.getStatus()
-			.bridges.find((bridge) => bridge.bridgeId === 'BONDTEST1')
+		const after = (await bond.getStatus()).bridges.find(
+			(bridge) => bridge.bridgeId === 'BONDTEST1',
+		)
 
 		expect(result).toMatchObject({
 			position: 55,
@@ -148,14 +148,14 @@ test('bond falls back to the discovered IP when the stored .local host stops res
 		)
 	} finally {
 		globalThis.fetch = previousFetch
-		storage.close()
+		await storage.close()
 	}
 })
 
 test('bond retries transient TCP resets with exponential backoff when reading device state', async () => {
 	const config = createConfig()
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const bond = createBondAdapter({
 		config,
 		state,
@@ -171,7 +171,7 @@ test('bond retries transient TCP resets with exponential backoff when reading de
 	globalThis.fetch = fetchMock as typeof fetch
 
 	try {
-		upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
+		await upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
 			{
 				bridgeId: 'BONDTEST4',
 				bondid: 'BONDTEST4',
@@ -185,8 +185,8 @@ test('bond retries transient TCP resets with exponential backoff when reading de
 				rawDiscovery: {},
 			},
 		])
-		adoptBondBridge(storage, config.homeConnectorId, 'BONDTEST4')
-		bond.setToken('BONDTEST4', 'bond-token')
+		await adoptBondBridge(storage, config.homeConnectorId, 'BONDTEST4')
+		await bond.setToken('BONDTEST4', 'bond-token')
 
 		const resultPromise = bond.getDeviceState('BONDTEST4', 'mockdev1')
 		await vi.advanceTimersByTimeAsync(99)
@@ -214,14 +214,14 @@ test('bond retries transient TCP resets with exponential backoff when reading de
 	} finally {
 		vi.useRealTimers()
 		globalThis.fetch = previousFetch
-		storage.close()
+		await storage.close()
 	}
 })
 
 test('bond surfaces actionable guidance when a .local bridge host cannot be resolved and no IP fallback exists', async () => {
 	const config = createConfig()
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const bond = createBondAdapter({
 		config,
 		state,
@@ -233,7 +233,7 @@ test('bond surfaces actionable guidance when a .local bridge host cannot be reso
 	}) as typeof fetch
 
 	try {
-		upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
+		await upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
 			{
 				bridgeId: 'BONDTEST2',
 				bondid: 'BONDTEST2',
@@ -252,8 +252,8 @@ test('bond surfaces actionable guidance when a .local bridge host cannot be reso
 				},
 			},
 		])
-		adoptBondBridge(storage, config.homeConnectorId, 'BONDTEST2')
-		bond.setToken('BONDTEST2', 'bond-token')
+		await adoptBondBridge(storage, config.homeConnectorId, 'BONDTEST2')
+		await bond.setToken('BONDTEST2', 'bond-token')
 
 		const error = await bond
 			.getDeviceState('BONDTEST2', 'mockdev1')
@@ -268,14 +268,14 @@ test('bond surfaces actionable guidance when a .local bridge host cannot be reso
 		)
 	} finally {
 		globalThis.fetch = previousFetch
-		storage.close()
+		await storage.close()
 	}
 })
 
 test('bond annotates bridge outages with stable low-cardinality Sentry metadata', async () => {
 	const config = createConfig()
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const bond = createBondAdapter({
 		config,
 		state,
@@ -289,7 +289,7 @@ test('bond annotates bridge outages with stable low-cardinality Sentry metadata'
 	}) as typeof fetch
 
 	try {
-		upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
+		await upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
 			{
 				bridgeId: 'ZPGI01117',
 				bondid: 'ZPGI01117',
@@ -303,8 +303,8 @@ test('bond annotates bridge outages with stable low-cardinality Sentry metadata'
 				rawDiscovery: {},
 			},
 		])
-		adoptBondBridge(storage, config.homeConnectorId, 'ZPGI01117')
-		bond.setToken('ZPGI01117', 'bond-token')
+		await adoptBondBridge(storage, config.homeConnectorId, 'ZPGI01117')
+		await bond.setToken('ZPGI01117', 'bond-token')
 
 		const error = (await bond
 			.getDeviceState('ZPGI01117', 'mockdev1')
@@ -355,14 +355,14 @@ test('bond annotates bridge outages with stable low-cardinality Sentry metadata'
 	} finally {
 		vi.useRealTimers()
 		globalThis.fetch = previousFetch
-		storage.close()
+		await storage.close()
 	}
 })
 
 test('bond leaves non-network Bond API errors unwrapped and does not claim fallback URLs were tried', async () => {
 	const config = createConfig()
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const bond = createBondAdapter({
 		config,
 		state,
@@ -387,7 +387,7 @@ test('bond leaves non-network Bond API errors unwrapped and does not claim fallb
 	globalThis.fetch = fetchMock as typeof fetch
 
 	try {
-		upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
+		await upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
 			{
 				bridgeId: 'BONDTEST3',
 				bondid: 'BONDTEST3',
@@ -403,8 +403,8 @@ test('bond leaves non-network Bond API errors unwrapped and does not claim fallb
 				},
 			},
 		])
-		adoptBondBridge(storage, config.homeConnectorId, 'BONDTEST3')
-		bond.setToken('BONDTEST3', 'bond-token')
+		await adoptBondBridge(storage, config.homeConnectorId, 'BONDTEST3')
+		await bond.setToken('BONDTEST3', 'bond-token')
 
 		await expect(bond.getDeviceState('BONDTEST3', 'mockdev1')).rejects.toThrow(
 			'Bond HTTP 401 for /v2/devices/mockdev1/state: unauthorized',
@@ -415,14 +415,14 @@ test('bond leaves non-network Bond API errors unwrapped and does not claim fallb
 		)
 	} finally {
 		globalThis.fetch = previousFetch
-		storage.close()
+		await storage.close()
 	}
 })
 
 test('bond recovers SetPosition when the action response resets but state reaches the requested position', async () => {
 	const config = createConfig()
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const bond = createBondAdapter({
 		config,
 		state,
@@ -453,7 +453,7 @@ test('bond recovers SetPosition when the action response resets but state reache
 	globalThis.fetch = fetchMock as typeof fetch
 
 	try {
-		upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
+		await upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
 			{
 				bridgeId: 'BONDTEST5',
 				bondid: 'BONDTEST5',
@@ -467,8 +467,8 @@ test('bond recovers SetPosition when the action response resets but state reache
 				rawDiscovery: {},
 			},
 		])
-		adoptBondBridge(storage, config.homeConnectorId, 'BONDTEST5')
-		bond.setToken('BONDTEST5', 'bond-token')
+		await adoptBondBridge(storage, config.homeConnectorId, 'BONDTEST5')
+		await bond.setToken('BONDTEST5', 'bond-token')
 
 		const result = await bond.shadeSetPosition({
 			bridgeId: 'BONDTEST5',
@@ -489,14 +489,14 @@ test('bond recovers SetPosition when the action response resets but state reache
 		])
 	} finally {
 		globalThis.fetch = previousFetch
-		storage.close()
+		await storage.close()
 	}
 })
 
 test('bond still reports SetPosition reset when follow-up state does not match', async () => {
 	const config = createConfig()
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const bond = createBondAdapter({
 		config,
 		state,
@@ -527,7 +527,7 @@ test('bond still reports SetPosition reset when follow-up state does not match',
 	globalThis.fetch = fetchMock as typeof fetch
 
 	try {
-		upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
+		await upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
 			{
 				bridgeId: 'BONDTEST6',
 				bondid: 'BONDTEST6',
@@ -541,8 +541,8 @@ test('bond still reports SetPosition reset when follow-up state does not match',
 				rawDiscovery: {},
 			},
 		])
-		adoptBondBridge(storage, config.homeConnectorId, 'BONDTEST6')
-		bond.setToken('BONDTEST6', 'bond-token')
+		await adoptBondBridge(storage, config.homeConnectorId, 'BONDTEST6')
+		await bond.setToken('BONDTEST6', 'bond-token')
 
 		await expect(
 			bond.shadeSetPosition({
@@ -556,14 +556,14 @@ test('bond still reports SetPosition reset when follow-up state does not match',
 		expect(fetchMock).toHaveBeenCalledTimes(3)
 	} finally {
 		globalThis.fetch = previousFetch
-		storage.close()
+		await storage.close()
 	}
 })
 
 test('bond preserves SetPosition reset when follow-up state read fails', async () => {
 	const config = createConfig()
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const bond = createBondAdapter({
 		config,
 		state,
@@ -594,7 +594,7 @@ test('bond preserves SetPosition reset when follow-up state read fails', async (
 	globalThis.fetch = fetchMock as typeof fetch
 
 	try {
-		upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
+		await upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
 			{
 				bridgeId: 'BONDTEST8',
 				bondid: 'BONDTEST8',
@@ -608,8 +608,8 @@ test('bond preserves SetPosition reset when follow-up state read fails', async (
 				rawDiscovery: {},
 			},
 		])
-		adoptBondBridge(storage, config.homeConnectorId, 'BONDTEST8')
-		bond.setToken('BONDTEST8', 'bond-token')
+		await adoptBondBridge(storage, config.homeConnectorId, 'BONDTEST8')
+		await bond.setToken('BONDTEST8', 'bond-token')
 
 		await expect(
 			bond.shadeSetPosition({
@@ -623,14 +623,14 @@ test('bond preserves SetPosition reset when follow-up state read fails', async (
 		expect(fetchMock).toHaveBeenCalledTimes(3)
 	} finally {
 		globalThis.fetch = previousFetch
-		storage.close()
+		await storage.close()
 	}
 })
 
 test('bond wraps request timeouts as actionable network failures', async () => {
 	const config = createConfig()
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const bond = createBondAdapter({
 		config,
 		state,
@@ -689,7 +689,7 @@ test('bond wraps request timeouts as actionable network failures', async () => {
 	try {
 		for (const testCase of cases) {
 			globalThis.fetch = vi.fn(testCase.fetchImpl) as typeof fetch
-			upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
+			await upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
 				{
 					bridgeId: testCase.bridgeId,
 					bondid: testCase.bridgeId,
@@ -703,8 +703,8 @@ test('bond wraps request timeouts as actionable network failures', async () => {
 					rawDiscovery: {},
 				},
 			])
-			adoptBondBridge(storage, config.homeConnectorId, testCase.bridgeId)
-			bond.setToken(testCase.bridgeId, 'bond-token')
+			await adoptBondBridge(storage, config.homeConnectorId, testCase.bridgeId)
+			await bond.setToken(testCase.bridgeId, 'bond-token')
 
 			const error = await bond
 				.getDeviceState(testCase.bridgeId, 'mockdev1')
@@ -716,14 +716,14 @@ test('bond wraps request timeouts as actionable network failures', async () => {
 		}
 	} finally {
 		globalThis.fetch = previousFetch
-		storage.close()
+		await storage.close()
 	}
 })
 
 test('bond does not refresh bridge lastSeenAt after failed requests', async () => {
 	const config = createConfig()
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const bond = createBondAdapter({
 		config,
 		state,
@@ -735,7 +735,7 @@ test('bond does not refresh bridge lastSeenAt after failed requests', async () =
 	}) as typeof fetch
 
 	try {
-		upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
+		await upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
 			{
 				bridgeId: 'BONDTEST8',
 				bondid: 'BONDTEST8',
@@ -749,18 +749,18 @@ test('bond does not refresh bridge lastSeenAt after failed requests', async () =
 				rawDiscovery: {},
 			},
 		])
-		adoptBondBridge(storage, config.homeConnectorId, 'BONDTEST8')
-		bond.setToken('BONDTEST8', 'bond-token')
+		await adoptBondBridge(storage, config.homeConnectorId, 'BONDTEST8')
+		await bond.setToken('BONDTEST8', 'bond-token')
 
 		await bond.getDeviceState('BONDTEST8', 'mockdev1').catch(() => null)
 
 		expect(
-			requireBondBridge(storage, config.homeConnectorId, 'BONDTEST8')
+			(await requireBondBridge(storage, config.homeConnectorId, 'BONDTEST8'))
 				.lastSeenAt,
 		).toBe('2026-04-27T21:35:00.000Z')
 	} finally {
 		globalThis.fetch = previousFetch
-		storage.close()
+		await storage.close()
 	}
 })
 
@@ -770,7 +770,7 @@ test('bond serializes bridge requests and applies configured pacing', async () =
 		bondRequestPaceMs: 250,
 	}
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const bond = createBondAdapter({
 		config,
 		state,
@@ -787,7 +787,7 @@ test('bond serializes bridge requests and applies configured pacing', async () =
 	}) as typeof fetch
 
 	try {
-		upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
+		await upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
 			{
 				bridgeId: 'BONDTEST11',
 				bondid: 'BONDTEST11',
@@ -801,8 +801,8 @@ test('bond serializes bridge requests and applies configured pacing', async () =
 				rawDiscovery: {},
 			},
 		])
-		adoptBondBridge(storage, config.homeConnectorId, 'BONDTEST11')
-		bond.setToken('BONDTEST11', 'bond-token')
+		await adoptBondBridge(storage, config.homeConnectorId, 'BONDTEST11')
+		await bond.setToken('BONDTEST11', 'bond-token')
 
 		const firstPromise = bond.getDeviceState('BONDTEST11', 'mockdev1')
 		const secondPromise = bond.getDeviceState('BONDTEST11', 'mockdev2')
@@ -817,18 +817,18 @@ test('bond serializes bridge requests and applies configured pacing', async () =
 		await secondPromise
 
 		expect(fetchStarts).toEqual([0, 260])
-		expect(bond.getReliabilityStatus({ bridgeId: 'BONDTEST11' })).toMatchObject(
-			{
-				recentRequestLogs: [
-					{ operation: 'fetch device mockdev2 state', status: 'success' },
-					{ operation: 'fetch device mockdev1 state', status: 'success' },
-				],
-			},
-		)
+		expect(
+			await bond.getReliabilityStatus({ bridgeId: 'BONDTEST11' }),
+		).toMatchObject({
+			recentRequestLogs: [
+				{ operation: 'fetch device mockdev2 state', status: 'success' },
+				{ operation: 'fetch device mockdev1 state', status: 'success' },
+			],
+		})
 	} finally {
 		vi.useRealTimers()
 		globalThis.fetch = previousFetch
-		storage.close()
+		await storage.close()
 	}
 })
 
@@ -838,7 +838,7 @@ test('bond cooldown prevents follow-up requests after network failures', async (
 		bondCircuitBreakerCooldownMs: 60_000,
 	}
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const bond = createBondAdapter({
 		config,
 		state,
@@ -851,7 +851,7 @@ test('bond cooldown prevents follow-up requests after network failures', async (
 	}) as typeof fetch
 
 	try {
-		upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
+		await upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
 			{
 				bridgeId: 'BONDTEST13',
 				bondid: 'BONDTEST13',
@@ -865,8 +865,8 @@ test('bond cooldown prevents follow-up requests after network failures', async (
 				rawDiscovery: {},
 			},
 		])
-		adoptBondBridge(storage, config.homeConnectorId, 'BONDTEST13')
-		bond.setToken('BONDTEST13', 'bond-token')
+		await adoptBondBridge(storage, config.homeConnectorId, 'BONDTEST13')
+		await bond.setToken('BONDTEST13', 'bond-token')
 
 		await bond.getDeviceState('BONDTEST13', 'mockdev1').catch(() => null)
 		const error = await bond
@@ -906,7 +906,7 @@ test('bond cooldown prevents follow-up requests after network failures', async (
 			shouldCapture: false,
 		})
 		expect(globalThis.fetch).toHaveBeenCalledTimes(1)
-		const status = bond.getReliabilityStatus({ bridgeId: 'BONDTEST13' })
+		const status = await bond.getReliabilityStatus({ bridgeId: 'BONDTEST13' })
 		expect(status.persisted?.lastFailureReason).toContain('fetch failed')
 		expect(
 			status.recentRequestLogs.map((log) => ({
@@ -920,7 +920,7 @@ test('bond cooldown prevents follow-up requests after network failures', async (
 	} finally {
 		vi.useRealTimers()
 		globalThis.fetch = previousFetch
-		storage.close()
+		await storage.close()
 	}
 })
 
@@ -930,7 +930,7 @@ test('bond serializes paced bridge requests and writes request logs', async () =
 		bondRequestPaceMs: 100,
 	}
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const bond = createBondAdapter({
 		config,
 		state,
@@ -953,7 +953,7 @@ test('bond serializes paced bridge requests and writes request logs', async () =
 	globalThis.fetch = fetchMock as typeof fetch
 
 	try {
-		upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
+		await upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
 			{
 				bridgeId: 'BONDTEST11',
 				bondid: 'BONDTEST11',
@@ -967,8 +967,8 @@ test('bond serializes paced bridge requests and writes request logs', async () =
 				rawDiscovery: {},
 			},
 		])
-		adoptBondBridge(storage, config.homeConnectorId, 'BONDTEST11')
-		bond.setToken('BONDTEST11', 'bond-token')
+		await adoptBondBridge(storage, config.homeConnectorId, 'BONDTEST11')
+		await bond.setToken('BONDTEST11', 'bond-token')
 
 		const first = bond.getDeviceState('BONDTEST11', 'dev1')
 		const second = bond.getDeviceState('BONDTEST11', 'dev2')
@@ -981,7 +981,7 @@ test('bond serializes paced bridge requests and writes request logs', async () =
 		await expect(first).resolves.toMatchObject({ position: 10 })
 		await expect(second).resolves.toMatchObject({ position: 20 })
 		expect(fetchStarts[1]! - fetchStarts[0]!).toBeGreaterThanOrEqual(100)
-		const status = bond.getReliabilityStatus({
+		const status = await bond.getReliabilityStatus({
 			bridgeId: 'BONDTEST11',
 			limit: 10,
 		})
@@ -993,14 +993,14 @@ test('bond serializes paced bridge requests and writes request logs', async () =
 	} finally {
 		vi.useRealTimers()
 		globalThis.fetch = previousFetch
-		storage.close()
+		await storage.close()
 	}
 })
 
 test('bond coalesces duplicate device state reads while one is in flight', async () => {
 	const config = createConfig()
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const bond = createBondAdapter({
 		config,
 		state,
@@ -1020,7 +1020,7 @@ test('bond coalesces duplicate device state reads while one is in flight', async
 	globalThis.fetch = fetchMock as typeof fetch
 
 	try {
-		upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
+		await upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
 			{
 				bridgeId: 'BONDTEST12',
 				bondid: 'BONDTEST12',
@@ -1034,8 +1034,8 @@ test('bond coalesces duplicate device state reads while one is in flight', async
 				rawDiscovery: {},
 			},
 		])
-		adoptBondBridge(storage, config.homeConnectorId, 'BONDTEST12')
-		bond.setToken('BONDTEST12', 'bond-token')
+		await adoptBondBridge(storage, config.homeConnectorId, 'BONDTEST12')
+		await bond.setToken('BONDTEST12', 'bond-token')
 
 		const first = bond.getDeviceState('BONDTEST12', 'mockdev1')
 		const second = bond.getDeviceState('BONDTEST12', 'mockdev1')
@@ -1046,13 +1046,15 @@ test('bond coalesces duplicate device state reads while one is in flight', async
 		await expect(second).resolves.toMatchObject({ position: 77 })
 		expect(fetchMock).toHaveBeenCalledTimes(1)
 		expect(
-			bond.getReliabilityStatus({
-				bridgeId: 'BONDTEST12',
-			}).recentRequestLogs,
+			(
+				await bond.getReliabilityStatus({
+					bridgeId: 'BONDTEST12',
+				})
+			).recentRequestLogs,
 		).toHaveLength(1)
 	} finally {
 		globalThis.fetch = previousFetch
-		storage.close()
+		await storage.close()
 	}
 })
 
@@ -1062,7 +1064,7 @@ test('bond coalesces duplicate queued device state reads until the shared reques
 		bondRequestPaceMs: 2_000,
 	}
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const bond = createBondAdapter({
 		config,
 		state,
@@ -1083,7 +1085,7 @@ test('bond coalesces duplicate queued device state reads until the shared reques
 	globalThis.fetch = fetchMock as typeof fetch
 
 	try {
-		upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
+		await upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
 			{
 				bridgeId: 'BONDTEST14',
 				bondid: 'BONDTEST14',
@@ -1097,8 +1099,8 @@ test('bond coalesces duplicate queued device state reads until the shared reques
 				rawDiscovery: {},
 			},
 		])
-		adoptBondBridge(storage, config.homeConnectorId, 'BONDTEST14')
-		bond.setToken('BONDTEST14', 'bond-token')
+		await adoptBondBridge(storage, config.homeConnectorId, 'BONDTEST14')
+		await bond.setToken('BONDTEST14', 'bond-token')
 
 		const blocker = bond.getDeviceState('BONDTEST14', 'blocker')
 		await vi.advanceTimersByTimeAsync(0)
@@ -1119,7 +1121,7 @@ test('bond coalesces duplicate queued device state reads until the shared reques
 	} finally {
 		vi.useRealTimers()
 		globalThis.fetch = previousFetch
-		storage.close()
+		await storage.close()
 	}
 })
 
@@ -1129,7 +1131,7 @@ test('bond enters cooldown after network failure and rejects queued requests', a
 		bondCircuitBreakerCooldownMs: 60_000,
 	}
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const bond = createBondAdapter({
 		config,
 		state,
@@ -1143,7 +1145,7 @@ test('bond enters cooldown after network failure and rejects queued requests', a
 	globalThis.fetch = fetchMock as typeof fetch
 
 	try {
-		upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
+		await upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
 			{
 				bridgeId: 'BONDTEST13',
 				bondid: 'BONDTEST13',
@@ -1157,8 +1159,8 @@ test('bond enters cooldown after network failure and rejects queued requests', a
 				rawDiscovery: {},
 			},
 		])
-		adoptBondBridge(storage, config.homeConnectorId, 'BONDTEST13')
-		bond.setToken('BONDTEST13', 'bond-token')
+		await adoptBondBridge(storage, config.homeConnectorId, 'BONDTEST13')
+		await bond.setToken('BONDTEST13', 'bond-token')
 
 		await expect(bond.getDeviceState('BONDTEST13', 'dev1')).rejects.toThrow(
 			'Bond bridge "BONDTEST13" could not be reached',
@@ -1167,7 +1169,7 @@ test('bond enters cooldown after network failure and rejects queued requests', a
 			'cooling down after a recent network failure',
 		)
 		expect(fetchMock).toHaveBeenCalledTimes(1)
-		const status = bond.getReliabilityStatus({
+		const status = await bond.getReliabilityStatus({
 			bridgeId: 'BONDTEST13',
 			limit: 10,
 		})
@@ -1185,7 +1187,7 @@ test('bond enters cooldown after network failure and rejects queued requests', a
 	} finally {
 		vi.useRealTimers()
 		globalThis.fetch = previousFetch
-		storage.close()
+		await storage.close()
 	}
 })
 
@@ -1195,7 +1197,7 @@ test('bond enters cooldown after wrapped AbortError failures', async () => {
 		bondCircuitBreakerCooldownMs: 60_000,
 	}
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const bond = createBondAdapter({
 		config,
 		state,
@@ -1209,7 +1211,7 @@ test('bond enters cooldown after wrapped AbortError failures', async () => {
 	globalThis.fetch = fetchMock as typeof fetch
 
 	try {
-		upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
+		await upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
 			{
 				bridgeId: 'BONDTEST15',
 				bondid: 'BONDTEST15',
@@ -1223,8 +1225,8 @@ test('bond enters cooldown after wrapped AbortError failures', async () => {
 				rawDiscovery: {},
 			},
 		])
-		adoptBondBridge(storage, config.homeConnectorId, 'BONDTEST15')
-		bond.setToken('BONDTEST15', 'bond-token')
+		await adoptBondBridge(storage, config.homeConnectorId, 'BONDTEST15')
+		await bond.setToken('BONDTEST15', 'bond-token')
 
 		await expect(bond.getDeviceState('BONDTEST15', 'dev1')).rejects.toThrow(
 			'Bond bridge "BONDTEST15" could not be reached',
@@ -1235,14 +1237,14 @@ test('bond enters cooldown after wrapped AbortError failures', async () => {
 
 		expect(fetchMock).toHaveBeenCalledTimes(1)
 		expect(
-			bond
-				.getReliabilityStatus({ bridgeId: 'BONDTEST15' })
-				.recentRequestLogs.map((log) => log.status),
+			(
+				await bond.getReliabilityStatus({ bridgeId: 'BONDTEST15' })
+			).recentRequestLogs.map((log) => log.status),
 		).toEqual(['cooldown', 'failure'])
 	} finally {
 		vi.useRealTimers()
 		globalThis.fetch = previousFetch
-		storage.close()
+		await storage.close()
 	}
 })
 
@@ -1252,7 +1254,7 @@ test('bond extends bridge cooldown after consecutive network failures', async ()
 		bondCircuitBreakerCooldownMs: 60_000,
 	}
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const bond = createBondAdapter({
 		config,
 		state,
@@ -1267,7 +1269,7 @@ test('bond extends bridge cooldown after consecutive network failures', async ()
 	globalThis.fetch = fetchMock as typeof fetch
 
 	try {
-		upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
+		await upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
 			{
 				bridgeId: 'BONDTEST16',
 				bondid: 'BONDTEST16',
@@ -1281,11 +1283,11 @@ test('bond extends bridge cooldown after consecutive network failures', async ()
 				rawDiscovery: {},
 			},
 		])
-		adoptBondBridge(storage, config.homeConnectorId, 'BONDTEST16')
-		bond.setToken('BONDTEST16', 'bond-token')
+		await adoptBondBridge(storage, config.homeConnectorId, 'BONDTEST16')
+		await bond.setToken('BONDTEST16', 'bond-token')
 
 		await bond.getDeviceState('BONDTEST16', 'dev1').catch(() => null)
-		expect(bond.getBridgeHealth('BONDTEST16')).toMatchObject({
+		expect(await bond.getBridgeHealth('BONDTEST16')).toMatchObject({
 			state: 'cooling_down',
 			shouldFanOut: false,
 			retryAfterMs: 60_000,
@@ -1293,7 +1295,7 @@ test('bond extends bridge cooldown after consecutive network failures', async ()
 
 		await vi.advanceTimersByTimeAsync(60_001)
 		await bond.getDeviceState('BONDTEST16', 'dev2').catch(() => null)
-		const health = bond.getBridgeHealth('BONDTEST16')
+		const health = await bond.getBridgeHealth('BONDTEST16')
 
 		expect(fetchMock).toHaveBeenCalledTimes(2)
 		expect(health).toMatchObject({
@@ -1305,13 +1307,13 @@ test('bond extends bridge cooldown after consecutive network failures', async ()
 		})
 		expect(health.guidance).toContain('Do not fan out across devices')
 		expect(
-			bond.getReliabilityStatus({ bridgeId: 'BONDTEST16' }).config
+			(await bond.getReliabilityStatus({ bridgeId: 'BONDTEST16' })).config
 				.maxCircuitBreakerCooldownMs,
 		).toBe(900_000)
 	} finally {
 		vi.useRealTimers()
 		globalThis.fetch = previousFetch
-		storage.close()
+		await storage.close()
 	}
 })
 
@@ -1321,7 +1323,7 @@ test('bond non-network failures reset bridge cooldown backoff streak', async () 
 		bondCircuitBreakerCooldownMs: 60_000,
 	}
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const bond = createBondAdapter({
 		config,
 		state,
@@ -1349,7 +1351,7 @@ test('bond non-network failures reset bridge cooldown backoff streak', async () 
 	globalThis.fetch = fetchMock as typeof fetch
 
 	try {
-		upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
+		await upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
 			{
 				bridgeId: 'BONDTEST17',
 				bondid: 'BONDTEST17',
@@ -1363,8 +1365,8 @@ test('bond non-network failures reset bridge cooldown backoff streak', async () 
 				rawDiscovery: {},
 			},
 		])
-		adoptBondBridge(storage, config.homeConnectorId, 'BONDTEST17')
-		bond.setToken('BONDTEST17', 'bond-token')
+		await adoptBondBridge(storage, config.homeConnectorId, 'BONDTEST17')
+		await bond.setToken('BONDTEST17', 'bond-token')
 
 		await bond.getDeviceState('BONDTEST17', 'dev1').catch(() => null)
 		await vi.advanceTimersByTimeAsync(60_001)
@@ -1374,17 +1376,17 @@ test('bond non-network failures reset bridge cooldown backoff streak', async () 
 		await bond.getDeviceState('BONDTEST17', 'dev3').catch(() => null)
 
 		expect(fetchMock).toHaveBeenCalledTimes(3)
-		expect(bond.getBridgeHealth('BONDTEST17')).toMatchObject({
+		expect(await bond.getBridgeHealth('BONDTEST17')).toMatchObject({
 			state: 'cooling_down',
 			retryAfterMs: 60_000,
 		})
 		expect(
-			bond
-				.getReliabilityStatus({ bridgeId: 'BONDTEST17' })
-				.recentRequestLogs.map((log) => ({
-					status: log.status,
-					networkFailure: log.networkFailure,
-				})),
+			(
+				await bond.getReliabilityStatus({ bridgeId: 'BONDTEST17' })
+			).recentRequestLogs.map((log) => ({
+				status: log.status,
+				networkFailure: log.networkFailure,
+			})),
 		).toEqual([
 			{ status: 'failure', networkFailure: true },
 			{ status: 'failure', networkFailure: false },
@@ -1393,7 +1395,7 @@ test('bond non-network failures reset bridge cooldown backoff streak', async () 
 	} finally {
 		vi.useRealTimers()
 		globalThis.fetch = previousFetch
-		storage.close()
+		await storage.close()
 	}
 })
 
@@ -1403,7 +1405,7 @@ test('bond cooldown logs preserve outage backoff when original failure log is pr
 		bondCircuitBreakerCooldownMs: 60_000,
 	}
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const bond = createBondAdapter({
 		config,
 		state,
@@ -1418,7 +1420,7 @@ test('bond cooldown logs preserve outage backoff when original failure log is pr
 	globalThis.fetch = fetchMock as typeof fetch
 
 	try {
-		upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
+		await upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
 			{
 				bridgeId: 'BONDTEST19',
 				bondid: 'BONDTEST19',
@@ -1432,8 +1434,8 @@ test('bond cooldown logs preserve outage backoff when original failure log is pr
 				rawDiscovery: {},
 			},
 		])
-		adoptBondBridge(storage, config.homeConnectorId, 'BONDTEST19')
-		bond.setToken('BONDTEST19', 'bond-token')
+		await adoptBondBridge(storage, config.homeConnectorId, 'BONDTEST19')
+		await bond.setToken('BONDTEST19', 'bond-token')
 
 		await bond.getDeviceState('BONDTEST19', 'initial').catch(() => null)
 		for (let index = 0; index < 200; index += 1) {
@@ -1442,23 +1444,23 @@ test('bond cooldown logs preserve outage backoff when original failure log is pr
 				.catch(() => null)
 		}
 		expect(
-			bond
-				.getReliabilityStatus({ bridgeId: 'BONDTEST19', limit: 200 })
-				.recentRequestLogs.every((log) => log.status === 'cooldown'),
+			(
+				await bond.getReliabilityStatus({ bridgeId: 'BONDTEST19', limit: 200 })
+			).recentRequestLogs.every((log) => log.status === 'cooldown'),
 		).toBe(true)
 
 		await vi.advanceTimersByTimeAsync(60_001)
 		await bond.getDeviceState('BONDTEST19', 'next-failure').catch(() => null)
 
 		expect(fetchMock).toHaveBeenCalledTimes(2)
-		expect(bond.getBridgeHealth('BONDTEST19')).toMatchObject({
+		expect(await bond.getBridgeHealth('BONDTEST19')).toMatchObject({
 			state: 'cooling_down',
 			retryAfterMs: 120_000,
 		})
 	} finally {
 		vi.useRealTimers()
 		globalThis.fetch = previousFetch
-		storage.close()
+		await storage.close()
 	}
 })
 
@@ -1468,7 +1470,7 @@ test('bond bridge cooldown backoff is capped at fifteen minutes', async () => {
 		bondCircuitBreakerCooldownMs: 20 * 60_000,
 	}
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const bond = createBondAdapter({
 		config,
 		state,
@@ -1483,7 +1485,7 @@ test('bond bridge cooldown backoff is capped at fifteen minutes', async () => {
 	globalThis.fetch = fetchMock as typeof fetch
 
 	try {
-		upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
+		await upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
 			{
 				bridgeId: 'BONDTEST18',
 				bondid: 'BONDTEST18',
@@ -1497,17 +1499,17 @@ test('bond bridge cooldown backoff is capped at fifteen minutes', async () => {
 				rawDiscovery: {},
 			},
 		])
-		adoptBondBridge(storage, config.homeConnectorId, 'BONDTEST18')
-		bond.setToken('BONDTEST18', 'bond-token')
+		await adoptBondBridge(storage, config.homeConnectorId, 'BONDTEST18')
+		await bond.setToken('BONDTEST18', 'bond-token')
 
 		await bond.getDeviceState('BONDTEST18', 'dev1').catch(() => null)
 
-		expect(bond.getBridgeHealth('BONDTEST18')).toMatchObject({
+		expect(await bond.getBridgeHealth('BONDTEST18')).toMatchObject({
 			state: 'cooling_down',
 			retryAfterMs: 900_000,
 		})
 		expect(
-			bond.getReliabilityStatus({ bridgeId: 'BONDTEST18' }).config,
+			(await bond.getReliabilityStatus({ bridgeId: 'BONDTEST18' })).config,
 		).toMatchObject({
 			circuitBreakerCooldownMs: 1_200_000,
 			maxCircuitBreakerCooldownMs: 900_000,
@@ -1515,14 +1517,14 @@ test('bond bridge cooldown backoff is capped at fifteen minutes', async () => {
 	} finally {
 		vi.useRealTimers()
 		globalThis.fetch = previousFetch
-		storage.close()
+		await storage.close()
 	}
 })
 
 test('bond missing token errors are marked as expected operator noise', async () => {
 	const config = createConfig()
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const bond = createBondAdapter({
 		config,
 		state,
@@ -1530,7 +1532,7 @@ test('bond missing token errors are marked as expected operator noise', async ()
 	})
 
 	try {
-		upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
+		await upsertDiscoveredBondBridges(storage, config.homeConnectorId, [
 			{
 				bridgeId: 'ZPGI01117',
 				bondid: 'ZPGI01117',
@@ -1544,7 +1546,7 @@ test('bond missing token errors are marked as expected operator noise', async ()
 				rawDiscovery: {},
 			},
 		])
-		adoptBondBridge(storage, config.homeConnectorId, 'ZPGI01117')
+		await adoptBondBridge(storage, config.homeConnectorId, 'ZPGI01117')
 
 		const error = await bond
 			.getDeviceState('ZPGI01117', 'mockdev1')
@@ -1563,6 +1565,6 @@ test('bond missing token errors are marked as expected operator noise', async ()
 			},
 		})
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })

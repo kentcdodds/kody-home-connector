@@ -1,16 +1,11 @@
+import { type TableRow } from 'remix/data-table'
 import { decryptSecret, encryptSecret } from '../../storage/encrypted-secret.ts'
 import { type HomeConnectorStorage } from '../../storage/index.ts'
-
-type IslandRouterApiCredentialRow = {
-	connector_id: string
-	pin: string
-	last_authenticated_at: string | null
-	last_auth_error: string | null
-}
+import { islandRouterApiCredentials } from '../../storage/schema.ts'
 
 function mapCredentialRow(
 	storage: HomeConnectorStorage,
-	row: IslandRouterApiCredentialRow,
+	row: TableRow<typeof islandRouterApiCredentials>,
 ) {
 	return {
 		connectorId: row.connector_id,
@@ -20,50 +15,40 @@ function mapCredentialRow(
 	}
 }
 
-export function getIslandRouterApiCredentials(
+export async function getIslandRouterApiCredentials(
 	storage: HomeConnectorStorage,
 	connectorId: string,
 ) {
-	const row = storage.db
-		.query(
-			`
-				SELECT connector_id, pin, last_authenticated_at, last_auth_error
-				FROM island_router_api_credentials
-				WHERE connector_id = ?
-			`,
-		)
-		.get(connectorId) as IslandRouterApiCredentialRow | undefined
+	const row = await storage.db.find(islandRouterApiCredentials, {
+		connector_id: connectorId,
+	})
 	return row ? mapCredentialRow(storage, row) : null
 }
 
-export function getIslandRouterApiPin(
+export async function getIslandRouterApiPin(
 	storage: HomeConnectorStorage,
 	connectorId: string,
 ) {
-	return getIslandRouterApiCredentials(storage, connectorId)?.pin ?? null
+	return (
+		(await getIslandRouterApiCredentials(storage, connectorId))?.pin ?? null
+	)
 }
 
-export function hasIslandRouterApiStoredPin(
+export async function hasIslandRouterApiStoredPin(
 	storage: HomeConnectorStorage,
 	connectorId: string,
 ) {
-	const row = storage.db
-		.query(
-			`
-				SELECT 1 AS found
-				FROM island_router_api_credentials
-				WHERE connector_id = ?
-			`,
-		)
-		.get(connectorId) as { found: number } | undefined
+	const row = await storage.db.find(islandRouterApiCredentials, {
+		connector_id: connectorId,
+	})
 	return Boolean(row)
 }
 
-export function getIslandRouterApiAuthStatus(
+export async function getIslandRouterApiAuthStatus(
 	storage: HomeConnectorStorage,
 	connectorId: string,
 ) {
-	const credentials = getIslandRouterApiCredentials(storage, connectorId)
+	const credentials = await getIslandRouterApiCredentials(storage, connectorId)
 	return credentials
 		? {
 				lastAuthenticatedAt: credentials.lastAuthenticatedAt,
@@ -72,7 +57,7 @@ export function getIslandRouterApiAuthStatus(
 		: null
 }
 
-export function saveIslandRouterApiPin(input: {
+export async function saveIslandRouterApiPin(input: {
 	storage: HomeConnectorStorage
 	connectorId: string
 	pin: string
@@ -87,55 +72,35 @@ export function saveIslandRouterApiPin(input: {
 		missingSecretMessage:
 			'Cannot store Island Router API PIN without HOME_CONNECTOR_SHARED_SECRET.',
 	})
-	input.storage.db
-		.query(
-			`
-				INSERT INTO island_router_api_credentials (
-					connector_id,
-					pin,
-					last_authenticated_at,
-					last_auth_error,
-					updated_at
-				) VALUES (?, ?, ?, ?, ?)
-				ON CONFLICT(connector_id) DO UPDATE SET
-					pin = excluded.pin,
-					last_authenticated_at = NULL,
-					last_auth_error = NULL,
-					updated_at = excluded.updated_at
-			`,
-		)
-		.run(input.connectorId, encryptedPin, null, null, new Date().toISOString())
+	await input.storage.db.query(islandRouterApiCredentials).upsert({
+		connector_id: input.connectorId,
+		pin: encryptedPin,
+		last_authenticated_at: null,
+		last_auth_error: null,
+	})
 }
 
-export function clearIslandRouterApiPin(
+export async function clearIslandRouterApiPin(
 	storage: HomeConnectorStorage,
 	connectorId: string,
 ) {
-	storage.db
-		.query(
-			`
-				DELETE FROM island_router_api_credentials
-				WHERE connector_id = ?
-			`,
-		)
-		.run(connectorId)
+	await storage.db.delete(islandRouterApiCredentials, {
+		connector_id: connectorId,
+	})
 }
 
-export function updateIslandRouterApiAuthStatus(input: {
+export async function updateIslandRouterApiAuthStatus(input: {
 	storage: HomeConnectorStorage
 	connectorId: string
 	lastAuthenticatedAt: string | null
 	lastAuthError: string | null
 }) {
-	input.storage.db
-		.query(
-			`
-				UPDATE island_router_api_credentials
-				SET last_authenticated_at = ?,
-					last_auth_error = ?,
-					updated_at = CURRENT_TIMESTAMP
-				WHERE connector_id = ?
-			`,
-		)
-		.run(input.lastAuthenticatedAt, input.lastAuthError, input.connectorId)
+	await input.storage.db.updateMany(
+		islandRouterApiCredentials,
+		{
+			last_authenticated_at: input.lastAuthenticatedAt,
+			last_auth_error: input.lastAuthError,
+		},
+		{ where: { connector_id: input.connectorId } },
+	)
 }

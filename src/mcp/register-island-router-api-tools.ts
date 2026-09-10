@@ -90,7 +90,7 @@ export function registerIslandRouterApiHomeConnectorTools(input: {
 			},
 		},
 		async () => {
-			const status = islandRouterApi.getStatus()
+			const status = await islandRouterApi.getStatus()
 			return structuredTextResult(
 				status.configured
 					? 'Island Router API proxy is configured.'
@@ -116,7 +116,7 @@ export function registerIslandRouterApiHomeConnectorTools(input: {
 			sdkInputSchema: pinSchema.sdkInputSchema,
 		},
 		async (args) => {
-			const status = islandRouterApi.setPin(String(args['pin'] ?? ''))
+			const status = await islandRouterApi.setPin(String(args['pin'] ?? ''))
 			return structuredTextResult('Stored Island Router API PIN.', status)
 		},
 	)
@@ -130,7 +130,7 @@ export function registerIslandRouterApiHomeConnectorTools(input: {
 			inputSchema: {},
 		},
 		async () => {
-			const status = islandRouterApi.clearPin()
+			const status = await islandRouterApi.clearPin()
 			return structuredTextResult('Cleared Island Router API PIN.', status)
 		},
 	)

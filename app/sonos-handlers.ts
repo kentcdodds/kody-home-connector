@@ -157,7 +157,9 @@ function renderSonosDiscoveryDiagnostics(
 
 function renderSonosStatusPage(input: {
 	state: HomeConnectorState
-	status: ReturnType<ReturnType<typeof createSonosAdapter>['getStatus']>
+	status: Awaited<
+		ReturnType<ReturnType<typeof createSonosAdapter>['getStatus']>
+	>
 	groups: Array<SonosGroup>
 	scanMessage?: string | null
 	scanError?: string | null
@@ -249,7 +251,7 @@ export function createSonosStatusHandler(
 						scanMessage: `Scan complete. Discovered ${players.length} Sonos player(s).`,
 					})
 				} catch (error) {
-					const status = sonos.getStatus()
+					const status = await sonos.getStatus()
 					captureHomeConnectorException(error, {
 						tags: {
 							route: '/sonos/status',
@@ -300,7 +302,7 @@ export function createSonosSetupHandler(
 	return {
 		middleware: [],
 		async handler() {
-			const status = sonos.getStatus()
+			const status = await sonos.getStatus()
 			const diagnostics = [
 				`MCP URL: ${state.connection.mcpUrl}`,
 				`Connector ID: ${state.connection.connectorId}`,

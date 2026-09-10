@@ -78,7 +78,7 @@ async function callPhoneTool(
 	args: Record<string, unknown> = {},
 	options?: { timeoutMs?: number },
 ) {
-	const blocked = phone.getCallReadiness()
+	const blocked = await phone.getCallReadiness()
 	if (blocked) return phoneErrorResult(blocked)
 	return resultFromCall(await phone.call(tool, args, options))
 }
@@ -111,7 +111,7 @@ export function registerPhoneHomeConnectorTools(input: {
 			},
 		},
 		async () => {
-			const status = phone.getStatus()
+			const status = await phone.getStatus()
 			return structuredTextResult(
 				status.connected
 					? `Android companion ${status.lastHello?.deviceName ?? status.deviceId ?? 'phone'} is connected.`
@@ -389,7 +389,7 @@ export function registerPhoneHomeConnectorTools(input: {
 			},
 		},
 		async () => {
-			const blocked = phone.getCallReadiness()
+			const blocked = await phone.getCallReadiness()
 			if (blocked) return phoneErrorResult(blocked)
 			const [permissions, calendars, contactsSummary, network] =
 				await Promise.all([
@@ -425,7 +425,7 @@ export function registerPhoneHomeConnectorTools(input: {
 			},
 		},
 		async () => {
-			const blocked = phone.getCallReadiness()
+			const blocked = await phone.getCallReadiness()
 			if (blocked) return phoneErrorResult(blocked)
 			const [network, mdns, googleHome, youtube, gms] = await Promise.all([
 				phone.call('phone_network'),

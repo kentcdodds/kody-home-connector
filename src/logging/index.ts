@@ -1,6 +1,7 @@
-import { type SQLInputValue } from 'node:sqlite'
+import { and, gte, like, lt, lte, or, type TableRow } from 'remix/data-table'
 import { type HomeConnectorConfig } from '../config.ts'
 import { type HomeConnectorStorage } from '../storage/index.ts'
+import { homeConnectorLogs } from '../storage/schema.ts'
 
 export const homeConnectorLogRetentionDays = 8
 
@@ -55,21 +56,14 @@ export type HomeConnectorLogger = {
 		message: string,
 		metadata?: Record<string, unknown>,
 	): void
-	listLogs(input?: ListHomeConnectorLogsInput): Array<HomeConnectorLogEntry>
-	pruneExpiredLogs(): void
+	listLogs(
+		input?: ListHomeConnectorLogsInput,
+	): Promise<Array<HomeConnectorLogEntry>>
+	pruneExpiredLogs(): Promise<void>
+	flush(): Promise<void>
 }
 
 type LoggerConsole = Pick<Console, 'debug' | 'info' | 'warn' | 'error'>
-
-type HomeConnectorLogRow = {
-	id: number
-	connector_id: string
-	level: string
-	event: string
-	message: string
-	metadata_json: string
-	created_at: string
-}
 
 function normalizeKey(value: string) {
 	return value.replace(/[^a-z0-9]/gi, '').toLowerCase()
@@ -218,9 +212,11 @@ function sanitizeLogMetadata(metadata: Record<string, unknown>) {
 		: {}
 }
 
-function mapLogRow(row: HomeConnectorLogRow): HomeConnectorLogEntry {
+function mapLogRow(
+	row: TableRow<typeof homeConnectorLogs>,
+): HomeConnectorLogEntry {
 	return {
-		id: Number(row.id),
+		id: row.id,
 		connectorId: row.connector_id,
 		level: row.level as HomeConnectorLogLevel,
 		event: row.event,
@@ -263,34 +259,48 @@ export function createHomeConnectorLogger(input: {
 	const consoleSink = input.console ?? console
 	const now = input.now ?? (() => new Date())
 	let nextPruneAt = 0
+	let pendingWrites: Promise<void> = Promise.resolve()
 
-	function pruneExpiredLogs() {
-		const cutoff = new Date(
-			now().getTime() - homeConnectorLogRetentionMs,
-		).toISOString()
-		input.storage.db
-			.query(
-				`
-			DELETE FROM home_connector_logs
-			WHERE connector_id = ? AND created_at < ?
-		`,
-			)
-			.run(input.config.homeConnectorId, cutoff)
+	function retentionCutoff() {
+		return new Date(now().getTime() - homeConnectorLogRetentionMs).toISOString()
+	}
+
+	function warnConsole(event: string, message: string, error: unknown) {
+		consoleSink.warn(
+			stringifyConsoleLog({
+				level: 'warn',
+				event,
+				message,
+				metadata: { error },
+			}),
+		)
+	}
+
+	function enqueue(task: () => Promise<void>) {
+		const result = pendingWrites.then(task, task)
+		pendingWrites = result.catch(() => {})
+		return result
+	}
+
+	async function pruneExpiredLogs() {
+		await input.storage.db.deleteMany(homeConnectorLogs, {
+			where: and(
+				{ connector_id: input.config.homeConnectorId },
+				lt(homeConnectorLogs.created_at, retentionCutoff()),
+			),
+		})
 		nextPruneAt = now().getTime() + 60 * 60 * 1000
 	}
 
-	function tryPruneExpiredLogs() {
+	async function tryPruneExpiredLogs() {
 		try {
-			pruneExpiredLogs()
+			await pruneExpiredLogs()
 		} catch (error) {
 			nextPruneAt = now().getTime() + 5 * 60 * 1000
-			consoleSink.warn(
-				stringifyConsoleLog({
-					level: 'warn',
-					event: 'logger.prune_failed',
-					message: 'Failed to prune expired home connector log entries.',
-					metadata: { error },
-				}),
+			warnConsole(
+				'logger.prune_failed',
+				'Failed to prune expired home connector log entries.',
+				error,
 			)
 		}
 	}
@@ -321,44 +331,29 @@ export function createHomeConnectorLogger(input: {
 		const createdAt = now().toISOString()
 		const sanitizedMessage = sanitizeLogString(message)
 		const sanitizedMetadata = stringifyMetadata(metadata)
-		if (now().getTime() >= nextPruneAt) {
-			tryPruneExpiredLogs()
-		}
-		try {
-			input.storage.db
-				.query(
-					`
-				INSERT INTO home_connector_logs (
-					connector_id,
+		const shouldPrune = now().getTime() >= nextPruneAt
+		void enqueue(async () => {
+			if (shouldPrune) await tryPruneExpiredLogs()
+			try {
+				await input.storage.db.create(homeConnectorLogs, {
+					connector_id: input.config.homeConnectorId,
 					level,
 					event,
-					message,
-					metadata_json,
-					created_at
-				) VALUES (?, ?, ?, ?, ?, ?)
-			`,
+					message: sanitizedMessage,
+					metadata_json: sanitizedMetadata,
+					created_at: createdAt,
+				})
+			} catch (error) {
+				warnConsole(
+					'logger.persist_failed',
+					'Failed to persist home connector log entry.',
+					error,
 				)
-				.run(
-					input.config.homeConnectorId,
-					level,
-					event,
-					sanitizedMessage,
-					sanitizedMetadata,
-					createdAt,
-				)
-		} catch (error) {
-			consoleSink.warn(
-				stringifyConsoleLog({
-					level: 'warn',
-					event: 'logger.persist_failed',
-					message: 'Failed to persist home connector log entry.',
-					metadata: { error },
-				}),
-			)
-		}
+			}
+		})
 	}
 
-	tryPruneExpiredLogs()
+	void enqueue(tryPruneExpiredLogs)
 
 	return {
 		debug(event, message, metadata) {
@@ -373,60 +368,51 @@ export function createHomeConnectorLogger(input: {
 		error(event, message, metadata) {
 			write('error', event, message, metadata)
 		},
-		listLogs(listInput = {}) {
-			const params: Array<SQLInputValue> = [input.config.homeConnectorId]
-			const clauses = ['connector_id = ?']
-			const retentionCutoff = new Date(
-				now().getTime() - homeConnectorLogRetentionMs,
-			).toISOString()
-			clauses.push('created_at >= ?')
-			params.push(retentionCutoff)
+		async listLogs(listInput = {}) {
+			await pendingWrites
+			let query = input.storage.db
+				.query(homeConnectorLogs)
+				.where({ connector_id: input.config.homeConnectorId })
+				.where(gte(homeConnectorLogs.created_at, retentionCutoff()))
 			if (listInput.level) {
-				clauses.push('level = ?')
-				params.push(listInput.level)
+				query = query.where({ level: listInput.level })
 			}
 			if (listInput.event) {
-				clauses.push('event = ?')
-				params.push(listInput.event)
+				query = query.where({ event: listInput.event })
 			}
 			if (listInput.since) {
-				clauses.push('created_at >= ?')
-				params.push(listInput.since)
+				query = query.where(gte(homeConnectorLogs.created_at, listInput.since))
 			}
 			if (listInput.until) {
-				clauses.push('created_at <= ?')
-				params.push(listInput.until)
+				query = query.where(lte(homeConnectorLogs.created_at, listInput.until))
 			}
 			if (listInput.beforeId != null) {
-				clauses.push('id < ?')
-				params.push(Math.floor(listInput.beforeId))
+				query = query.where(
+					lt(homeConnectorLogs.id, Math.floor(listInput.beforeId)),
+				)
 			}
 			if (listInput.query) {
-				const query = `%${listInput.query}%`
-				clauses.push('(event LIKE ? OR message LIKE ? OR metadata_json LIKE ?)')
-				params.push(query, query, query)
-			}
-			params.push(normalizeLimit(listInput.limit))
-			const rows = input.storage.db
-				.query(
-					`
-				SELECT
-					id,
-					connector_id,
-					level,
-					event,
-					message,
-					metadata_json,
-					created_at
-				FROM home_connector_logs
-				WHERE ${clauses.join(' AND ')}
-				ORDER BY created_at DESC, id DESC
-				LIMIT ?
-			`,
+				const pattern = `%${listInput.query}%`
+				query = query.where(
+					or(
+						like(homeConnectorLogs.event, pattern),
+						like(homeConnectorLogs.message, pattern),
+						like(homeConnectorLogs.metadata_json, pattern),
+					),
 				)
-				.all(...params) as Array<HomeConnectorLogRow>
+			}
+			const rows = await query
+				.orderBy('created_at', 'desc')
+				.orderBy('id', 'desc')
+				.limit(normalizeLimit(listInput.limit))
+				.all()
 			return rows.map(mapLogRow)
 		},
-		pruneExpiredLogs,
+		pruneExpiredLogs() {
+			return enqueue(pruneExpiredLogs)
+		},
+		flush() {
+			return pendingWrites
+		},
 	}
 }

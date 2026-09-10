@@ -225,13 +225,13 @@ export function createIslandRouterApiAdapter(input: {
 	const fetchImpl = input.fetchImpl ?? globalThis.fetch
 	let tokens: IslandRouterApiAuthTokens | null = null
 
-	function requirePin() {
+	async function requirePin() {
 		if (!storage.sharedSecret) {
 			throw new Error(
 				'Island Router API requests require HOME_CONNECTOR_SHARED_SECRET.',
 			)
 		}
-		const pin = getIslandRouterApiPin(storage, connectorId)
+		const pin = await getIslandRouterApiPin(storage, connectorId)
 		if (!pin) {
 			throw new Error(
 				'Island Router API PIN is not configured. Run island_router_api_set_pin first.',
@@ -241,7 +241,7 @@ export function createIslandRouterApiAdapter(input: {
 	}
 
 	async function authenticate() {
-		const pin = requirePin()
+		const pin = await requirePin()
 		const timeBlocks = Math.floor(Date.now() / 1000 / 30)
 		try {
 			const startupResponse = await requestJson({
@@ -281,7 +281,7 @@ export function createIslandRouterApiAdapter(input: {
 				)
 			}
 			tokens = getTokenData(authPayload)
-			updateIslandRouterApiAuthStatus({
+			await updateIslandRouterApiAuthStatus({
 				storage,
 				connectorId,
 				lastAuthenticatedAt: new Date().toISOString(),
@@ -290,11 +290,11 @@ export function createIslandRouterApiAdapter(input: {
 			return tokens
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error)
-			updateIslandRouterApiAuthStatus({
+			await updateIslandRouterApiAuthStatus({
 				storage,
 				connectorId,
 				lastAuthenticatedAt:
-					getIslandRouterApiAuthStatus(storage, connectorId)
+					(await getIslandRouterApiAuthStatus(storage, connectorId))
 						?.lastAuthenticatedAt ?? null,
 				lastAuthError: message,
 			})
@@ -315,18 +315,18 @@ export function createIslandRouterApiAdapter(input: {
 		const payload = await parseJsonResponse(response)
 		if (!response.ok) {
 			tokens = null
-			updateIslandRouterApiAuthStatus({
+			await updateIslandRouterApiAuthStatus({
 				storage,
 				connectorId,
 				lastAuthenticatedAt:
-					getIslandRouterApiAuthStatus(storage, connectorId)
+					(await getIslandRouterApiAuthStatus(storage, connectorId))
 						?.lastAuthenticatedAt ?? null,
 				lastAuthError: `Island Router token refresh failed with HTTP ${response.status}.`,
 			})
 			return await authenticate()
 		}
 		tokens = getTokenData(payload)
-		updateIslandRouterApiAuthStatus({
+		await updateIslandRouterApiAuthStatus({
 			storage,
 			connectorId,
 			lastAuthenticatedAt: new Date().toISOString(),
@@ -391,11 +391,11 @@ export function createIslandRouterApiAdapter(input: {
 			if (response.status === 401) {
 				const message =
 					'Island Router API request remained unauthorized after refresh.'
-				updateIslandRouterApiAuthStatus({
+				await updateIslandRouterApiAuthStatus({
 					storage,
 					connectorId,
 					lastAuthenticatedAt:
-						getIslandRouterApiAuthStatus(storage, connectorId)
+						(await getIslandRouterApiAuthStatus(storage, connectorId))
 							?.lastAuthenticatedAt ?? null,
 					lastAuthError: message,
 				})
@@ -419,12 +419,18 @@ export function createIslandRouterApiAdapter(input: {
 
 	return {
 		writeConfirmation: islandRouterApiWriteConfirmation,
-		getStatus() {
-			const hasStoredPin = hasIslandRouterApiStoredPin(storage, connectorId)
+		async getStatus() {
+			const hasStoredPin = await hasIslandRouterApiStoredPin(
+				storage,
+				connectorId,
+			)
 			const pin = storage.sharedSecret
-				? getIslandRouterApiPin(storage, connectorId)
+				? await getIslandRouterApiPin(storage, connectorId)
 				: null
-			const authStatus = getIslandRouterApiAuthStatus(storage, connectorId)
+			const authStatus = await getIslandRouterApiAuthStatus(
+				storage,
+				connectorId,
+			)
 			return {
 				configured: Boolean(storage.sharedSecret && hasStoredPin && pin),
 				hasStoredPin,
@@ -433,12 +439,12 @@ export function createIslandRouterApiAdapter(input: {
 				baseUrl: config.islandRouterApiBaseUrl,
 			}
 		},
-		setPin(pin: string) {
+		async setPin(pin: string) {
 			const trimmed = pin.trim()
 			if (!trimmed) {
 				throw new Error('Island Router API PIN must not be empty.')
 			}
-			saveIslandRouterApiPin({
+			await saveIslandRouterApiPin({
 				storage,
 				connectorId,
 				pin: trimmed,
@@ -446,8 +452,8 @@ export function createIslandRouterApiAdapter(input: {
 			tokens = null
 			return this.getStatus()
 		},
-		clearPin() {
-			clearIslandRouterApiPin(storage, connectorId)
+		async clearPin() {
+			await clearIslandRouterApiPin(storage, connectorId)
 			tokens = null
 			return this.getStatus()
 		},

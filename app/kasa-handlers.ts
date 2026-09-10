@@ -153,12 +153,12 @@ function renderKasaDiscoveryDiagnostics(
 	`
 }
 
-function renderKasaSetupPage(input: {
+async function renderKasaSetupPage(input: {
 	state: HomeConnectorState
 	kasa: ReturnType<typeof createKasaAdapter>
 	banner: Banner
 }) {
-	const configStatus = input.kasa.getConfigStatus()
+	const configStatus = await input.kasa.getConfigStatus()
 	return render(
 		RootLayout({
 			title: 'home connector - kasa setup',
@@ -258,13 +258,13 @@ function renderKasaSetupPage(input: {
 	)
 }
 
-function renderKasaStatusPage(input: {
+async function renderKasaStatusPage(input: {
 	state: HomeConnectorState
 	kasa: ReturnType<typeof createKasaAdapter>
 	scanMessage?: string | null
 	scanError?: string | null
 }) {
-	const status = input.kasa.getStatus()
+	const status = await input.kasa.getStatus()
 	return render(
 		RootLayout({
 			title: 'home connector - kasa status',
@@ -344,7 +344,7 @@ export function createKasaSetupHandler(
 							message: 'Unknown form action.',
 						})
 					}
-					kasa.setCredentials(
+					await kasa.setCredentials(
 						String(form.get('username') ?? ''),
 						String(form.get('password') ?? ''),
 					)

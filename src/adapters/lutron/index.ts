@@ -59,7 +59,7 @@ function requireLutronCredentials(processor: {
 	}
 }
 
-function updateLutronAuthFailure(input: {
+async function updateLutronAuthFailure(input: {
 	storage: HomeConnectorStorage
 	connectorId: string
 	processorId: string
@@ -73,7 +73,7 @@ function updateLutronAuthFailure(input: {
 	) {
 		return
 	}
-	updateLutronAuthStatus({
+	await updateLutronAuthStatus({
 		storage: input.storage,
 		connectorId: input.connectorId,
 		processorId: input.processorId,
@@ -95,8 +95,8 @@ export function createLutronAdapter(input: {
 		)
 	}
 
-	function buildMockInventory(processorId: string) {
-		const processor = requireLutronProcessor(
+	async function buildMockInventory(processorId: string) {
+		const processor = await requireLutronProcessor(
 			input.storage,
 			input.config.homeConnectorId,
 			processorId,
@@ -134,15 +134,15 @@ export function createLutronAdapter(input: {
 	return {
 		async scan() {
 			const result = await scanLutronProcessors(input.state, input.config)
-			upsertDiscoveredLutronProcessors(
+			await upsertDiscoveredLutronProcessors(
 				input.storage,
 				input.config.homeConnectorId,
 				result.processors,
 			)
 			return listProcessors()
 		},
-		getStatus() {
-			const processors = listProcessors()
+		async getStatus() {
+			const processors = await listProcessors()
 			return {
 				processors,
 				diagnostics: input.state.lutronDiscoveryDiagnostics,
@@ -151,13 +151,17 @@ export function createLutronAdapter(input: {
 				).length,
 			}
 		},
-		setCredentials(processorId: string, username: string, password: string) {
-			requireLutronProcessor(
+		async setCredentials(
+			processorId: string,
+			username: string,
+			password: string,
+		) {
+			await requireLutronProcessor(
 				input.storage,
 				input.config.homeConnectorId,
 				processorId,
 			)
-			saveLutronCredentials({
+			await saveLutronCredentials({
 				storage: input.storage,
 				connectorId: input.config.homeConnectorId,
 				processorId,
@@ -165,7 +169,7 @@ export function createLutronAdapter(input: {
 				password,
 			})
 			return toLutronPublicProcessor(
-				requireLutronProcessor(
+				await requireLutronProcessor(
 					input.storage,
 					input.config.homeConnectorId,
 					processorId,
@@ -173,7 +177,7 @@ export function createLutronAdapter(input: {
 			)
 		},
 		async authenticate(processorId: string) {
-			const processor = requireLutronProcessor(
+			const processor = await requireLutronProcessor(
 				input.storage,
 				input.config.homeConnectorId,
 				processorId,
@@ -198,7 +202,7 @@ export function createLutronAdapter(input: {
 						credentials,
 					})
 				}
-				updateLutronAuthStatus({
+				await updateLutronAuthStatus({
 					storage: input.storage,
 					connectorId: input.config.homeConnectorId,
 					processorId,
@@ -206,7 +210,7 @@ export function createLutronAdapter(input: {
 					lastAuthError: null,
 				})
 			} catch (error) {
-				updateLutronAuthFailure({
+				await updateLutronAuthFailure({
 					storage: input.storage,
 					connectorId: input.config.homeConnectorId,
 					processorId,
@@ -215,7 +219,7 @@ export function createLutronAdapter(input: {
 				throw error
 			}
 			return toLutronPublicProcessor(
-				requireLutronProcessor(
+				await requireLutronProcessor(
 					input.storage,
 					input.config.homeConnectorId,
 					processorId,
@@ -223,7 +227,7 @@ export function createLutronAdapter(input: {
 			)
 		},
 		async getInventory(processorId: string) {
-			const processor = requireLutronProcessor(
+			const processor = await requireLutronProcessor(
 				input.storage,
 				input.config.homeConnectorId,
 				processorId,
@@ -233,14 +237,14 @@ export function createLutronAdapter(input: {
 				const inventory =
 					input.config.mocksEnabled && isMockLutronHost(processor.host)
 						? {
-								...buildMockInventory(processorId),
+								...(await buildMockInventory(processorId)),
 								processor: toLutronPublicProcessor(processor),
 							}
 						: await loadLutronInventory({
 								processor,
 								credentials,
 							})
-				updateLutronAuthStatus({
+				await updateLutronAuthStatus({
 					storage: input.storage,
 					connectorId: input.config.homeConnectorId,
 					processorId,
@@ -249,7 +253,7 @@ export function createLutronAdapter(input: {
 				})
 				return inventory
 			} catch (error) {
-				updateLutronAuthFailure({
+				await updateLutronAuthFailure({
 					storage: input.storage,
 					connectorId: input.config.homeConnectorId,
 					processorId,
@@ -259,7 +263,7 @@ export function createLutronAdapter(input: {
 			}
 		},
 		async pressButton(processorId: string, buttonId: string) {
-			const processor = requireLutronProcessor(
+			const processor = await requireLutronProcessor(
 				input.storage,
 				input.config.homeConnectorId,
 				processorId,
@@ -274,7 +278,7 @@ export function createLutronAdapter(input: {
 								credentials,
 								buttonId,
 							})
-				updateLutronAuthStatus({
+				await updateLutronAuthStatus({
 					storage: input.storage,
 					connectorId: input.config.homeConnectorId,
 					processorId,
@@ -288,7 +292,7 @@ export function createLutronAdapter(input: {
 					response,
 				}
 			} catch (error) {
-				updateLutronAuthFailure({
+				await updateLutronAuthFailure({
 					storage: input.storage,
 					connectorId: input.config.homeConnectorId,
 					processorId,
@@ -298,7 +302,7 @@ export function createLutronAdapter(input: {
 			}
 		},
 		async setZoneLevel(processorId: string, zoneId: string, level: number) {
-			const processor = requireLutronProcessor(
+			const processor = await requireLutronProcessor(
 				input.storage,
 				input.config.homeConnectorId,
 				processorId,
@@ -315,7 +319,7 @@ export function createLutronAdapter(input: {
 								zoneId: normalizedZoneId,
 								level,
 							})
-				updateLutronAuthStatus({
+				await updateLutronAuthStatus({
 					storage: input.storage,
 					connectorId: input.config.homeConnectorId,
 					processorId,
@@ -330,7 +334,7 @@ export function createLutronAdapter(input: {
 					response,
 				}
 			} catch (error) {
-				updateLutronAuthFailure({
+				await updateLutronAuthFailure({
 					storage: input.storage,
 					connectorId: input.config.homeConnectorId,
 					processorId,
@@ -349,7 +353,7 @@ export function createLutronAdapter(input: {
 				vibrancy?: number
 			},
 		) {
-			const processor = requireLutronProcessor(
+			const processor = await requireLutronProcessor(
 				input.storage,
 				input.config.homeConnectorId,
 				processorId,
@@ -375,7 +379,7 @@ export function createLutronAdapter(input: {
 								level: inputColor.level,
 								vibrancy: inputColor.vibrancy,
 							})
-				updateLutronAuthStatus({
+				await updateLutronAuthStatus({
 					storage: input.storage,
 					connectorId: input.config.homeConnectorId,
 					processorId,
@@ -393,7 +397,7 @@ export function createLutronAdapter(input: {
 					response,
 				}
 			} catch (error) {
-				updateLutronAuthFailure({
+				await updateLutronAuthFailure({
 					storage: input.storage,
 					connectorId: input.config.homeConnectorId,
 					processorId,
@@ -410,7 +414,7 @@ export function createLutronAdapter(input: {
 				level?: number
 			},
 		) {
-			const processor = requireLutronProcessor(
+			const processor = await requireLutronProcessor(
 				input.storage,
 				input.config.homeConnectorId,
 				processorId,
@@ -432,7 +436,7 @@ export function createLutronAdapter(input: {
 								kelvin: inputWhiteTuning.kelvin,
 								level: inputWhiteTuning.level,
 							})
-				updateLutronAuthStatus({
+				await updateLutronAuthStatus({
 					storage: input.storage,
 					connectorId: input.config.homeConnectorId,
 					processorId,
@@ -448,7 +452,7 @@ export function createLutronAdapter(input: {
 					response,
 				}
 			} catch (error) {
-				updateLutronAuthFailure({
+				await updateLutronAuthFailure({
 					storage: input.storage,
 					connectorId: input.config.homeConnectorId,
 					processorId,
@@ -462,7 +466,7 @@ export function createLutronAdapter(input: {
 			zoneId: string,
 			state: 'On' | 'Off',
 		) {
-			const processor = requireLutronProcessor(
+			const processor = await requireLutronProcessor(
 				input.storage,
 				input.config.homeConnectorId,
 				processorId,
@@ -482,7 +486,7 @@ export function createLutronAdapter(input: {
 								zoneId: normalizedZoneId,
 								state,
 							})
-				updateLutronAuthStatus({
+				await updateLutronAuthStatus({
 					storage: input.storage,
 					connectorId: input.config.homeConnectorId,
 					processorId,
@@ -497,7 +501,7 @@ export function createLutronAdapter(input: {
 					response,
 				}
 			} catch (error) {
-				updateLutronAuthFailure({
+				await updateLutronAuthFailure({
 					storage: input.storage,
 					connectorId: input.config.homeConnectorId,
 					processorId,
@@ -507,7 +511,7 @@ export function createLutronAdapter(input: {
 			}
 		},
 		async setShadeLevel(processorId: string, zoneId: string, level: number) {
-			const processor = requireLutronProcessor(
+			const processor = await requireLutronProcessor(
 				input.storage,
 				input.config.homeConnectorId,
 				processorId,
@@ -524,7 +528,7 @@ export function createLutronAdapter(input: {
 								zoneId: normalizedZoneId,
 								level,
 							})
-				updateLutronAuthStatus({
+				await updateLutronAuthStatus({
 					storage: input.storage,
 					connectorId: input.config.homeConnectorId,
 					processorId,
@@ -539,7 +543,7 @@ export function createLutronAdapter(input: {
 					response,
 				}
 			} catch (error) {
-				updateLutronAuthFailure({
+				await updateLutronAuthFailure({
 					storage: input.storage,
 					connectorId: input.config.homeConnectorId,
 					processorId,

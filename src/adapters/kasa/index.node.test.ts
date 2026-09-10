@@ -48,7 +48,7 @@ function createConfig() {
 test('adapter scans, adopts, reads status, and controls adopted Kasa plugs', async () => {
 	const config = createConfig()
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	let relayState = 0
 	const calls: Array<string> = []
 	const fakeClient: KasaClient = {
@@ -117,12 +117,12 @@ test('adapter scans, adopts, reads status, and controls adopted Kasa plugs', asy
 	})
 
 	try {
-		expect(adapter.getConfigStatus()).toMatchObject({
+		expect(await adapter.getConfigStatus()).toMatchObject({
 			configured: false,
 			hasStoredCredentials: false,
 		})
-		adapter.setCredentials('kent@example.com', 'secret-password')
-		expect(adapter.getConfigStatus()).toMatchObject({
+		await adapter.setCredentials('kent@example.com', 'secret-password')
+		expect(await adapter.getConfigStatus()).toMatchObject({
 			configured: true,
 			hasStoredCredentials: true,
 			username: 'kent@example.com',
@@ -139,7 +139,9 @@ test('adapter scans, adopts, reads status, and controls adopted Kasa plugs', asy
 		await expect(
 			adapter.turnOn({ alias: 'Water recirculating pump' }),
 		).rejects.toThrow('not adopted')
-		const adopted = adapter.adoptPlug({ alias: 'Water recirculating pump' })
+		const adopted = await adapter.adoptPlug({
+			alias: 'Water recirculating pump',
+		})
 		expect(adopted).toMatchObject({
 			plugId: 'plug-1',
 			adopted: true,
@@ -166,7 +168,7 @@ test('adapter scans, adopts, reads status, and controls adopted Kasa plugs', asy
 			'getSysInfo',
 		])
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })
 
@@ -177,7 +179,7 @@ test('adapter marks plugs credential-ready when env credentials are configured',
 		kasaPassword: 'secret-password',
 	}
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const adapter = createKasaAdapter({
 		config,
 		state,
@@ -217,7 +219,7 @@ test('adapter marks plugs credential-ready when env credentials are configured',
 
 	try {
 		await adapter.scan()
-		expect(adapter.getStatus()).toMatchObject({
+		expect(await adapter.getStatus()).toMatchObject({
 			config: {
 				configured: true,
 				hasEnvCredentials: true,
@@ -231,14 +233,14 @@ test('adapter marks plugs credential-ready when env credentials are configured',
 			],
 		})
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })
 
 test('adapter rejects relay control when device reports an error or unchanged state', async () => {
 	const config = createConfig()
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	let responseMode: 'err' | 'unchanged' = 'err'
 	const fakeClient: KasaClient = {
 		async getSysInfo() {
@@ -298,9 +300,9 @@ test('adapter rejects relay control when device reports an error or unchanged st
 	})
 
 	try {
-		adapter.setCredentials('kent@example.com', 'secret-password')
+		await adapter.setCredentials('kent@example.com', 'secret-password')
 		await adapter.scan()
-		adapter.adoptPlug({ plugId: 'plug-1' })
+		await adapter.adoptPlug({ plugId: 'plug-1' })
 
 		await expect(adapter.turnOn({ plugId: 'plug-1' })).rejects.toThrow(
 			'err_code -1',
@@ -310,14 +312,14 @@ test('adapter rejects relay control when device reports an error or unchanged st
 			'did not report relay state on',
 		)
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })
 
 test('adapter marks unreachable plug errors as expected Sentry noise', async () => {
 	const config = createConfig()
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const fakeClient: KasaClient = {
 		async getSysInfo() {
 			throw new Error('connect EHOSTUNREACH 192.168.1.145:80')
@@ -365,9 +367,9 @@ test('adapter marks unreachable plug errors as expected Sentry noise', async () 
 	})
 
 	try {
-		adapter.setCredentials('kent@example.com', 'secret-password')
+		await adapter.setCredentials('kent@example.com', 'secret-password')
 		await adapter.scan()
-		adapter.adoptPlug({ plugId: 'plug-1' })
+		await adapter.adoptPlug({ plugId: 'plug-1' })
 
 		let statusError: unknown
 		try {
@@ -403,14 +405,14 @@ test('adapter marks unreachable plug errors as expected Sentry noise', async () 
 			},
 		})
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })
 
 test('adapter does not mark stored credentials healthy when fallback auth was used', async () => {
 	const config = createConfig()
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const fakeClient: KasaClient = {
 		usedConfiguredCredentials: false,
 		async getSysInfo() {
@@ -470,14 +472,14 @@ test('adapter does not mark stored credentials healthy when fallback auth was us
 	})
 
 	try {
-		adapter.setCredentials('kent@example.com', 'bad-password')
+		await adapter.setCredentials('kent@example.com', 'bad-password')
 		await adapter.scan()
 		await adapter.getPlugStatus({ plugId: 'plug-1' })
-		expect(adapter.getConfigStatus()).toMatchObject({
+		expect(await adapter.getConfigStatus()).toMatchObject({
 			lastAuthenticatedAt: null,
 			lastAuthError: null,
 		})
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })

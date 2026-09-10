@@ -15,10 +15,10 @@ import { createHomeConnectorLogger } from './logging/index.ts'
 import { createAppState, updateConnectionState } from './state.ts'
 import { createHomeConnectorStorage } from './storage/index.ts'
 
-export function createHomeConnectorApp() {
+export async function createHomeConnectorApp() {
 	const config = loadHomeConnectorConfig()
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const logger = createHomeConnectorLogger({
 		config,
 		storage,
@@ -118,7 +118,7 @@ export function createHomeConnectorApp() {
 }
 
 export async function startHomeConnectorApp() {
-	const app = createHomeConnectorApp()
+	const app = await createHomeConnectorApp()
 	updateConnectionState(app.state, { listening: true })
 	app.logger.info(
 		'server.mcp.ready',

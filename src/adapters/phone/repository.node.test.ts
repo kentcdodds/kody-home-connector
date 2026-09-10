@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { expect, test } from 'vitest'
 import { createHomeConnectorStorage } from '../../storage/index.ts'
+import { phoneDeviceTokens } from '../../storage/schema.ts'
 import { createTestHomeConnectorConfig } from '../../test-home-connector-config.ts'
 import {
 	clearPhoneDeviceToken,
@@ -11,11 +12,11 @@ import {
 	savePhoneDeviceToken,
 } from './repository.ts'
 
-function createStorage(overrides: { sharedSecret?: string | null } = {}) {
+async function createStorage(overrides: { sharedSecret?: string | null } = {}) {
 	const directory = mkdtempSync(
 		path.join(tmpdir(), 'kody-home-connector-phone-'),
 	)
-	const storage = createHomeConnectorStorage(
+	const storage = await createHomeConnectorStorage(
 		createTestHomeConnectorConfig({
 			dataPath: directory,
 			dbPath: path.join(directory, 'home-connector.sqlite'),
@@ -27,56 +28,50 @@ function createStorage(overrides: { sharedSecret?: string | null } = {}) {
 	)
 	return {
 		storage,
-		close() {
-			storage.close()
+		async close() {
+			await storage.close()
 			rmSync(directory, { recursive: true, force: true })
 		},
 	}
 }
 
-test('sqlite storage persists an encrypted phone device token', () => {
-	const { storage, close } = createStorage()
+test('sqlite storage persists an encrypted phone device token', async () => {
+	const { storage, close } = await createStorage()
 	try {
-		expect(hasStoredPhoneDeviceToken(storage, 'default')).toBe(false)
-		savePhoneDeviceToken({
+		expect(await hasStoredPhoneDeviceToken(storage, 'default')).toBe(false)
+		await savePhoneDeviceToken({
 			storage,
 			connectorId: 'default',
 			token: '  phone-token  ',
 		})
-		expect(hasStoredPhoneDeviceToken(storage, 'default')).toBe(true)
-		expect(getPhoneDeviceToken(storage, 'default')).toBe('phone-token')
+		expect(await hasStoredPhoneDeviceToken(storage, 'default')).toBe(true)
+		expect(await getPhoneDeviceToken(storage, 'default')).toBe('phone-token')
 
-		const row = storage.db
-			.query(
-				`
-					SELECT token
-					FROM phone_device_tokens
-					WHERE connector_id = ?
-				`,
-			)
-			.get('default') as { token: string }
-		expect(row.token).toContain('enc:v1:')
-		expect(row.token).not.toContain('phone-token')
+		const row = await storage.db.find(phoneDeviceTokens, {
+			connector_id: 'default',
+		})
+		expect(row?.token).toContain('enc:v1:')
+		expect(row?.token).not.toContain('phone-token')
 
-		clearPhoneDeviceToken(storage, 'default')
-		expect(hasStoredPhoneDeviceToken(storage, 'default')).toBe(false)
-		expect(getPhoneDeviceToken(storage, 'default')).toBeNull()
+		await clearPhoneDeviceToken(storage, 'default')
+		expect(await hasStoredPhoneDeviceToken(storage, 'default')).toBe(false)
+		expect(await getPhoneDeviceToken(storage, 'default')).toBeNull()
 	} finally {
-		close()
+		await close()
 	}
 })
 
-test('saving a phone device token requires HOME_CONNECTOR_DATA_KEY', () => {
-	const { storage, close } = createStorage({ sharedSecret: null })
+test('saving a phone device token requires HOME_CONNECTOR_DATA_KEY', async () => {
+	const { storage, close } = await createStorage({ sharedSecret: null })
 	try {
-		expect(() =>
+		await expect(
 			savePhoneDeviceToken({
 				storage,
 				connectorId: 'default',
 				token: 'phone-token',
 			}),
-		).toThrow(/HOME_CONNECTOR_DATA_KEY/)
+		).rejects.toThrow(/HOME_CONNECTOR_DATA_KEY/)
 	} finally {
-		close()
+		await close()
 	}
 })

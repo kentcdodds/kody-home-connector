@@ -116,7 +116,7 @@ function createTokenVerifier(input: {
 }): OAuthTokenVerifier {
 	return {
 		async verifyAccessToken(token: string): Promise<AuthInfo> {
-			const record = readActiveOAuthToken(
+			const record = await readActiveOAuthToken(
 				input.storage.db,
 				hashOAuthSecret(token),
 				nowSeconds(),
@@ -232,7 +232,7 @@ async function handleAuthorizePost(input: {
 			redirectUris: metadata.redirect_uris,
 		})
 		const code = createOAuthSecret()
-		insertAuthorizationCode(input.storage.db, {
+		await insertAuthorizationCode(input.storage.db, {
 			codeHash: hashOAuthSecret(code),
 			clientId,
 			redirectUri,
@@ -274,7 +274,7 @@ async function handleToken(input: {
 		const redirectUri = String(form.get('redirect_uri') ?? '')
 		const clientId = String(form.get('client_id') ?? '')
 		const codeVerifier = String(form.get('code_verifier') ?? '')
-		const record = consumeAuthorizationCode(
+		const record = await consumeAuthorizationCode(
 			input.storage.db,
 			hashOAuthSecret(code),
 			nowSeconds(),
@@ -300,10 +300,11 @@ async function handleToken(input: {
 	if (grantType === 'refresh_token') {
 		const refreshToken = String(form.get('refresh_token') ?? '')
 		const clientId = String(form.get('client_id') ?? '')
-		const record = readActiveOAuthToken(
+		const now = nowSeconds()
+		const record = await readActiveOAuthToken(
 			input.storage.db,
 			hashOAuthSecret(refreshToken),
-			nowSeconds(),
+			now,
 		)
 		if (
 			!record ||
@@ -312,7 +313,9 @@ async function handleToken(input: {
 		) {
 			return jsonError(400, 'invalid_grant', 'Refresh token is invalid.')
 		}
-		revokeOAuthToken(input.storage.db, record.tokenHash)
+		if (!(await revokeOAuthToken(input.storage.db, record.tokenHash, now))) {
+			return jsonError(400, 'invalid_grant', 'Refresh token is invalid.')
+		}
 		return issueTokenPair({
 			storage: input.storage,
 			clientId,
@@ -323,7 +326,7 @@ async function handleToken(input: {
 	return jsonError(400, 'unsupported_grant_type', 'Unsupported grant_type.')
 }
 
-function issueTokenPair(input: {
+async function issueTokenPair(input: {
 	storage: HomeConnectorStorage
 	clientId: string
 	resource: string
@@ -332,7 +335,7 @@ function issueTokenPair(input: {
 	const accessToken = createOAuthSecret()
 	const refreshToken = createOAuthSecret()
 	const issuedAt = nowSeconds()
-	insertOAuthToken(input.storage.db, {
+	await insertOAuthToken(input.storage.db, {
 		tokenHash: hashOAuthSecret(accessToken),
 		tokenKind: 'access',
 		clientId: input.clientId,
@@ -341,7 +344,7 @@ function issueTokenPair(input: {
 		expiresAt: issuedAt + accessTokenTtlSeconds,
 		revokedAt: null,
 	})
-	insertOAuthToken(input.storage.db, {
+	await insertOAuthToken(input.storage.db, {
 		tokenHash: hashOAuthSecret(refreshToken),
 		tokenKind: 'refresh',
 		clientId: input.clientId,
@@ -366,7 +369,11 @@ async function handleRevoke(input: {
 	const form = await input.request.formData()
 	const token = String(form.get('token') ?? '')
 	if (token) {
-		revokeOAuthToken(input.storage.db, hashOAuthSecret(token))
+		await revokeOAuthToken(
+			input.storage.db,
+			hashOAuthSecret(token),
+			nowSeconds(),
+		)
 	}
 	return new Response(null, { status: 200 })
 }

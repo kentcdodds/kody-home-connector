@@ -127,7 +127,7 @@ export function registerKasaHomeConnectorTools(input: {
 			},
 		},
 		async () => {
-			const status = kasa.getStatus()
+			const status = await kasa.getStatus()
 			return structuredTextResult(
 				status.plugs.length === 0
 					? 'No Kasa smart plugs are currently known.'
@@ -167,8 +167,8 @@ export function registerKasaHomeConnectorTools(input: {
 			sdkInputSchema: selectorSchema.sdkInputSchema,
 		},
 		async (args) => {
-			return await handleExpectedKasaError(() => {
-				const plug = kasa.adoptPlug(getSelector(args))
+			return await handleExpectedKasaError(async () => {
+				const plug = await kasa.adoptPlug(getSelector(args))
 				return structuredTextResult(`Adopted Kasa smart plug ${plug.alias}.`, {
 					plug,
 				})
@@ -186,8 +186,8 @@ export function registerKasaHomeConnectorTools(input: {
 			sdkInputSchema: selectorSchema.sdkInputSchema,
 		},
 		async (args) => {
-			return await handleExpectedKasaError(() => {
-				const plug = kasa.forgetPlug(getSelector(args))
+			return await handleExpectedKasaError(async () => {
+				const plug = await kasa.forgetPlug(getSelector(args))
 				return structuredTextResult(`Forgot Kasa smart plug ${plug.alias}.`, {
 					plug,
 				})
@@ -216,7 +216,7 @@ export function registerKasaHomeConnectorTools(input: {
 			sdkInputSchema: credentialsSchema.sdkInputSchema,
 		},
 		async (args) => {
-			const status = kasa.setCredentials(
+			const status = await kasa.setCredentials(
 				String(args['username'] ?? ''),
 				String(args['password'] ?? ''),
 			)

@@ -1,5 +1,8 @@
+import { and, notInList, type TableRow } from 'remix/data-table'
 import { type HomeConnectorStorage } from '../../storage/index.ts'
 import { decryptSecret, encryptSecret } from '../../storage/encrypted-secret.ts'
+import { kasaCredentials, kasaPlugs } from '../../storage/schema.ts'
+import { compareNoCase, compareText } from '../../storage/sort.ts'
 import {
 	type KasaCredentials,
 	type KasaDiscoveredPlug,
@@ -8,30 +11,6 @@ import {
 	type KasaRelayState,
 	type KasaSysInfo,
 } from './types.ts'
-
-type KasaPlugRow = {
-	connector_id: string
-	plug_id: string
-	alias: string
-	host: string
-	port: number
-	model: string | null
-	mac: string | null
-	device_id: string | null
-	relay_state: string | null
-	adopted: number
-	raw_sysinfo_json: string | null
-	raw_discovery_json: string | null
-	last_seen_at: string | null
-}
-
-type KasaCredentialsRow = {
-	connector_id: string
-	username: string
-	password: string
-	last_authenticated_at: string | null
-	last_auth_error: string | null
-}
 
 function encryptPassword(password: string, sharedSecret: string | null) {
 	return encryptSecret({
@@ -75,7 +54,7 @@ function normalizeRelayState(value: string | null): KasaRelayState {
 	return value === 'on' || value === 'off' ? value : 'unknown'
 }
 
-function mapPlugRow(row: KasaPlugRow): KasaPersistedPlug {
+function mapPlugRow(row: TableRow<typeof kasaPlugs>): KasaPersistedPlug {
 	return {
 		plugId: row.plug_id,
 		alias: row.alias,
@@ -102,184 +81,27 @@ function toPublicPlug(
 	}
 }
 
-function selectPlugRows(
+export async function listKasaPlugs(
 	storage: HomeConnectorStorage,
 	connectorId: string,
-): Array<KasaPlugRow> {
-	return storage.db
-		.query(
-			`
-				SELECT
-					connector_id,
-					plug_id,
-					alias,
-					host,
-					port,
-					model,
-					mac,
-					device_id,
-					relay_state,
-					adopted,
-					raw_sysinfo_json,
-					raw_discovery_json,
-					last_seen_at
-				FROM kasa_plugs
-				WHERE connector_id = ?
-				ORDER BY alias COLLATE NOCASE, plug_id
-			`,
+) {
+	const rows = await storage.db.findMany(kasaPlugs, {
+		where: { connector_id: connectorId },
+	})
+	return rows
+		.sort(
+			(a, b) =>
+				compareNoCase(a.alias, b.alias) || compareText(a.plug_id, b.plug_id),
 		)
-		.all(connectorId) as Array<KasaPlugRow>
+		.map(mapPlugRow)
 }
 
-function getUpsertPlugStatement(storage: HomeConnectorStorage) {
-	return storage.db.query(`
-		INSERT INTO kasa_plugs (
-			connector_id,
-			plug_id,
-			alias,
-			host,
-			port,
-			model,
-			mac,
-			device_id,
-			relay_state,
-			adopted,
-			raw_sysinfo_json,
-			raw_discovery_json,
-			last_seen_at,
-			updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(connector_id, plug_id) DO UPDATE SET
-			alias = excluded.alias,
-			host = excluded.host,
-			port = excluded.port,
-			model = excluded.model,
-			mac = excluded.mac,
-			device_id = excluded.device_id,
-			relay_state = excluded.relay_state,
-			adopted = CASE
-				WHEN excluded.adopted = 1 THEN 1
-				ELSE adopted
-			END,
-			raw_sysinfo_json = excluded.raw_sysinfo_json,
-			raw_discovery_json = excluded.raw_discovery_json,
-			last_seen_at = excluded.last_seen_at,
-			updated_at = excluded.updated_at
-	`)
-}
-
-function getDeleteMissingUnadoptedPlugsStatement(
-	storage: HomeConnectorStorage,
-) {
-	return storage.db.query(`
-		DELETE FROM kasa_plugs AS plug
-		WHERE plug.connector_id = ?
-			AND plug.plug_id NOT IN (
-				SELECT value
-				FROM json_each(?)
-			)
-			AND plug.adopted = 0
-	`)
-}
-
-function getMarkPlugAdoptedStatement(storage: HomeConnectorStorage) {
-	return storage.db.query(`
-		UPDATE kasa_plugs
-		SET adopted = 1,
-			updated_at = CURRENT_TIMESTAMP
-		WHERE connector_id = ? AND plug_id = ?
-	`)
-}
-
-function getDeletePlugStatement(storage: HomeConnectorStorage) {
-	return storage.db.query(`
-		DELETE FROM kasa_plugs
-		WHERE connector_id = ? AND plug_id = ?
-	`)
-}
-
-function getDeletePlugByHostStatement(storage: HomeConnectorStorage) {
-	return storage.db.query(`
-		DELETE FROM kasa_plugs
-		WHERE connector_id = ? AND host = ? AND port = ? AND plug_id = ?
-	`)
-}
-
-function getUpdateRelayStateStatement(storage: HomeConnectorStorage) {
-	return storage.db.query(`
-		UPDATE kasa_plugs
-		SET relay_state = ?,
-			raw_sysinfo_json = ?,
-			last_seen_at = ?,
-			updated_at = CURRENT_TIMESTAMP
-		WHERE connector_id = ? AND plug_id = ?
-	`)
-}
-
-function getUpsertCredentialsStatement(storage: HomeConnectorStorage) {
-	return storage.db.query(`
-		INSERT INTO kasa_credentials (
-			connector_id,
-			username,
-			password,
-			last_authenticated_at,
-			last_auth_error,
-			updated_at
-		) VALUES (?, ?, ?, ?, ?, ?)
-		ON CONFLICT(connector_id) DO UPDATE SET
-			username = excluded.username,
-			password = excluded.password,
-			last_authenticated_at = excluded.last_authenticated_at,
-			last_auth_error = excluded.last_auth_error,
-			updated_at = excluded.updated_at
-	`)
-}
-
-function getCredentialsRow(
-	storage: HomeConnectorStorage,
-	connectorId: string,
-): KasaCredentialsRow | null {
-	return (
-		(storage.db
-			.query(
-				`
-					SELECT
-						connector_id,
-						username,
-						password,
-						last_authenticated_at,
-						last_auth_error
-					FROM kasa_credentials
-					WHERE connector_id = ?
-				`,
-			)
-			.get(connectorId) as KasaCredentialsRow | undefined) ?? null
-	)
-}
-
-function getUpdateAuthStatusStatement(storage: HomeConnectorStorage) {
-	return storage.db.query(`
-		UPDATE kasa_credentials
-		SET last_authenticated_at = ?,
-			last_auth_error = ?,
-			updated_at = CURRENT_TIMESTAMP
-		WHERE connector_id = ?
-	`)
-}
-
-export function listKasaPlugs(
+export async function listKasaPublicPlugs(
 	storage: HomeConnectorStorage,
 	connectorId: string,
 ) {
-	return selectPlugRows(storage, connectorId).map(mapPlugRow)
-}
-
-export function listKasaPublicPlugs(
-	storage: HomeConnectorStorage,
-	connectorId: string,
-) {
-	const credentials = getKasaCredentials(storage, connectorId)
-	return listKasaPlugs(storage, connectorId).map((plug) =>
+	const credentials = await getKasaCredentials(storage, connectorId)
+	return (await listKasaPlugs(storage, connectorId)).map((plug) =>
 		toPublicPlug(plug, credentials),
 	)
 }
@@ -291,33 +113,33 @@ export function toKasaPublicPlug(
 	return toPublicPlug(plug, credentials)
 }
 
-export function getKasaPlug(
+export async function getKasaPlug(
 	storage: HomeConnectorStorage,
 	connectorId: string,
 	plugId: string,
 ) {
-	return (
-		listKasaPlugs(storage, connectorId).find(
-			(plug) => plug.plugId === plugId,
-		) ?? null
-	)
+	const row = await storage.db.find(kasaPlugs, {
+		connector_id: connectorId,
+		plug_id: plugId,
+	})
+	return row ? mapPlugRow(row) : null
 }
 
 function isHostFallbackPlugId(plugId: string) {
 	return plugId.startsWith('host:')
 }
 
-export function upsertDiscoveredKasaPlugs(
+export async function upsertDiscoveredKasaPlugs(
 	storage: HomeConnectorStorage,
 	connectorId: string,
 	plugs: Array<KasaDiscoveredPlug>,
 ) {
 	const existing = new Map(
-		listKasaPlugs(storage, connectorId).map((plug) => [plug.plugId, plug]),
+		(await listKasaPlugs(storage, connectorId)).map((plug) => [
+			plug.plugId,
+			plug,
+		]),
 	)
-	const now = new Date().toISOString()
-	const upsertStatement = getUpsertPlugStatement(storage)
-	const deleteHostFallbackStatement = getDeletePlugByHostStatement(storage)
 	for (const plug of plugs) {
 		const hostFallback = [...existing.values()].find(
 			(current) =>
@@ -327,58 +149,74 @@ export function upsertDiscoveredKasaPlugs(
 				!isHostFallbackPlugId(plug.plugId),
 		)
 		const adopted = existing.get(plug.plugId)?.adopted || hostFallback?.adopted
-		upsertStatement.run(
-			connectorId,
-			plug.plugId,
-			plug.alias,
-			plug.host,
-			plug.port,
-			plug.model,
-			plug.mac,
-			plug.deviceId,
-			plug.relayState,
-			adopted ? 1 : 0,
-			plug.rawSysinfo ? JSON.stringify(plug.rawSysinfo) : null,
-			plug.rawDiscovery ? JSON.stringify(plug.rawDiscovery) : null,
-			plug.lastSeenAt,
-			now,
-		)
+		await storage.db.query(kasaPlugs).upsert({
+			connector_id: connectorId,
+			plug_id: plug.plugId,
+			alias: plug.alias,
+			host: plug.host,
+			port: plug.port,
+			model: plug.model,
+			mac: plug.mac,
+			device_id: plug.deviceId,
+			relay_state: plug.relayState,
+			adopted: adopted ? 1 : 0,
+			raw_sysinfo_json: plug.rawSysinfo
+				? JSON.stringify(plug.rawSysinfo)
+				: null,
+			raw_discovery_json: plug.rawDiscovery
+				? JSON.stringify(plug.rawDiscovery)
+				: null,
+			last_seen_at: plug.lastSeenAt,
+		})
 		if (hostFallback) {
-			deleteHostFallbackStatement.run(
-				connectorId,
-				hostFallback.host,
-				hostFallback.port,
-				hostFallback.plugId,
-			)
+			await storage.db.deleteMany(kasaPlugs, {
+				where: {
+					connector_id: connectorId,
+					host: hostFallback.host,
+					port: hostFallback.port,
+					plug_id: hostFallback.plugId,
+				},
+			})
 		}
 	}
 	if (plugs.length > 0) {
-		getDeleteMissingUnadoptedPlugsStatement(storage).run(
-			connectorId,
-			JSON.stringify(plugs.map((plug) => plug.plugId)),
-		)
+		await storage.db.deleteMany(kasaPlugs, {
+			where: and(
+				{ connector_id: connectorId, adopted: 0 },
+				notInList(
+					'plug_id',
+					plugs.map((plug) => plug.plugId),
+				),
+			),
+		})
 	}
 	return listKasaPlugs(storage, connectorId)
 }
 
-export function adoptKasaPlug(
+export async function adoptKasaPlug(
 	storage: HomeConnectorStorage,
 	connectorId: string,
 	plugId: string,
 ) {
-	getMarkPlugAdoptedStatement(storage).run(connectorId, plugId)
+	await storage.db.updateMany(
+		kasaPlugs,
+		{ adopted: 1 },
+		{ where: { connector_id: connectorId, plug_id: plugId } },
+	)
 	return getKasaPlug(storage, connectorId, plugId)
 }
 
-export function removeKasaPlug(input: {
+export async function removeKasaPlug(input: {
 	storage: HomeConnectorStorage
 	connectorId: string
 	plugId: string
 }) {
-	getDeletePlugStatement(input.storage).run(input.connectorId, input.plugId)
+	await input.storage.db.deleteMany(kasaPlugs, {
+		where: { connector_id: input.connectorId, plug_id: input.plugId },
+	})
 }
 
-export function updateKasaPlugSysinfo(input: {
+export async function updateKasaPlugSysinfo(input: {
 	storage: HomeConnectorStorage
 	connectorId: string
 	plugId: string
@@ -386,17 +224,21 @@ export function updateKasaPlugSysinfo(input: {
 	rawSysinfo: KasaSysInfo | null
 	lastSeenAt: string
 }) {
-	getUpdateRelayStateStatement(input.storage).run(
-		input.relayState,
-		input.rawSysinfo ? JSON.stringify(input.rawSysinfo) : null,
-		input.lastSeenAt,
-		input.connectorId,
-		input.plugId,
+	await input.storage.db.updateMany(
+		kasaPlugs,
+		{
+			relay_state: input.relayState,
+			raw_sysinfo_json: input.rawSysinfo
+				? JSON.stringify(input.rawSysinfo)
+				: null,
+			last_seen_at: input.lastSeenAt,
+		},
+		{ where: { connector_id: input.connectorId, plug_id: input.plugId } },
 	)
 	return getKasaPlug(input.storage, input.connectorId, input.plugId)
 }
 
-export function saveKasaCredentials(input: {
+export async function saveKasaCredentials(input: {
 	storage: HomeConnectorStorage
 	connectorId: string
 	username: string
@@ -404,23 +246,23 @@ export function saveKasaCredentials(input: {
 	lastAuthenticatedAt?: string | null
 	lastAuthError?: string | null
 }) {
-	const now = new Date().toISOString()
-	getUpsertCredentialsStatement(input.storage).run(
-		input.connectorId,
-		encryptUsername(input.username, input.storage.sharedSecret),
-		encryptPassword(input.password, input.storage.sharedSecret),
-		input.lastAuthenticatedAt ?? null,
-		input.lastAuthError ?? null,
-		now,
-	)
+	await input.storage.db.query(kasaCredentials).upsert({
+		connector_id: input.connectorId,
+		username: encryptUsername(input.username, input.storage.sharedSecret),
+		password: encryptPassword(input.password, input.storage.sharedSecret),
+		last_authenticated_at: input.lastAuthenticatedAt ?? null,
+		last_auth_error: input.lastAuthError ?? null,
+	})
 	return getKasaCredentials(input.storage, input.connectorId)
 }
 
-export function getKasaCredentials(
+export async function getKasaCredentials(
 	storage: HomeConnectorStorage,
 	connectorId: string,
-): KasaCredentials | null {
-	const row = getCredentialsRow(storage, connectorId)
+): Promise<KasaCredentials | null> {
+	const row = await storage.db.find(kasaCredentials, {
+		connector_id: connectorId,
+	})
 	if (!row) return null
 	const username = decryptUsername(row.username, storage.sharedSecret)
 	const password = decryptPassword(row.password, storage.sharedSecret)
@@ -434,15 +276,18 @@ export function getKasaCredentials(
 	}
 }
 
-export function updateKasaAuthStatus(input: {
+export async function updateKasaAuthStatus(input: {
 	storage: HomeConnectorStorage
 	connectorId: string
 	lastAuthenticatedAt: string | null
 	lastAuthError: string | null
 }) {
-	getUpdateAuthStatusStatement(input.storage).run(
-		input.lastAuthenticatedAt,
-		input.lastAuthError,
-		input.connectorId,
+	await input.storage.db.updateMany(
+		kasaCredentials,
+		{
+			last_authenticated_at: input.lastAuthenticatedAt,
+			last_auth_error: input.lastAuthError,
+		},
+		{ where: { connector_id: input.connectorId } },
 	)
 }

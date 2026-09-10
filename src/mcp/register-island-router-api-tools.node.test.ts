@@ -15,7 +15,7 @@ test('registers Island Router API proxy tools and handlers call the adapter', as
 	}> = []
 	const islandRouterApi = {
 		writeConfirmation: islandRouterApiWriteConfirmation,
-		getStatus() {
+		async getStatus() {
 			return {
 				configured: true,
 				hasStoredPin: true,
@@ -24,13 +24,13 @@ test('registers Island Router API proxy tools and handlers call the adapter', as
 				baseUrl: 'https://my.islandrouter.com',
 			}
 		},
-		setPin(pin: string) {
+		async setPin(pin: string) {
 			expect(pin).toBe('123456')
-			return this.getStatus()
+			return await this.getStatus()
 		},
-		clearPin() {
+		async clearPin() {
 			return {
-				...this.getStatus(),
+				...(await this.getStatus()),
 				configured: false,
 				hasStoredPin: false,
 			}

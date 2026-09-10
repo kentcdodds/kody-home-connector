@@ -45,13 +45,13 @@ function createConfig(dbPath: string) {
 	}
 }
 
-test('sqlite storage persists Samsung TV devices and tokens', () => {
+test('sqlite storage persists Samsung TV devices and tokens', async () => {
 	const directory = mkdtempSync(path.join(tmpdir(), 'kody-home-connector-'))
 	const dbPath = path.join(directory, 'home-connector.sqlite')
-	const storage = createHomeConnectorStorage(createConfig(dbPath))
+	const storage = await createHomeConnectorStorage(createConfig(dbPath))
 
 	try {
-		upsertDiscoveredSamsungTvs(storage, 'default', [
+		await upsertDiscoveredSamsungTvs(storage, 'default', [
 			{
 				deviceId: 'samsung-tv-one',
 				name: 'Living Room The Frame',
@@ -70,8 +70,8 @@ test('sqlite storage persists Samsung TV devices and tokens', () => {
 				},
 			},
 		])
-		adoptSamsungTvDevice(storage, 'default', 'samsung-tv-one')
-		saveSamsungTvToken({
+		await adoptSamsungTvDevice(storage, 'default', 'samsung-tv-one')
+		await saveSamsungTvToken({
 			storage,
 			connectorId: 'default',
 			deviceId: 'samsung-tv-one',
@@ -79,7 +79,7 @@ test('sqlite storage persists Samsung TV devices and tokens', () => {
 			lastVerifiedAt: '2026-03-25T17:05:00.000Z',
 		})
 
-		const persistedDevices = listSamsungTvDevices(storage, 'default')
+		const persistedDevices = await listSamsungTvDevices(storage, 'default')
 		expect(persistedDevices).toHaveLength(1)
 		expect(persistedDevices[0]).toMatchObject({
 			deviceId: 'samsung-tv-one',
@@ -88,7 +88,7 @@ test('sqlite storage persists Samsung TV devices and tokens', () => {
 			lastVerifiedAt: '2026-03-25T17:05:00.000Z',
 		})
 	} finally {
-		storage.close()
+		await storage.close()
 		rmSync(directory, {
 			force: true,
 			recursive: true,
@@ -96,13 +96,13 @@ test('sqlite storage persists Samsung TV devices and tokens', () => {
 	}
 })
 
-test('sqlite storage persists Bond bridges and tokens', () => {
+test('sqlite storage persists Bond bridges and tokens', async () => {
 	const directory = mkdtempSync(path.join(tmpdir(), 'kody-home-connector-'))
 	const dbPath = path.join(directory, 'home-connector.sqlite')
-	const storage = createHomeConnectorStorage(createConfig(dbPath))
+	const storage = await createHomeConnectorStorage(createConfig(dbPath))
 
 	try {
-		upsertDiscoveredBondBridges(storage, 'default', [
+		await upsertDiscoveredBondBridges(storage, 'default', [
 			{
 				bridgeId: 'BONDTEST1',
 				bondid: 'BONDTEST1',
@@ -116,8 +116,8 @@ test('sqlite storage persists Bond bridges and tokens', () => {
 				rawDiscovery: { test: true },
 			},
 		])
-		adoptBondBridge(storage, 'default', 'BONDTEST1')
-		saveBondToken({
+		await adoptBondBridge(storage, 'default', 'BONDTEST1')
+		await saveBondToken({
 			storage,
 			connectorId: 'default',
 			bridgeId: 'BONDTEST1',
@@ -126,7 +126,7 @@ test('sqlite storage persists Bond bridges and tokens', () => {
 			lastAuthError: null,
 		})
 
-		const bridges = listBondBridges(storage, 'default')
+		const bridges = await listBondBridges(storage, 'default')
 		expect(bridges).toHaveLength(1)
 		expect(bridges[0]).toMatchObject({
 			bridgeId: 'BONDTEST1',
@@ -135,11 +135,11 @@ test('sqlite storage persists Bond bridges and tokens', () => {
 			host: 'bond.test.local',
 		})
 
-		expect(() =>
+		await expect(
 			releaseBondBridge(storage, 'default', 'missing-bridge'),
-		).toThrow('missing-bridge')
+		).rejects.toThrow('missing-bridge')
 
-		upsertDiscoveredBondBridges(storage, 'default', [
+		await upsertDiscoveredBondBridges(storage, 'default', [
 			{
 				bridgeId: 'BONDGHOST',
 				bondid: 'BONDGHOST',
@@ -153,13 +153,13 @@ test('sqlite storage persists Bond bridges and tokens', () => {
 				rawDiscovery: {},
 			},
 		])
-		expect(listBondBridges(storage, 'default')).toHaveLength(2)
-		pruneNonAdoptedBondBridges(storage, 'default')
-		const afterPrune = listBondBridges(storage, 'default')
+		expect(await listBondBridges(storage, 'default')).toHaveLength(2)
+		await pruneNonAdoptedBondBridges(storage, 'default')
+		const afterPrune = await listBondBridges(storage, 'default')
 		expect(afterPrune).toHaveLength(1)
 		expect(afterPrune[0]?.bridgeId).toBe('BONDTEST1')
 	} finally {
-		storage.close()
+		await storage.close()
 		rmSync(directory, {
 			force: true,
 			recursive: true,
@@ -167,27 +167,27 @@ test('sqlite storage persists Bond bridges and tokens', () => {
 	}
 })
 
-test('sqlite storage persists Venstar managed thermostats', () => {
+test('sqlite storage persists Venstar managed thermostats', async () => {
 	const directory = mkdtempSync(path.join(tmpdir(), 'kody-home-connector-'))
 	const dbPath = path.join(directory, 'home-connector.sqlite')
-	const storage = createHomeConnectorStorage(createConfig(dbPath))
+	const storage = await createHomeConnectorStorage(createConfig(dbPath))
 
 	try {
-		upsertVenstarThermostat({
+		await upsertVenstarThermostat({
 			storage,
 			connectorId: 'default',
 			name: 'Hallway',
 			ip: '192.168.10.40',
 			lastSeenAt: '2026-04-13T18:00:00.000Z',
 		})
-		upsertVenstarThermostat({
+		await upsertVenstarThermostat({
 			storage,
 			connectorId: 'default',
 			name: 'Office',
 			ip: '192.168.10.41',
 		})
 
-		expect(listVenstarThermostats(storage, 'default')).toEqual([
+		expect(await listVenstarThermostats(storage, 'default')).toEqual([
 			{
 				name: 'Hallway',
 				ip: '192.168.10.40',
@@ -200,13 +200,13 @@ test('sqlite storage persists Venstar managed thermostats', () => {
 			},
 		])
 
-		removeVenstarThermostat({
+		await removeVenstarThermostat({
 			storage,
 			connectorId: 'default',
 			ip: '192.168.10.41',
 		})
 
-		expect(listVenstarThermostats(storage, 'default')).toEqual([
+		expect(await listVenstarThermostats(storage, 'default')).toEqual([
 			{
 				name: 'Hallway',
 				ip: '192.168.10.40',
@@ -214,7 +214,7 @@ test('sqlite storage persists Venstar managed thermostats', () => {
 			},
 		])
 	} finally {
-		storage.close()
+		await storage.close()
 		rmSync(directory, {
 			force: true,
 			recursive: true,

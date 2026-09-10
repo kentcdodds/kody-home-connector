@@ -24,7 +24,7 @@ installHomeConnectorMockServer()
 test('samsung tv scan persists discovered devices and diagnostics', async () => {
 	const config = createConfig()
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const samsungTv = createSamsungTvAdapter({
 		config,
 		state,
@@ -33,20 +33,20 @@ test('samsung tv scan persists discovered devices and diagnostics', async () => 
 
 	try {
 		const devices = await samsungTv.scan()
-		const status = samsungTv.getStatus()
+		const status = await samsungTv.getStatus()
 
 		expect(devices.length).toBeGreaterThan(0)
 		expect(status.allDevices.length).toBe(devices.length)
 		expect(status.diagnostics).not.toBeNull()
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })
 
 test('samsung tv pairing stores a reusable token for an adopted device', async () => {
 	const config = createConfig()
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const samsungTv = createSamsungTvAdapter({
 		config,
 		state,
@@ -56,21 +56,21 @@ test('samsung tv pairing stores a reusable token for an adopted device', async (
 	try {
 		const devices = await samsungTv.scan()
 		const deviceId = devices[0]!.deviceId
-		samsungTv.adoptDevice(deviceId)
+		await samsungTv.adoptDevice(deviceId)
 
 		const paired = await samsungTv.pairDevice(deviceId)
 
 		expect(paired.token).toBeTruthy()
-		expect(samsungTv.getStatus().pairedCount).toBe(1)
+		expect((await samsungTv.getStatus()).pairedCount).toBe(1)
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })
 
 test('samsung tv control and art mode work in mock mode after pairing', async () => {
 	const config = createConfig()
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const samsungTv = createSamsungTvAdapter({
 		config,
 		state,
@@ -82,7 +82,7 @@ test('samsung tv control and art mode work in mock mode after pairing', async ()
 		const deviceId = devices.find(
 			(device) => device.name === 'Living Room The Frame',
 		)!.deviceId
-		samsungTv.adoptDevice(deviceId)
+		await samsungTv.adoptDevice(deviceId)
 		await samsungTv.pairDevice(deviceId)
 
 		const keypress = await samsungTv.pressKey(deviceId, 'KEY_MUTE')
@@ -106,14 +106,14 @@ test('samsung tv control and art mode work in mock mode after pairing', async ()
 		expect(artModeOn.mode).toBe('on')
 		expect(artMode.mode).toBe('on')
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })
 
 test('samsung tv power off and power on update the stored power state', async () => {
 	const config = createConfig()
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const samsungTv = createSamsungTvAdapter({
 		config,
 		state,
@@ -125,13 +125,13 @@ test('samsung tv power off and power on update the stored power state', async ()
 		const deviceId = devices.find(
 			(device) => device.name === 'Living Room The Frame',
 		)!.deviceId
-		samsungTv.adoptDevice(deviceId)
+		await samsungTv.adoptDevice(deviceId)
 		await samsungTv.pairDevice(deviceId)
 
 		const poweredOff = await samsungTv.powerOff(deviceId)
-		const statusAfterOff = samsungTv.getStatus()
+		const statusAfterOff = await samsungTv.getStatus()
 		const poweredOn = await samsungTv.powerOn(deviceId)
-		const statusAfterOn = samsungTv.getStatus()
+		const statusAfterOn = await samsungTv.getStatus()
 
 		expect(poweredOff).toMatchObject({
 			deviceId,
@@ -150,7 +150,7 @@ test('samsung tv power off and power on update the stored power state', async ()
 				?.powerState,
 		).toBe('on')
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })
 
@@ -160,7 +160,7 @@ test('samsung tv refresh keeps the original device id stable', async () => {
 		mocksEnabled: false,
 	}
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const samsungTv = createSamsungTvAdapter({
 		config,
 		state,
@@ -197,7 +197,7 @@ test('samsung tv refresh keeps the original device id stable', async () => {
 	}
 
 	try {
-		upsertDiscoveredSamsungTvs(storage, config.homeConnectorId, [
+		await upsertDiscoveredSamsungTvs(storage, config.homeConnectorId, [
 			{
 				deviceId: originalDeviceId,
 				name: 'Original Frame TV',
@@ -220,7 +220,7 @@ test('samsung tv refresh keeps the original device id stable', async () => {
 		])
 
 		const refreshed = await samsungTv.getDeviceInfo(originalDeviceId)
-		const status = samsungTv.getStatus()
+		const status = await samsungTv.getStatus()
 
 		expect(refreshed.deviceId).toBe(originalDeviceId)
 		expect(refreshed.name).toBe('Renamed Frame TV')
@@ -229,6 +229,37 @@ test('samsung tv refresh keeps the original device id stable', async () => {
 		expect(status.allDevices[0]?.name).toBe('Renamed Frame TV')
 	} finally {
 		globalThis.fetch = originalFetch
-		storage.close()
+		await storage.close()
+	}
+})
+
+test('samsung tv scan tolerates duplicate discovery records', async () => {
+	const config = createConfig()
+	const storage = await createHomeConnectorStorage(config)
+	const record = {
+		deviceId: 'samsung-tv-duplicate',
+		name: 'Duplicate Frame TV',
+		host: 'duplicate.test',
+		serviceUrl: 'http://duplicate.test:8001/api/v2/',
+		model: null,
+		modelName: null,
+		macAddress: null,
+		frameTvSupport: false,
+		tokenAuthSupport: true,
+		powerState: null,
+		lastSeenAt: new Date().toISOString(),
+		adopted: false,
+		rawDeviceInfo: null,
+	}
+	try {
+		const devices = await upsertDiscoveredSamsungTvs(
+			storage,
+			config.homeConnectorId,
+			[record, { ...record, name: 'Duplicate Frame TV (again)' }],
+		)
+		expect(devices).toHaveLength(1)
+		expect(devices[0]?.name).toBe('Duplicate Frame TV (again)')
+	} finally {
+		await storage.close()
 	}
 })

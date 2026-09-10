@@ -1,12 +1,12 @@
 import { createHash, randomBytes } from 'node:crypto'
-import { type HomeConnectorStorage } from '../storage/index.ts'
+import { and, gt, isNull, type TableRow } from 'remix/data-table'
+import { type HomeConnectorDatabase } from '../storage/index.ts'
+import { oauthAuthorizationCodes, oauthTokens } from '../storage/schema.ts'
 
 export const mcpOAuthScope = 'mcp'
 export const authorizationCodeTtlSeconds = 10 * 60
 export const accessTokenTtlSeconds = 60 * 60
 export const refreshTokenTtlSeconds = 30 * 24 * 60 * 60
-
-type SqliteDatabase = HomeConnectorStorage['db']
 
 export type OAuthAuthorizationCodeRecord = {
 	codeHash: string
@@ -38,84 +38,44 @@ export function createOAuthSecret() {
 	return randomBytes(32).toString('base64url')
 }
 
-export function initializeOAuthSchema(db: SqliteDatabase) {
-	db.exec(`
-		CREATE TABLE IF NOT EXISTS oauth_authorization_codes (
-			code_hash TEXT PRIMARY KEY NOT NULL,
-			client_id TEXT NOT NULL,
-			redirect_uri TEXT NOT NULL,
-			code_challenge TEXT NOT NULL,
-			code_challenge_method TEXT NOT NULL,
-			resource TEXT NOT NULL,
-			scope TEXT NOT NULL,
-			expires_at INTEGER NOT NULL,
-			consumed_at INTEGER
-		);
-
-		CREATE TABLE IF NOT EXISTS oauth_tokens (
-			token_hash TEXT PRIMARY KEY NOT NULL,
-			token_kind TEXT NOT NULL,
-			client_id TEXT NOT NULL,
-			resource TEXT NOT NULL,
-			scope TEXT NOT NULL,
-			expires_at INTEGER NOT NULL,
-			revoked_at INTEGER
-		);
-	`)
-}
-
-export function insertAuthorizationCode(
-	db: SqliteDatabase,
+export async function insertAuthorizationCode(
+	db: HomeConnectorDatabase,
 	record: OAuthAuthorizationCodeRecord,
 ) {
-	db.query(
-		`INSERT INTO oauth_authorization_codes (
-			code_hash, client_id, redirect_uri, code_challenge,
-			code_challenge_method, resource, scope, expires_at, consumed_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-	).run(
-		record.codeHash,
-		record.clientId,
-		record.redirectUri,
-		record.codeChallenge,
-		record.codeChallengeMethod,
-		record.resource,
-		record.scope,
-		record.expiresAt,
-		record.consumedAt,
-	)
+	await db.create(oauthAuthorizationCodes, {
+		code_hash: record.codeHash,
+		client_id: record.clientId,
+		redirect_uri: record.redirectUri,
+		code_challenge: record.codeChallenge,
+		code_challenge_method: record.codeChallengeMethod,
+		resource: record.resource,
+		scope: record.scope,
+		expires_at: record.expiresAt,
+		consumed_at: record.consumedAt,
+	})
 }
 
-export function consumeAuthorizationCode(
-	db: SqliteDatabase,
+export async function consumeAuthorizationCode(
+	db: HomeConnectorDatabase,
 	codeHash: string,
 	nowSeconds: number,
-): OAuthAuthorizationCodeRecord | null {
-	const row = db
-		.query(
-			`SELECT code_hash, client_id, redirect_uri, code_challenge,
-				code_challenge_method, resource, scope, expires_at, consumed_at
-			FROM oauth_authorization_codes WHERE code_hash = ?`,
-		)
-		.get(codeHash) as
-		| {
-				code_hash: string
-				client_id: string
-				redirect_uri: string
-				code_challenge: string
-				code_challenge_method: string
-				resource: string
-				scope: string
-				expires_at: number
-				consumed_at: number | null
-		  }
-		| undefined
+): Promise<OAuthAuthorizationCodeRecord | null> {
+	const row = await db.find(oauthAuthorizationCodes, { code_hash: codeHash })
 	if (!row || row.consumed_at != null || row.expires_at <= nowSeconds) {
 		return null
 	}
-	db.query(
-		`UPDATE oauth_authorization_codes SET consumed_at = ? WHERE code_hash = ?`,
-	).run(nowSeconds, codeHash)
+	const consumed = await db.updateMany(
+		oauthAuthorizationCodes,
+		{ consumed_at: nowSeconds },
+		{
+			where: and(
+				{ code_hash: codeHash },
+				isNull('consumed_at'),
+				gt('expires_at', nowSeconds),
+			),
+		},
+	)
+	if (consumed.affectedRows !== 1) return null
 	return {
 		codeHash: row.code_hash,
 		clientId: row.client_id,
@@ -129,46 +89,22 @@ export function consumeAuthorizationCode(
 	}
 }
 
-export function insertOAuthToken(db: SqliteDatabase, record: OAuthTokenRecord) {
-	db.query(
-		`INSERT INTO oauth_tokens (
-			token_hash, token_kind, client_id, resource, scope, expires_at, revoked_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-	).run(
-		record.tokenHash,
-		record.tokenKind,
-		record.clientId,
-		record.resource,
-		record.scope,
-		record.expiresAt,
-		record.revokedAt,
-	)
+export async function insertOAuthToken(
+	db: HomeConnectorDatabase,
+	record: OAuthTokenRecord,
+) {
+	await db.create(oauthTokens, {
+		token_hash: record.tokenHash,
+		token_kind: record.tokenKind,
+		client_id: record.clientId,
+		resource: record.resource,
+		scope: record.scope,
+		expires_at: record.expiresAt,
+		revoked_at: record.revokedAt,
+	})
 }
 
-export function readActiveOAuthToken(
-	db: SqliteDatabase,
-	tokenHash: string,
-	nowSeconds: number,
-): OAuthTokenRecord | null {
-	const row = db
-		.query(
-			`SELECT token_hash, token_kind, client_id, resource, scope, expires_at, revoked_at
-			FROM oauth_tokens WHERE token_hash = ?`,
-		)
-		.get(tokenHash) as
-		| {
-				token_hash: string
-				token_kind: 'access' | 'refresh'
-				client_id: string
-				resource: string
-				scope: string
-				expires_at: number
-				revoked_at: number | null
-		  }
-		| undefined
-	if (!row || row.revoked_at != null || row.expires_at <= nowSeconds) {
-		return null
-	}
+function mapOAuthTokenRow(row: TableRow<typeof oauthTokens>): OAuthTokenRecord {
 	return {
 		tokenHash: row.token_hash,
 		tokenKind: row.token_kind,
@@ -180,9 +116,33 @@ export function readActiveOAuthToken(
 	}
 }
 
-export function revokeOAuthToken(db: SqliteDatabase, tokenHash: string) {
-	db.query(`UPDATE oauth_tokens SET revoked_at = ? WHERE token_hash = ?`).run(
-		Math.floor(Date.now() / 1000),
-		tokenHash,
+export async function readActiveOAuthToken(
+	db: HomeConnectorDatabase,
+	tokenHash: string,
+	nowSeconds: number,
+): Promise<OAuthTokenRecord | null> {
+	const row = await db.find(oauthTokens, { token_hash: tokenHash })
+	if (!row || row.revoked_at != null || row.expires_at <= nowSeconds) {
+		return null
+	}
+	return mapOAuthTokenRow(row)
+}
+
+export async function revokeOAuthToken(
+	db: HomeConnectorDatabase,
+	tokenHash: string,
+	nowSeconds: number,
+): Promise<boolean> {
+	const revoked = await db.updateMany(
+		oauthTokens,
+		{ revoked_at: nowSeconds },
+		{
+			where: and(
+				{ token_hash: tokenHash },
+				isNull('revoked_at'),
+				gt('expires_at', nowSeconds),
+			),
+		},
 	)
+	return revoked.affectedRows === 1
 }

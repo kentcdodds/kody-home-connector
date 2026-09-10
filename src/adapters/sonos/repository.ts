@@ -1,26 +1,12 @@
+import { and, notInList, type TableRow } from 'remix/data-table'
 import { type HomeConnectorStorage } from '../../storage/index.ts'
+import { sonosPlayers } from '../../storage/schema.ts'
+import { compareNoCase, compareText } from '../../storage/sort.ts'
 import { type SonosPersistedPlayer, type SonosPlayerRecord } from './types.ts'
 
-type SonosPlayerRow = {
-	connector_id: string
-	player_id: string
-	udn: string
-	room_name: string
-	display_name: string | null
-	friendly_name: string
-	model_name: string | null
-	model_number: string | null
-	serial_num: string | null
-	household_id: string | null
-	host: string
-	description_url: string
-	audio_input_supported: number
-	adopted: number
-	last_seen_at: string | null
-	raw_description_xml: string | null
-}
-
-function mapSonosPlayerRow(row: SonosPlayerRow): SonosPersistedPlayer {
+function mapSonosPlayerRow(
+	row: TableRow<typeof sonosPlayers>,
+): SonosPersistedPlayer {
 	return {
 		playerId: row.player_id,
 		udn: row.udn,
@@ -40,119 +26,40 @@ function mapSonosPlayerRow(row: SonosPlayerRow): SonosPersistedPlayer {
 	}
 }
 
-function selectSonosPlayerRows(
-	storage: HomeConnectorStorage,
-	connectorId: string,
-): Array<SonosPlayerRow> {
-	const statement = storage.db.query(`
-		SELECT
-			connector_id,
-			player_id,
-			udn,
-			room_name,
-			display_name,
-			friendly_name,
-			model_name,
-			model_number,
-			serial_num,
-			household_id,
-			host,
-			description_url,
-			audio_input_supported,
-			adopted,
-			last_seen_at,
-			raw_description_xml
-		FROM sonos_players
-		WHERE connector_id = ?
-		ORDER BY room_name COLLATE NOCASE, player_id
-	`)
-	return statement.all(connectorId) as Array<SonosPlayerRow>
-}
-
-function getUpsertSonosPlayerStatement(storage: HomeConnectorStorage) {
-	return storage.db.query(`
-		INSERT INTO sonos_players (
-			connector_id,
-			player_id,
-			udn,
-			room_name,
-			display_name,
-			friendly_name,
-			model_name,
-			model_number,
-			serial_num,
-			household_id,
-			host,
-			description_url,
-			audio_input_supported,
-			adopted,
-			last_seen_at,
-			raw_description_xml,
-			updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(connector_id, player_id) DO UPDATE SET
-			udn = excluded.udn,
-			room_name = excluded.room_name,
-			display_name = excluded.display_name,
-			friendly_name = excluded.friendly_name,
-			model_name = excluded.model_name,
-			model_number = excluded.model_number,
-			serial_num = excluded.serial_num,
-			household_id = excluded.household_id,
-			host = excluded.host,
-			description_url = excluded.description_url,
-			audio_input_supported = excluded.audio_input_supported,
-			last_seen_at = excluded.last_seen_at,
-			raw_description_xml = excluded.raw_description_xml,
-			updated_at = excluded.updated_at
-	`)
-}
-
-function getDeleteMissingSonosPlayersStatement(storage: HomeConnectorStorage) {
-	return storage.db.query(`
-		DELETE FROM sonos_players
-		WHERE connector_id = ?
-			AND player_id NOT IN (
-				SELECT value
-				FROM json_each(?)
-			)
-			AND adopted = 0
-	`)
-}
-
-function getUpdateSonosAdoptedStatement(storage: HomeConnectorStorage) {
-	return storage.db.query(`
-		UPDATE sonos_players
-		SET adopted = ?, updated_at = CURRENT_TIMESTAMP
-		WHERE connector_id = ? AND player_id = ?
-	`)
-}
-
-export function listSonosPlayers(
+export async function listSonosPlayers(
 	storage: HomeConnectorStorage,
 	connectorId: string,
 ) {
-	return selectSonosPlayerRows(storage, connectorId).map(mapSonosPlayerRow)
+	const rows = await storage.db.findMany(sonosPlayers, {
+		where: { connector_id: connectorId },
+	})
+	return rows
+		.sort(
+			(a, b) =>
+				compareNoCase(a.room_name, b.room_name) ||
+				compareText(a.player_id, b.player_id),
+		)
+		.map(mapSonosPlayerRow)
 }
 
-export function getSonosPlayer(
+export async function getSonosPlayer(
 	storage: HomeConnectorStorage,
 	connectorId: string,
 	playerId: string,
 ) {
-	return (
-		listSonosPlayers(storage, connectorId).find(
-			(player) => player.playerId === playerId,
-		) ?? null
-	)
+	const row = await storage.db.find(sonosPlayers, {
+		connector_id: connectorId,
+		player_id: playerId,
+	})
+	return row ? mapSonosPlayerRow(row) : null
 }
 
-export function requireSonosPlayer(
+export async function requireSonosPlayer(
 	storage: HomeConnectorStorage,
 	connectorId: string,
 	playerId: string,
 ) {
-	const player = getSonosPlayer(storage, connectorId, playerId)
+	const player = await getSonosPlayer(storage, connectorId, playerId)
 	if (!player) {
 		const error = new Error(
 			`Sonos player "${playerId}" was not found.`,
@@ -178,53 +85,65 @@ export function requireSonosPlayer(
 	return player
 }
 
-export function upsertDiscoveredSonosPlayers(
+export async function upsertDiscoveredSonosPlayers(
 	storage: HomeConnectorStorage,
 	connectorId: string,
 	players: Array<SonosPlayerRecord>,
 ) {
-	const existing = new Map(
-		listSonosPlayers(storage, connectorId).map((player) => [
-			player.playerId,
-			player,
-		]),
+	const knownPlayerIds = new Set(
+		(await listSonosPlayers(storage, connectorId)).map(
+			(player) => player.playerId,
+		),
 	)
-	const now = new Date().toISOString()
-	const upsertStatement = getUpsertSonosPlayerStatement(storage)
 	for (const player of players) {
-		const current = existing.get(player.playerId)
-		upsertStatement.run(
-			connectorId,
-			player.playerId,
-			player.udn,
-			player.roomName,
-			player.displayName,
-			player.friendlyName,
-			player.modelName,
-			player.modelNumber,
-			player.serialNum,
-			player.householdId,
-			player.host,
-			player.descriptionUrl,
-			player.audioInputSupported ? 1 : 0,
-			current?.adopted ? 1 : player.adopted ? 1 : 0,
-			player.lastSeenAt,
-			player.rawDescriptionXml,
-			now,
-		)
+		const values = {
+			udn: player.udn,
+			room_name: player.roomName,
+			display_name: player.displayName,
+			friendly_name: player.friendlyName,
+			model_name: player.modelName,
+			model_number: player.modelNumber,
+			serial_num: player.serialNum,
+			household_id: player.householdId,
+			host: player.host,
+			description_url: player.descriptionUrl,
+			audio_input_supported: player.audioInputSupported ? 1 : 0,
+			last_seen_at: player.lastSeenAt,
+			raw_description_xml: player.rawDescriptionXml,
+		}
+		const key = { connector_id: connectorId, player_id: player.playerId }
+		if (knownPlayerIds.has(player.playerId)) {
+			await storage.db.update(sonosPlayers, key, values)
+		} else {
+			await storage.db.create(sonosPlayers, {
+				...key,
+				adopted: player.adopted ? 1 : 0,
+				...values,
+			})
+			knownPlayerIds.add(player.playerId)
+		}
 	}
-	getDeleteMissingSonosPlayersStatement(storage).run(
-		connectorId,
-		JSON.stringify(players.map((player) => player.playerId)),
-	)
+	await storage.db.deleteMany(sonosPlayers, {
+		where: and(
+			{ connector_id: connectorId, adopted: 0 },
+			notInList(
+				'player_id',
+				players.map((player) => player.playerId),
+			),
+		),
+	})
 	return listSonosPlayers(storage, connectorId)
 }
 
-export function adoptSonosPlayer(
+export async function adoptSonosPlayer(
 	storage: HomeConnectorStorage,
 	connectorId: string,
 	playerId: string,
 ) {
-	getUpdateSonosAdoptedStatement(storage).run(1, connectorId, playerId)
+	await storage.db.updateMany(
+		sonosPlayers,
+		{ adopted: 1 },
+		{ where: { connector_id: connectorId, player_id: playerId } },
+	)
 	return getSonosPlayer(storage, connectorId, playerId)
 }
