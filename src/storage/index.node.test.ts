@@ -70,7 +70,7 @@ test('sqlite storage persists Samsung TV devices and tokens', async () => {
 				},
 			},
 		])
-		adoptSamsungTvDevice(storage, 'default', 'samsung-tv-one')
+		await adoptSamsungTvDevice(storage, 'default', 'samsung-tv-one')
 		await saveSamsungTvToken({
 			storage,
 			connectorId: 'default',

@@ -1,7 +1,6 @@
--- Baseline schema. Every statement is idempotent so this migration adopts
--- databases created by releases that predate versioned migrations (they already
--- contain these tables) as well as brand-new databases. There is intentionally
--- no down.sql: reverting the baseline would drop live data.
+-- Schema created by the pre-migration startup code (src/storage/index.ts and
+-- src/oauth/store.ts before versioned migrations). Used to build databases that
+-- exercise the baseline migration's adoption of existing installs.
 
 CREATE TABLE IF NOT EXISTS samsung_tvs (
 	connector_id TEXT NOT NULL,

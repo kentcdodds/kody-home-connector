@@ -35,15 +35,24 @@ export function createHomeConnectorDatabase(dbPath: string) {
 	)
 }
 
+export function loadHomeConnectorMigrations() {
+	return loadMigrations(migrationsDirectory)
+}
+
 export async function migrateHomeConnectorDatabase(db: HomeConnectorDatabase) {
-	await db.migrate(await loadMigrations(migrationsDirectory))
+	await db.migrate(await loadHomeConnectorMigrations())
 }
 
 export async function createHomeConnectorStorage(
 	config: HomeConnectorConfig,
 ): Promise<HomeConnectorStorage> {
 	const db = createHomeConnectorDatabase(config.dbPath)
-	await migrateHomeConnectorDatabase(db)
+	try {
+		await migrateHomeConnectorDatabase(db)
+	} catch (error) {
+		await db.close()
+		throw error
+	}
 	return {
 		db,
 		sharedSecret: config.sharedSecret,
