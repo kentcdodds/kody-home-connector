@@ -344,7 +344,7 @@ export function createKasaSetupHandler(
 							message: 'Unknown form action.',
 						})
 					}
-					kasa.setCredentials(
+					await kasa.setCredentials(
 						String(form.get('username') ?? ''),
 						String(form.get('password') ?? ''),
 					)

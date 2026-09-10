@@ -65,16 +65,20 @@ export async function upsertDiscoveredJellyfishControllers(input: {
 			firmware_version: controller.firmwareVersion,
 			last_seen_at: controller.lastSeenAt,
 		}
-		await input.storage.db.query(jellyfishControllers).upsert(
-			{
-				connector_id: input.connectorId,
-				controller_id: controller.controllerId,
+		const key = {
+			connector_id: input.connectorId,
+			controller_id: controller.controllerId,
+		}
+		if (await input.storage.db.find(jellyfishControllers, key)) {
+			await input.storage.db.update(jellyfishControllers, key, values)
+		} else {
+			await input.storage.db.create(jellyfishControllers, {
+				...key,
 				last_connected_at: null,
 				last_error: null,
 				...values,
-			},
-			{ update: values },
-		)
+			})
+		}
 	}
 	return listJellyfishControllers(input.storage, input.connectorId)
 }

@@ -207,7 +207,7 @@ export function createIslandRouterApiSetupHandler(
 					const intent = String(form.get('intent') ?? '')
 
 					if (intent === 'set-pin') {
-						islandRouterApi.setPin(String(form.get('pin') ?? ''))
+						await islandRouterApi.setPin(String(form.get('pin') ?? ''))
 						return renderPage({
 							tone: 'success',
 							message: 'Saved Island Router API PIN.',
@@ -215,7 +215,7 @@ export function createIslandRouterApiSetupHandler(
 					}
 
 					if (intent === 'clear-pin') {
-						islandRouterApi.clearPin()
+						await islandRouterApi.clearPin()
 						return renderPage({
 							tone: 'success',
 							message: 'Cleared Island Router API PIN.',

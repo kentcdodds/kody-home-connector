@@ -23,7 +23,7 @@ installHomeConnectorMockServer()
 test('lutron scan persists discovered processors and diagnostics', async () => {
 	const config = createConfig()
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const lutron = createLutronAdapter({
 		config,
 		state,
@@ -32,20 +32,20 @@ test('lutron scan persists discovered processors and diagnostics', async () => {
 
 	try {
 		const processors = await lutron.scan()
-		const status = lutron.getStatus()
+		const status = await lutron.getStatus()
 
 		expect(processors.length).toBeGreaterThan(0)
 		expect(status.processors.length).toBe(processors.length)
 		expect(status.diagnostics).not.toBeNull()
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })
 
 test('lutron inventory and commands work in mock mode with stored credentials', async () => {
 	const config = createConfig()
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const lutron = createLutronAdapter({
 		config,
 		state,
@@ -55,7 +55,11 @@ test('lutron inventory and commands work in mock mode with stored credentials', 
 	try {
 		const processors = await lutron.scan()
 		const processorId = processors[0]!.processorId
-		lutron.setCredentials(processorId, 'mock-lutron-user', 'mock-lutron-pass')
+		await lutron.setCredentials(
+			processorId,
+			'mock-lutron-user',
+			'mock-lutron-pass',
+		)
 
 		await lutron.authenticate(processorId)
 		const inventory = await lutron.getInventory(processorId)
@@ -105,9 +109,9 @@ test('lutron inventory and commands work in mock mode with stored credentials', 
 				saturation: 50,
 			}),
 		).rejects.toBeInstanceOf(LutronInvalidZoneIdError)
-		const statusAfterInvalidZone = lutron
-			.getStatus()
-			.processors.find((processor) => processor.processorId === processorId)
+		const statusAfterInvalidZone = (await lutron.getStatus()).processors.find(
+			(processor) => processor.processorId === processorId,
+		)
 		expect(statusAfterInvalidZone?.lastAuthenticatedAt).toBe(
 			authenticatedBeforeInvalidZone.lastAuthenticatedAt,
 		)
@@ -123,6 +127,6 @@ test('lutron inventory and commands work in mock mode with stored credentials', 
 		expect(updatedZone?.status?.switchedLevel).toBe('Off')
 		expect(updatedSpectrum?.status?.level).toBe(42)
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })

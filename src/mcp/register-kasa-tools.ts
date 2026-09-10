@@ -216,7 +216,7 @@ export function registerKasaHomeConnectorTools(input: {
 			sdkInputSchema: credentialsSchema.sdkInputSchema,
 		},
 		async (args) => {
-			const status = kasa.setCredentials(
+			const status = await kasa.setCredentials(
 				String(args['username'] ?? ''),
 				String(args['password'] ?? ''),
 			)

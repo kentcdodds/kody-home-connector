@@ -64,9 +64,9 @@ function createConfig(dataPath = '/tmp'): HomeConnectorConfig {
 	}
 }
 
-function createAdapters(config: HomeConnectorConfig) {
-	const storage = createHomeConnectorStorage(config)
-	upsertVenstarThermostat({
+async function createAdapters(config: HomeConnectorConfig) {
+	const storage = await createHomeConnectorStorage(config)
+	await upsertVenstarThermostat({
 		storage,
 		connectorId: config.homeConnectorId,
 		name: 'Hallway',
@@ -197,7 +197,7 @@ test('home route toggles worker snapshot link by connector id', async () => {
 		venstar,
 		kasa,
 		phone,
-	} = createAdapters(config)
+	} = await createAdapters(config)
 	state.connection.connectorId = 'default'
 	state.connection.mcpUrl = config.mcpUrl
 	state.connection.listening = true
@@ -231,7 +231,7 @@ test('home route toggles worker snapshot link by connector id', async () => {
 		expect(htmlWithConnector).toContain('Home connector dashboard')
 		expect(htmlWithConnector).toContain('Island router diagnostics')
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })
 
@@ -251,7 +251,7 @@ test('read-only routes serve HEAD and reject other methods with 405', async () =
 		venstar,
 		kasa,
 		phone,
-	} = createAdapters(config)
+	} = await createAdapters(config)
 	try {
 		const router = createHomeConnectorRouter(
 			state,
@@ -286,7 +286,7 @@ test('read-only routes serve HEAD and reject other methods with 405', async () =
 		const unknownResponse = await router.fetch('http://example.test/nope')
 		expect(unknownResponse.status).toBe(404)
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })
 
@@ -306,7 +306,7 @@ test('venstar status scan shows discovered thermostats', async () => {
 		venstar,
 		kasa,
 		phone,
-	} = createAdapters(config)
+	} = await createAdapters(config)
 	try {
 		const router = createHomeConnectorRouter(
 			state,
@@ -334,14 +334,14 @@ test('venstar status scan shows discovered thermostats', async () => {
 		const html = await response.text()
 		expect(html).toContain('Office')
 		expect(html).toContain('192.168.10.41')
-		expect(venstar.listThermostats()).toMatchObject([
+		expect(await venstar.listThermostats()).toMatchObject([
 			{
 				name: 'Hallway',
 				ip: 'venstar.mock.local',
 			},
 		])
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })
 
@@ -362,7 +362,7 @@ test('venstar status can adopt a discovered thermostat', async () => {
 		venstar,
 		kasa,
 		phone,
-	} = createAdapters(config)
+	} = await createAdapters(config)
 	try {
 		const router = createHomeConnectorRouter(
 			state,
@@ -402,7 +402,7 @@ test('venstar status can adopt a discovered thermostat', async () => {
 
 		expect(response.status).toBe(200)
 		await response.text()
-		expect(venstar.listThermostats()).toMatchObject([
+		expect(await venstar.listThermostats()).toMatchObject([
 			{
 				name: 'Hallway',
 				ip: 'venstar.mock.local',
@@ -415,7 +415,7 @@ test('venstar status can adopt a discovered thermostat', async () => {
 			},
 		])
 	} finally {
-		storage.close()
+		await storage.close()
 		rmSync(dataPath, { recursive: true, force: true })
 	}
 })
@@ -437,7 +437,7 @@ test('venstar setup can save and remove thermostats directly', async () => {
 		venstar,
 		kasa,
 		phone,
-	} = createAdapters(config)
+	} = await createAdapters(config)
 	try {
 		venstar.removeThermostat('venstar.mock.local')
 		const router = createHomeConnectorRouter(
@@ -472,7 +472,7 @@ test('venstar setup can save and remove thermostats directly', async () => {
 		)
 		expect(saveResponse.status).toBe(200)
 		await saveResponse.text()
-		expect(venstar.listThermostats()).toEqual([
+		expect(await venstar.listThermostats()).toEqual([
 			{ name: 'UPSTAIRS', ip: '192.168.0.71', lastSeenAt: null },
 		])
 
@@ -491,9 +491,9 @@ test('venstar setup can save and remove thermostats directly', async () => {
 		)
 		expect(removeResponse.status).toBe(200)
 		await removeResponse.text()
-		expect(venstar.listThermostats()).toEqual([])
+		expect(await venstar.listThermostats()).toEqual([])
 	} finally {
-		storage.close()
+		await storage.close()
 		rmSync(dataPath, { recursive: true, force: true })
 	}
 })
@@ -514,18 +514,22 @@ test('access networks unleashed setup can adopt a controller and save auth infor
 		venstar,
 		kasa,
 		phone,
-	} = createAdapters(config)
+	} = await createAdapters(config)
 	try {
-		upsertDiscoveredAccessNetworksUnleashedControllers(storage, 'default', [
-			{
-				controllerId: '192.168.1.10',
-				name: 'Unleashed Demo',
-				host: '192.168.1.10',
-				loginUrl: 'https://192.168.1.10/admin/login.jsp',
-				lastSeenAt: '2026-05-03T21:40:00.000Z',
-				rawDiscovery: { probeUrl: 'https://192.168.1.10/' },
-			},
-		])
+		await upsertDiscoveredAccessNetworksUnleashedControllers(
+			storage,
+			'default',
+			[
+				{
+					controllerId: '192.168.1.10',
+					name: 'Unleashed Demo',
+					host: '192.168.1.10',
+					loginUrl: 'https://192.168.1.10/admin/login.jsp',
+					lastSeenAt: '2026-05-03T21:40:00.000Z',
+					rawDiscovery: { probeUrl: 'https://192.168.1.10/' },
+				},
+			],
+		)
 
 		const router = createHomeConnectorRouter(
 			state,
@@ -580,7 +584,7 @@ test('access networks unleashed setup can adopt a controller and save auth infor
 		const saveHtml = await saveResponse.text()
 		expect(saveHtml).toContain('Saved auth information for Unleashed Demo.')
 		expect(saveHtml).toContain('stored locally')
-		expect(accessNetworksUnleashed.listControllers()).toEqual(
+		expect(await accessNetworksUnleashed.listControllers()).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({
 					controllerId: '192.168.1.10',
@@ -590,7 +594,7 @@ test('access networks unleashed setup can adopt a controller and save auth infor
 			]),
 		)
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })
 
@@ -610,7 +614,7 @@ test('kasa setup saves credentials without echoing the password', async () => {
 		venstar,
 		kasa,
 		phone,
-	} = createAdapters(config)
+	} = await createAdapters(config)
 	try {
 		const router = createHomeConnectorRouter(
 			state,
@@ -653,7 +657,7 @@ test('kasa setup saves credentials without echoing the password', async () => {
 		expect(saveHtml).toContain('kent@example.com')
 		expect(saveHtml).toContain('configured')
 		expect(saveHtml).not.toContain('super-secret-kasa-password')
-		expect(kasa.getConfigStatus()).toMatchObject({
+		expect(await kasa.getConfigStatus()).toMatchObject({
 			configured: true,
 			hasStoredCredentials: true,
 			username: 'kent@example.com',
@@ -678,9 +682,9 @@ test('kasa setup saves credentials without echoing the password', async () => {
 		expect(crossOriginHtml).toContain(
 			'Rejected cross-origin credential submission.',
 		)
-		expect(kasa.getConfigStatus().username).toBe('kent@example.com')
+		expect((await kasa.getConfigStatus()).username).toBe('kent@example.com')
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })
 
@@ -700,7 +704,7 @@ test('kasa setup accepts LAN host origin when request URL is localhost', async (
 		venstar,
 		kasa,
 		phone,
-	} = createAdapters(config)
+	} = await createAdapters(config)
 	try {
 		const router = createHomeConnectorRouter(
 			state,
@@ -739,12 +743,12 @@ test('kasa setup accepts LAN host origin when request URL is localhost', async (
 		const saveHtml = await saveResponse.text()
 		expect(saveHtml).toContain('Saved Kasa credentials.')
 		expect(saveHtml).not.toContain('Rejected cross-origin')
-		expect(kasa.getConfigStatus()).toMatchObject({
+		expect(await kasa.getConfigStatus()).toMatchObject({
 			configured: true,
 			username: 'kent@example.com',
 		})
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })
 
@@ -764,7 +768,7 @@ test('kasa setup accepts LAN origin with explicit port when Host omits port', as
 		venstar,
 		kasa,
 		phone,
-	} = createAdapters(config)
+	} = await createAdapters(config)
 	try {
 		const router = createHomeConnectorRouter(
 			state,
@@ -804,7 +808,7 @@ test('kasa setup accepts LAN origin with explicit port when Host omits port', as
 		expect(saveHtml).toContain('Saved Kasa credentials.')
 		expect(saveHtml).not.toContain('Rejected cross-origin')
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })
 
@@ -824,10 +828,10 @@ test('kasa status reflects credential state and known plugs', async () => {
 		venstar,
 		kasa,
 		phone,
-	} = createAdapters(config)
+	} = await createAdapters(config)
 	try {
-		kasa.setCredentials('kent@example.com', 'super-secret-kasa-password')
-		upsertDiscoveredKasaPlugs(storage, 'default', [
+		await kasa.setCredentials('kent@example.com', 'super-secret-kasa-password')
+		await upsertDiscoveredKasaPlugs(storage, 'default', [
 			{
 				plugId: 'water-pump',
 				alias: 'Water recirculating pump',
@@ -873,7 +877,7 @@ test('kasa status reflects credential state and known plugs', async () => {
 		expect(statusHtml).toContain('Water recirculating pump')
 		expect(statusHtml).not.toContain('super-secret-kasa-password')
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })
 
@@ -893,7 +897,7 @@ test('island router api setup can save and clear the local pin', async () => {
 		venstar,
 		kasa,
 		phone,
-	} = createAdapters(config)
+	} = await createAdapters(config)
 	try {
 		const router = createHomeConnectorRouter(
 			state,
@@ -938,7 +942,7 @@ test('island router api setup can save and clear the local pin', async () => {
 		expect(saveHtml).toContain('PIN stored')
 		expect(saveHtml).toContain('yes')
 		expect(saveHtml).not.toContain('123456')
-		expect(islandRouterApi.getStatus()).toMatchObject({
+		expect(await islandRouterApi.getStatus()).toMatchObject({
 			configured: true,
 			hasStoredPin: true,
 		})
@@ -967,12 +971,12 @@ test('island router api setup can save and clear the local pin', async () => {
 		expect(await clearResponse.text()).toContain(
 			'Cleared Island Router API PIN.',
 		)
-		expect(islandRouterApi.getStatus()).toMatchObject({
+		expect(await islandRouterApi.getStatus()).toMatchObject({
 			configured: false,
 			hasStoredPin: false,
 		})
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })
 
@@ -992,7 +996,7 @@ test('health route returns ok json', async () => {
 		venstar,
 		kasa,
 		phone,
-	} = createAdapters(config)
+	} = await createAdapters(config)
 	try {
 		const router = createHomeConnectorRouter(
 			state,
@@ -1034,7 +1038,7 @@ test('health route returns ok json', async () => {
 			},
 		})
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })
 
@@ -1054,7 +1058,7 @@ test('system and diagnostics routes render aggregated admin surfaces', async () 
 		venstar,
 		kasa,
 		phone,
-	} = createAdapters(config)
+	} = await createAdapters(config)
 	state.connection.connectorId = 'default'
 	state.connection.mcpUrl = config.mcpUrl
 	state.connection.listening = true
@@ -1100,7 +1104,7 @@ test('system and diagnostics routes render aggregated admin surfaces', async () 
 		expect(diagnosticsHtml).toContain('&quot;listening&quot;: true')
 		expect(diagnosticsHtml).not.toContain('operator-password')
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })
 
@@ -1120,7 +1124,7 @@ test('dashboard starts Venstar and router reads in parallel', async () => {
 		venstar,
 		kasa,
 		phone,
-	} = createAdapters(config)
+	} = await createAdapters(config)
 	const started: Array<string> = []
 	let resolveVenstar: (() => void) | null = null
 	let resolveRouter: (() => void) | null = null
@@ -1171,7 +1175,7 @@ test('dashboard starts Venstar and router reads in parallel', async () => {
 	} finally {
 		venstar.listThermostatsWithStatus = originalVenstarList
 		islandRouter.getStatus = originalIslandRouterGetStatus
-		storage.close()
+		await storage.close()
 	}
 })
 
@@ -1191,7 +1195,7 @@ test('island router status route renders configuration details and host diagnosi
 		venstar,
 		kasa,
 		phone,
-	} = createAdapters(config)
+	} = await createAdapters(config)
 	try {
 		const router = createHomeConnectorRouter(
 			state,
@@ -1218,7 +1222,7 @@ test('island router status route renders configuration details and host diagnosi
 		expect(pageHtml).toContain('Host diagnosis')
 		expect(pageHtml).toContain('Host diagnosis failed')
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })
 
@@ -1239,7 +1243,7 @@ test('phone status and setup pages never render the device token', async () => {
 		venstar,
 		kasa,
 		phone,
-	} = createAdapters(config)
+	} = await createAdapters(config)
 	try {
 		const router = createHomeConnectorRouter(
 			state,
@@ -1291,7 +1295,7 @@ test('phone status and setup pages never render the device token', async () => {
 		expect(saveHtml).toContain('admin UI')
 		expect(saveHtml).not.toContain('ui-secret-phone-token')
 		expect(saveHtml).not.toContain('super-secret-phone-token')
-		expect(phone.getStatus()).toMatchObject({
+		expect(await phone.getStatus()).toMatchObject({
 			tokenConfigured: true,
 			hasStoredToken: true,
 			tokenSource: 'stored',
@@ -1315,8 +1319,8 @@ test('phone status and setup pages never render the device token', async () => {
 		expect(await crossOriginResponse.text()).toContain(
 			'Rejected cross-origin credential submission.',
 		)
-		expect(phone.getStatus().tokenSource).toBe('stored')
+		expect((await phone.getStatus()).tokenSource).toBe('stored')
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })

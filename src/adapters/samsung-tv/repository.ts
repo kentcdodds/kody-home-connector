@@ -95,15 +95,16 @@ export async function upsertDiscoveredSamsungTvs(
 				: null,
 			last_seen_at: device.lastSeenAt,
 		}
-		await storage.db.query(samsungTvs).upsert(
-			{
-				connector_id: connectorId,
-				device_id: device.deviceId,
-				adopted: current?.adopted ? 1 : device.adopted ? 1 : 0,
+		const key = { connector_id: connectorId, device_id: device.deviceId }
+		if (current) {
+			await storage.db.update(samsungTvs, key, values)
+		} else {
+			await storage.db.create(samsungTvs, {
+				...key,
+				adopted: device.adopted ? 1 : 0,
 				...values,
-			},
-			{ update: values },
-		)
+			})
+		}
 	}
 	await storage.db.deleteMany(samsungTvs, {
 		where: and(

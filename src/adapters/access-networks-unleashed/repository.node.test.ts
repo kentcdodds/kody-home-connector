@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { expect, test } from 'vitest'
 import { createHomeConnectorStorage } from '../../storage/index.ts'
+import { accessNetworksUnleashedCredentials } from '../../storage/schema.ts'
 import {
 	getAdoptedAccessNetworksUnleashedController,
 	listAccessNetworksUnleashedControllers,
@@ -60,32 +61,40 @@ function createConfigBase(dbPath: string) {
 	}
 }
 
-test('sqlite storage persists Unleashed controllers and encrypted credentials', () => {
+test('sqlite storage persists Unleashed controllers and encrypted credentials', async () => {
 	const directory = mkdtempSync(path.join(tmpdir(), 'kody-home-connector-'))
 	const dbPath = path.join(directory, 'home-connector.sqlite')
-	const storage = createHomeConnectorStorage(createConfig(dbPath))
+	const storage = await createHomeConnectorStorage(createConfig(dbPath))
 
 	try {
-		upsertDiscoveredAccessNetworksUnleashedControllers(storage, 'default', [
-			{
-				controllerId: '192.168.1.10',
-				name: 'Unleashed Kitchen',
-				host: '192.168.1.10',
-				loginUrl: 'https://192.168.1.10/admin/wsg/login.jsp',
-				lastSeenAt: '2026-05-03T19:20:00.000Z',
-				rawDiscovery: { probeUrl: 'https://192.168.1.10/' },
-			},
-			{
-				controllerId: '192.168.1.11',
-				name: 'Unleashed Office',
-				host: '192.168.1.11',
-				loginUrl: 'https://192.168.1.11/admin/wsg/login.jsp',
-				lastSeenAt: '2026-05-03T19:21:00.000Z',
-				rawDiscovery: { probeUrl: 'https://192.168.1.11/' },
-			},
-		])
-		adoptAccessNetworksUnleashedController(storage, 'default', '192.168.1.11')
-		saveAccessNetworksUnleashedCredentials({
+		await upsertDiscoveredAccessNetworksUnleashedControllers(
+			storage,
+			'default',
+			[
+				{
+					controllerId: '192.168.1.10',
+					name: 'Unleashed Kitchen',
+					host: '192.168.1.10',
+					loginUrl: 'https://192.168.1.10/admin/wsg/login.jsp',
+					lastSeenAt: '2026-05-03T19:20:00.000Z',
+					rawDiscovery: { probeUrl: 'https://192.168.1.10/' },
+				},
+				{
+					controllerId: '192.168.1.11',
+					name: 'Unleashed Office',
+					host: '192.168.1.11',
+					loginUrl: 'https://192.168.1.11/admin/wsg/login.jsp',
+					lastSeenAt: '2026-05-03T19:21:00.000Z',
+					rawDiscovery: { probeUrl: 'https://192.168.1.11/' },
+				},
+			],
+		)
+		await adoptAccessNetworksUnleashedController(
+			storage,
+			'default',
+			'192.168.1.11',
+		)
+		await saveAccessNetworksUnleashedCredentials({
 			storage,
 			connectorId: 'default',
 			controllerId: '192.168.1.11',
@@ -94,13 +103,13 @@ test('sqlite storage persists Unleashed controllers and encrypted credentials', 
 			lastAuthenticatedAt: '2026-05-03T19:22:00.000Z',
 		})
 
-		const controllers = listAccessNetworksUnleashedControllers(
+		const controllers = await listAccessNetworksUnleashedControllers(
 			storage,
 			'default',
 		)
 		expect(controllers).toHaveLength(2)
 		expect(
-			getAdoptedAccessNetworksUnleashedController(storage, 'default'),
+			await getAdoptedAccessNetworksUnleashedController(storage, 'default'),
 		).toMatchObject({
 			controllerId: '192.168.1.11',
 			adopted: true,
@@ -109,10 +118,8 @@ test('sqlite storage persists Unleashed controllers and encrypted credentials', 
 			lastAuthenticatedAt: '2026-05-03T19:22:00.000Z',
 		})
 
-		const publicControllers = listAccessNetworksUnleashedPublicControllers(
-			storage,
-			'default',
-		)
+		const publicControllers =
+			await listAccessNetworksUnleashedPublicControllers(storage, 'default')
 		expect(publicControllers).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({
@@ -129,43 +136,33 @@ test('sqlite storage persists Unleashed controllers and encrypted credentials', 
 			]),
 		)
 
-		const rawPasswordRow = storage.db
-			.query(
-				`
-					SELECT password
-					FROM access_networks_unleashed_credentials
-					WHERE connector_id = ? AND controller_id = ?
-				`,
-			)
-			.get('default', '192.168.1.11') as { password: string } | undefined
+		const rawPasswordRow = await storage.db.find(
+			accessNetworksUnleashedCredentials,
+			{ connector_id: 'default', controller_id: '192.168.1.11' },
+		)
 		expect(rawPasswordRow?.password).toMatch(/^enc:v1:/)
 		expect(rawPasswordRow?.password).not.toContain('admin-pass')
 		expect(rawPasswordRow?.password?.split(':')).toHaveLength(5)
 
-		removeAccessNetworksUnleashedController({
+		await removeAccessNetworksUnleashedController({
 			storage,
 			connectorId: 'default',
 			controllerId: '192.168.1.11',
 		})
 		expect(
-			storage.db
-				.query(
-					`
-						SELECT password
-						FROM access_networks_unleashed_credentials
-						WHERE connector_id = ? AND controller_id = ?
-					`,
-				)
-				.get('default', '192.168.1.11'),
-		).toBeUndefined()
+			await storage.db.find(accessNetworksUnleashedCredentials, {
+				connector_id: 'default',
+				controller_id: '192.168.1.11',
+			}),
+		).toBeNull()
 
-		const mismatchedSecretStorage = createHomeConnectorStorage(
+		const mismatchedSecretStorage = await createHomeConnectorStorage(
 			createConfig(path.join(directory, 'wrong-secret.sqlite'), {
 				sharedSecret: 'wrong-secret',
 			}),
 		)
 		try {
-			upsertDiscoveredAccessNetworksUnleashedControllers(
+			await upsertDiscoveredAccessNetworksUnleashedControllers(
 				mismatchedSecretStorage,
 				'default',
 				[
@@ -183,32 +180,21 @@ test('sqlite storage persists Unleashed controllers and encrypted credentials', 
 			if (!copiedCiphertext) {
 				throw new Error('Expected encrypted password row to exist')
 			}
-			mismatchedSecretStorage.db
-				.query(
-					`
-						INSERT INTO access_networks_unleashed_credentials (
-							connector_id,
-							controller_id,
-							username,
-							password,
-							last_authenticated_at,
-							last_auth_error,
-							updated_at
-						) VALUES (?, ?, ?, ?, ?, ?, ?)
-					`,
-				)
-				.run(
-					'default',
-					'192.168.1.11',
-					'admin-user',
-					copiedCiphertext,
-					'2026-05-03T19:22:00.000Z',
-					null,
-					'2026-05-03T19:22:00.000Z',
-				)
+			await mismatchedSecretStorage.db.create(
+				accessNetworksUnleashedCredentials,
+				{
+					connector_id: 'default',
+					controller_id: '192.168.1.11',
+					username: 'admin-user',
+					password: copiedCiphertext,
+					last_authenticated_at: '2026-05-03T19:22:00.000Z',
+					last_auth_error: null,
+					updated_at: '2026-05-03T19:22:00.000Z',
+				},
+			)
 
 			expect(
-				listAccessNetworksUnleashedPublicControllers(
+				await listAccessNetworksUnleashedPublicControllers(
 					mismatchedSecretStorage,
 					'default',
 				),
@@ -221,10 +207,10 @@ test('sqlite storage persists Unleashed controllers and encrypted credentials', 
 				]),
 			)
 		} finally {
-			mismatchedSecretStorage.close()
+			await mismatchedSecretStorage.close()
 		}
 	} finally {
-		storage.close()
+		await storage.close()
 		rmSync(directory, {
 			force: true,
 			recursive: true,
@@ -232,48 +218,60 @@ test('sqlite storage persists Unleashed controllers and encrypted credentials', 
 	}
 })
 
-test('adopting a lexicographically earlier controller still succeeds with the unique adopted index', () => {
+test('adopting a lexicographically earlier controller still succeeds with the unique adopted index', async () => {
 	const directory = mkdtempSync(path.join(tmpdir(), 'kody-home-connector-'))
 	const dbPath = path.join(directory, 'home-connector.sqlite')
-	const storage = createHomeConnectorStorage(createConfig(dbPath))
+	const storage = await createHomeConnectorStorage(createConfig(dbPath))
 
 	try {
-		upsertDiscoveredAccessNetworksUnleashedControllers(storage, 'default', [
-			{
-				controllerId: '192.168.1.2',
-				name: 'Later Controller',
-				host: '192.168.1.2',
-				loginUrl: 'https://192.168.1.2/admin/wsg/login.jsp',
-				lastSeenAt: '2026-05-03T19:30:00.000Z',
-				rawDiscovery: null,
-			},
-			{
-				controllerId: '192.168.1.10',
-				name: 'Earlier Controller',
-				host: '192.168.1.10',
-				loginUrl: 'https://192.168.1.10/admin/wsg/login.jsp',
-				lastSeenAt: '2026-05-03T19:31:00.000Z',
-				rawDiscovery: null,
-			},
-		])
+		await upsertDiscoveredAccessNetworksUnleashedControllers(
+			storage,
+			'default',
+			[
+				{
+					controllerId: '192.168.1.2',
+					name: 'Later Controller',
+					host: '192.168.1.2',
+					loginUrl: 'https://192.168.1.2/admin/wsg/login.jsp',
+					lastSeenAt: '2026-05-03T19:30:00.000Z',
+					rawDiscovery: null,
+				},
+				{
+					controllerId: '192.168.1.10',
+					name: 'Earlier Controller',
+					host: '192.168.1.10',
+					loginUrl: 'https://192.168.1.10/admin/wsg/login.jsp',
+					lastSeenAt: '2026-05-03T19:31:00.000Z',
+					rawDiscovery: null,
+				},
+			],
+		)
 
-		adoptAccessNetworksUnleashedController(storage, 'default', '192.168.1.2')
-		adoptAccessNetworksUnleashedController(storage, 'default', '192.168.1.10')
+		await adoptAccessNetworksUnleashedController(
+			storage,
+			'default',
+			'192.168.1.2',
+		)
+		await adoptAccessNetworksUnleashedController(
+			storage,
+			'default',
+			'192.168.1.10',
+		)
 
 		expect(
-			getAdoptedAccessNetworksUnleashedController(storage, 'default'),
+			await getAdoptedAccessNetworksUnleashedController(storage, 'default'),
 		).toMatchObject({
 			controllerId: '192.168.1.10',
 			adopted: true,
 		})
 
 		expect(
-			listAccessNetworksUnleashedControllers(storage, 'default').filter(
+			(await listAccessNetworksUnleashedControllers(storage, 'default')).filter(
 				(controller) => controller.adopted,
 			),
 		).toHaveLength(1)
 	} finally {
-		storage.close()
+		await storage.close()
 		rmSync(directory, {
 			force: true,
 			recursive: true,

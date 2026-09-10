@@ -113,15 +113,16 @@ export async function upsertDiscoveredSonosPlayers(
 			last_seen_at: player.lastSeenAt,
 			raw_description_xml: player.rawDescriptionXml,
 		}
-		await storage.db.query(sonosPlayers).upsert(
-			{
-				connector_id: connectorId,
-				player_id: player.playerId,
-				adopted: current?.adopted ? 1 : player.adopted ? 1 : 0,
+		const key = { connector_id: connectorId, player_id: player.playerId }
+		if (current) {
+			await storage.db.update(sonosPlayers, key, values)
+		} else {
+			await storage.db.create(sonosPlayers, {
+				...key,
+				adopted: player.adopted ? 1 : 0,
 				...values,
-			},
-			{ update: values },
-		)
+			})
+		}
 	}
 	await storage.db.deleteMany(sonosPlayers, {
 		where: and(

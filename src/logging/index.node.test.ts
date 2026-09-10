@@ -1,6 +1,7 @@
-import { expect, test } from 'vitest'
+import { expect, test, vi } from 'vitest'
 import { type HomeConnectorConfig } from '../config.ts'
 import { createHomeConnectorStorage } from '../storage/index.ts'
+import { homeConnectorLogs } from '../storage/schema.ts'
 import { createHomeConnectorLogger, sanitizeLogValue } from './index.ts'
 
 const silentConsole = {
@@ -52,7 +53,7 @@ function createConfig(): HomeConnectorConfig {
 	}
 }
 
-test('sanitizeLogValue redacts secret-shaped keys and inline credentials', () => {
+test('sanitizeLogValue redacts secret-shaped keys and inline credentials', async () => {
 	const sanitized = sanitizeLogValue({
 		token: 'abc123',
 		headers: {
@@ -74,9 +75,9 @@ test('sanitizeLogValue redacts secret-shaped keys and inline credentials', () =>
 	})
 })
 
-test('logger persists sanitized entries and supports filtered reads', () => {
+test('logger persists sanitized entries and supports filtered reads', async () => {
 	const config = createConfig()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const logger = createHomeConnectorLogger({
 		config,
 		storage,
@@ -90,7 +91,7 @@ test('logger persists sanitized entries and supports filtered reads', () => {
 		url: 'https://example.com?apiKey=abc123',
 	})
 
-	const logs = logger.listLogs({
+	const logs = await logger.listLogs({
 		level: 'info',
 		event: 'tool.call.finished',
 		query: 'bond_list_bridges',
@@ -111,9 +112,9 @@ test('logger persists sanitized entries and supports filtered reads', () => {
 	})
 })
 
-test('logger writes sanitized values to the console sink', () => {
+test('logger writes sanitized values to the console sink', async () => {
 	const config = createConfig()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const consoleCalls: Array<Array<unknown>> = []
 	const logger = createHomeConnectorLogger({
 		config,
@@ -150,9 +151,9 @@ test('logger writes sanitized values to the console sink', () => {
 	})
 })
 
-test('logger writes sanitized structured context as one console line', () => {
+test('logger writes sanitized structured context as one console line', async () => {
 	const config = createConfig()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const consoleCalls: Array<Array<unknown>> = []
 	const logger = createHomeConnectorLogger({
 		config,
@@ -189,16 +190,12 @@ test('logger writes sanitized structured context as one console line', () => {
 	})
 })
 
-test('logger still writes entries when retention pruning fails', () => {
+test('logger still writes entries when retention pruning fails', async () => {
 	const config = createConfig()
-	const storage = createHomeConnectorStorage(config)
-	const originalQuery = storage.db.query.bind(storage.db)
-	storage.db.query = (sql) => {
-		if (sql.includes('DELETE FROM home_connector_logs')) {
-			throw new Error('delete failed token=abc123')
-		}
-		return originalQuery(sql)
-	}
+	const storage = await createHomeConnectorStorage(config)
+	vi.spyOn(storage.db, 'deleteMany').mockRejectedValue(
+		new Error('delete failed token=abc123'),
+	)
 	const logger = createHomeConnectorLogger({
 		config,
 		storage,
@@ -208,20 +205,16 @@ test('logger still writes entries when retention pruning fails', () => {
 
 	logger.info('test.persisted', 'Persisted after prune failure')
 
-	expect(logger.listLogs({ event: 'test.persisted' })).toHaveLength(1)
+	expect(await logger.listLogs({ event: 'test.persisted' })).toHaveLength(1)
 })
 
-test('logger sanitizes persistence failure console warnings', () => {
+test('logger sanitizes persistence failure console warnings', async () => {
 	const config = createConfig()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const consoleCalls: Array<Array<unknown>> = []
-	const originalQuery = storage.db.query.bind(storage.db)
-	storage.db.query = (sql) => {
-		if (sql.includes('INSERT INTO home_connector_logs')) {
-			throw new Error('insert failed token=abc123')
-		}
-		return originalQuery(sql)
-	}
+	vi.spyOn(storage.db, 'create').mockRejectedValue(
+		new Error('insert failed token=abc123'),
+	)
 	const logger = createHomeConnectorLogger({
 		config,
 		storage,
@@ -237,6 +230,7 @@ test('logger sanitizes persistence failure console warnings', () => {
 	})
 
 	logger.info('test.failed_insert', 'Failed insert')
+	await logger.flush()
 
 	expect(JSON.stringify(consoleCalls)).not.toContain('abc123')
 	expect(consoleCalls.at(-1)).toHaveLength(1)
@@ -253,19 +247,15 @@ test('logger sanitizes persistence failure console warnings', () => {
 	})
 })
 
-test('logger writes prune failures as one sanitized console line', () => {
+test('logger writes prune failures as one sanitized console line', async () => {
 	const config = createConfig()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const consoleCalls: Array<Array<unknown>> = []
-	const originalQuery = storage.db.query.bind(storage.db)
-	storage.db.query = (sql) => {
-		if (sql.includes('DELETE FROM home_connector_logs')) {
-			throw new Error('delete failed token=abc123')
-		}
-		return originalQuery(sql)
-	}
+	vi.spyOn(storage.db, 'deleteMany').mockRejectedValue(
+		new Error('delete failed token=abc123'),
+	)
 
-	createHomeConnectorLogger({
+	const logger = createHomeConnectorLogger({
 		config,
 		storage,
 		console: {
@@ -278,6 +268,7 @@ test('logger writes prune failures as one sanitized console line', () => {
 		},
 		now: () => new Date('2026-05-12T18:00:00.000Z'),
 	})
+	await logger.flush()
 
 	expect(JSON.stringify(consoleCalls)).not.toContain('abc123')
 	expect(consoleCalls[0]).toHaveLength(1)
@@ -294,71 +285,50 @@ test('logger writes prune failures as one sanitized console line', () => {
 	})
 })
 
-test('logger excludes expired entries from reads', () => {
+test('logger excludes expired entries from reads', async () => {
 	const config = createConfig()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const logger = createHomeConnectorLogger({
 		config,
 		storage,
 		console: silentConsole,
 		now: () => new Date('2026-05-12T18:00:00.000Z'),
 	})
-	const statement = storage.db.query(
-		`
-			INSERT INTO home_connector_logs (
-				connector_id,
-				level,
-				event,
-				message,
-				metadata_json,
-				created_at
-			) VALUES (?, ?, ?, ?, ?, ?)
-		`,
-	)
-	statement.run(
-		config.homeConnectorId,
-		'info',
-		'old.event',
-		'old',
-		'{}',
-		'2026-05-01T00:00:00.000Z',
-	)
-	statement.run(
-		config.homeConnectorId,
-		'info',
-		'new.event',
-		'new',
-		'{}',
-		'2026-05-12T17:00:00.000Z',
-	)
+	await storage.db.createMany(homeConnectorLogs, [
+		{
+			connector_id: config.homeConnectorId,
+			level: 'info',
+			event: 'old.event',
+			message: 'old',
+			metadata_json: '{}',
+			created_at: '2026-05-01T00:00:00.000Z',
+		},
+		{
+			connector_id: config.homeConnectorId,
+			level: 'info',
+			event: 'new.event',
+			message: 'new',
+			metadata_json: '{}',
+			created_at: '2026-05-12T17:00:00.000Z',
+		},
+	])
 
-	expect(logger.listLogs().map((log) => log.event)).toEqual(['new.event'])
+	expect((await logger.listLogs()).map((log) => log.event)).toEqual([
+		'new.event',
+	])
 })
 
-test('logger prunes entries older than eight days', () => {
+test('logger prunes entries older than eight days', async () => {
 	const config = createConfig()
-	const storage = createHomeConnectorStorage(config)
-	storage.db
-		.query(
-			`
-			INSERT INTO home_connector_logs (
-				connector_id,
-				level,
-				event,
-				message,
-				metadata_json,
-				created_at
-			) VALUES (?, ?, ?, ?, ?, ?)
-		`,
-		)
-		.run(
-			config.homeConnectorId,
-			'info',
-			'old.event',
-			'old',
-			'{}',
-			'2026-05-01T00:00:00.000Z',
-		)
+	const storage = await createHomeConnectorStorage(config)
+	await storage.db.create(homeConnectorLogs, {
+		connector_id: config.homeConnectorId,
+		level: 'info',
+		event: 'old.event',
+		message: 'old',
+		metadata_json: '{}',
+		created_at: '2026-05-01T00:00:00.000Z',
+	})
 	const logger = createHomeConnectorLogger({
 		config,
 		storage,
@@ -366,5 +336,5 @@ test('logger prunes entries older than eight days', () => {
 		now: () => new Date('2026-05-12T18:00:00.000Z'),
 	})
 
-	expect(logger.listLogs()).toHaveLength(0)
+	expect(await logger.listLogs()).toHaveLength(0)
 })

@@ -26,7 +26,7 @@ installHomeConnectorMockServer()
 test('jellyfish scan persists discovered controllers and diagnostics', async () => {
 	const config = createConfig()
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const jellyfish = createJellyfishAdapter({
 		config,
 		state,
@@ -35,7 +35,7 @@ test('jellyfish scan persists discovered controllers and diagnostics', async () 
 
 	try {
 		const controllers = await jellyfish.scan()
-		const status = jellyfish.getStatus()
+		const status = await jellyfish.getStatus()
 		expect(controllers).toHaveLength(1)
 		expect(controllers[0]).toMatchObject({
 			hostname: 'JellyFish-F348.local',
@@ -43,14 +43,14 @@ test('jellyfish scan persists discovered controllers and diagnostics', async () 
 		})
 		expect(status.diagnostics?.protocol).toBe('json')
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })
 
 test('jellyfish list methods return structured zones, patterns, and parsed pattern data', async () => {
 	const config = createConfig()
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const jellyfish = createJellyfishAdapter({
 		config,
 		state,
@@ -88,14 +88,14 @@ test('jellyfish list methods return structured zones, patterns, and parsed patte
 			}),
 		})
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })
 
 test('jellyfish runPattern defaults to all zones when zoneNames are omitted', async () => {
 	const config = createConfig()
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const jellyfish = createJellyfishAdapter({
 		config,
 		state,
@@ -114,14 +114,14 @@ test('jellyfish runPattern defaults to all zones when zoneNames are omitted', as
 			zoneName: ['Zone'],
 		})
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })
 
 test('jellyfish schedule methods read and replace daily and calendar schedules', async () => {
 	const config = createConfig()
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const jellyfish = createJellyfishAdapter({
 		config,
 		state,
@@ -218,11 +218,11 @@ test('jellyfish schedule methods read and replace daily and calendar schedules',
 			],
 		})
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })
 
-test('parseScheduleResponse tolerates null and write-shaped payloads', () => {
+test('parseScheduleResponse tolerates null and write-shaped payloads', async () => {
 	expect(
 		parseScheduleResponse(
 			{
@@ -316,7 +316,7 @@ test('jellyfish schedule reads preserve existing controller payloads', async () 
 	})
 	const config = createConfig()
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const jellyfish = createJellyfishAdapter({
 		config,
 		state,
@@ -342,14 +342,14 @@ test('jellyfish schedule reads preserve existing controller payloads', async () 
 		])
 	} finally {
 		resetMockJellyfishState()
-		storage.close()
+		await storage.close()
 	}
 })
 
 test('jellyfish schedule writes validate timing, days, and known zones', async () => {
 	const config = createConfig()
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const jellyfish = createJellyfishAdapter({
 		config,
 		state,
@@ -490,6 +490,6 @@ test('jellyfish schedule writes validate timing, days, and known zones', async (
 			}),
 		).rejects.toThrow('Invalid JellyFish calendar schedule day')
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })

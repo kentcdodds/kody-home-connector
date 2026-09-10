@@ -282,15 +282,12 @@ export async function upsertDiscoveredBondBridges(
 			raw_discovery_json: JSON.stringify(bridge.rawDiscovery),
 			last_seen_at: bridge.lastSeenAt,
 		}
-		await storage.db.query(bondBridges).upsert(
-			{
-				connector_id: connectorId,
-				bridge_id: bridge.bridgeId,
-				adopted: 0,
-				...values,
-			},
-			{ update: values },
-		)
+		const key = { connector_id: connectorId, bridge_id: bridge.bridgeId }
+		if (await storage.db.find(bondBridges, key)) {
+			await storage.db.update(bondBridges, key, values)
+		} else {
+			await storage.db.create(bondBridges, { ...key, adopted: 0, ...values })
+		}
 	}
 	if (bridges.length > 0) {
 		await storage.db.deleteMany(bondBridges, {

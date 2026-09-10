@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { expect, test } from 'vitest'
 import { createHomeConnectorStorage } from '../../storage/index.ts'
+import { kasaCredentials, kasaPlugs } from '../../storage/schema.ts'
 import {
 	adoptKasaPlug,
 	getKasaCredentials,
@@ -54,15 +55,15 @@ function createConfig(dbPath: string) {
 	}
 }
 
-test('sqlite storage persists Kasa plugs and encrypted credentials', () => {
+test('sqlite storage persists Kasa plugs and encrypted credentials', async () => {
 	const directory = mkdtempSync(
 		path.join(tmpdir(), 'kody-home-connector-kasa-'),
 	)
 	const dbPath = path.join(directory, 'home-connector.sqlite')
-	const storage = createHomeConnectorStorage(createConfig(dbPath))
+	const storage = await createHomeConnectorStorage(createConfig(dbPath))
 
 	try {
-		upsertDiscoveredKasaPlugs(storage, 'default', [
+		await upsertDiscoveredKasaPlugs(storage, 'default', [
 			{
 				plugId: 'plug-1',
 				alias: 'Water recirculating pump',
@@ -81,8 +82,8 @@ test('sqlite storage persists Kasa plugs and encrypted credentials', () => {
 				lastSeenAt: '2026-06-24T17:52:00.000Z',
 			},
 		])
-		adoptKasaPlug(storage, 'default', 'plug-1')
-		saveKasaCredentials({
+		await adoptKasaPlug(storage, 'default', 'plug-1')
+		await saveKasaCredentials({
 			storage,
 			connectorId: 'default',
 			username: 'kent@example.com',
@@ -90,12 +91,12 @@ test('sqlite storage persists Kasa plugs and encrypted credentials', () => {
 			lastAuthenticatedAt: '2026-06-24T17:53:00.000Z',
 		})
 
-		expect(getKasaCredentials(storage, 'default')).toMatchObject({
+		expect(await getKasaCredentials(storage, 'default')).toMatchObject({
 			username: 'kent@example.com',
 			password: 'kasa-password',
 			lastAuthenticatedAt: '2026-06-24T17:53:00.000Z',
 		})
-		expect(listKasaPublicPlugs(storage, 'default')).toEqual([
+		expect(await listKasaPublicPlugs(storage, 'default')).toEqual([
 			expect.objectContaining({
 				plugId: 'plug-1',
 				alias: 'Water recirculating pump',
@@ -105,60 +106,50 @@ test('sqlite storage persists Kasa plugs and encrypted credentials', () => {
 			}),
 		])
 
-		const rawPasswordRow = storage.db
-			.query(
-				`
-					SELECT username, password
-					FROM kasa_credentials
-					WHERE connector_id = ?
-				`,
-			)
-			.get('default') as { username: string; password: string } | undefined
+		const rawPasswordRow = await storage.db.find(kasaCredentials, {
+			connector_id: 'default',
+		})
 		expect(rawPasswordRow?.username).toMatch(/^enc:v1:/)
 		expect(rawPasswordRow?.username).not.toContain('kent@example.com')
 		expect(rawPasswordRow?.password).toMatch(/^enc:v1:/)
 		expect(rawPasswordRow?.password).not.toContain('kasa-password')
 
-		storage.db
-			.query(
-				`
-					UPDATE kasa_plugs
-					SET raw_sysinfo_json = ?, raw_discovery_json = ?, relay_state = ?
-					WHERE connector_id = ? AND plug_id = ?
-				`,
-			)
-			.run('not-json', 'also-not-json', 'nonsense', 'default', 'plug-1')
-		expect(listKasaPlugs(storage, 'default')).toEqual([
+		await storage.db.update(
+			kasaPlugs,
+			{ connector_id: 'default', plug_id: 'plug-1' },
+			{
+				raw_sysinfo_json: 'not-json',
+				raw_discovery_json: 'also-not-json',
+				relay_state: 'nonsense',
+			},
+		)
+		expect(await listKasaPlugs(storage, 'default')).toEqual([
 			expect.objectContaining({
 				rawSysinfo: null,
 				rawDiscovery: null,
 				relayState: 'unknown',
 			}),
 		])
-		storage.db
-			.query(
-				`
-					UPDATE kasa_plugs
-					SET raw_sysinfo_json = ?, raw_discovery_json = ?
-					WHERE connector_id = ? AND plug_id = ?
-				`,
-			)
-			.run('[]', '"scalar"', 'default', 'plug-1')
-		expect(listKasaPlugs(storage, 'default')).toEqual([
+		await storage.db.update(
+			kasaPlugs,
+			{ connector_id: 'default', plug_id: 'plug-1' },
+			{ raw_sysinfo_json: '[]', raw_discovery_json: '"scalar"' },
+		)
+		expect(await listKasaPlugs(storage, 'default')).toEqual([
 			expect.objectContaining({
 				rawSysinfo: null,
 				rawDiscovery: null,
 			}),
 		])
 
-		removeKasaPlug({
+		await removeKasaPlug({
 			storage,
 			connectorId: 'default',
 			plugId: 'plug-1',
 		})
-		expect(listKasaPlugs(storage, 'default')).toEqual([])
+		expect(await listKasaPlugs(storage, 'default')).toEqual([])
 	} finally {
-		storage.close()
+		await storage.close()
 		rmSync(directory, {
 			force: true,
 			recursive: true,
@@ -166,15 +157,15 @@ test('sqlite storage persists Kasa plugs and encrypted credentials', () => {
 	}
 })
 
-test('upsert migrates adopted host fallback rows to stable plug ids', () => {
+test('upsert migrates adopted host fallback rows to stable plug ids', async () => {
 	const directory = mkdtempSync(
 		path.join(tmpdir(), 'kody-home-connector-kasa-'),
 	)
 	const dbPath = path.join(directory, 'home-connector.sqlite')
-	const storage = createHomeConnectorStorage(createConfig(dbPath))
+	const storage = await createHomeConnectorStorage(createConfig(dbPath))
 
 	try {
-		upsertDiscoveredKasaPlugs(storage, 'default', [
+		await upsertDiscoveredKasaPlugs(storage, 'default', [
 			{
 				plugId: 'host:192.168.1.145',
 				alias: 'Kasa plug 192.168.1.145',
@@ -189,9 +180,9 @@ test('upsert migrates adopted host fallback rows to stable plug ids', () => {
 				lastSeenAt: '2026-06-24T17:52:00.000Z',
 			},
 		])
-		adoptKasaPlug(storage, 'default', 'host:192.168.1.145')
+		await adoptKasaPlug(storage, 'default', 'host:192.168.1.145')
 
-		upsertDiscoveredKasaPlugs(storage, 'default', [
+		await upsertDiscoveredKasaPlugs(storage, 'default', [
 			{
 				plugId: 'stable-device-id',
 				alias: 'Water recirculating pump',
@@ -211,7 +202,7 @@ test('upsert migrates adopted host fallback rows to stable plug ids', () => {
 			},
 		])
 
-		expect(listKasaPlugs(storage, 'default')).toEqual([
+		expect(await listKasaPlugs(storage, 'default')).toEqual([
 			expect.objectContaining({
 				plugId: 'stable-device-id',
 				adopted: true,
@@ -219,7 +210,7 @@ test('upsert migrates adopted host fallback rows to stable plug ids', () => {
 			}),
 		])
 	} finally {
-		storage.close()
+		await storage.close()
 		rmSync(directory, {
 			force: true,
 			recursive: true,
@@ -227,15 +218,15 @@ test('upsert migrates adopted host fallback rows to stable plug ids', () => {
 	}
 })
 
-test('upsert promotes existing stable plug adoption from host fallback rows', () => {
+test('upsert promotes existing stable plug adoption from host fallback rows', async () => {
 	const directory = mkdtempSync(
 		path.join(tmpdir(), 'kody-home-connector-kasa-'),
 	)
 	const dbPath = path.join(directory, 'home-connector.sqlite')
-	const storage = createHomeConnectorStorage(createConfig(dbPath))
+	const storage = await createHomeConnectorStorage(createConfig(dbPath))
 
 	try {
-		upsertDiscoveredKasaPlugs(storage, 'default', [
+		await upsertDiscoveredKasaPlugs(storage, 'default', [
 			{
 				plugId: 'stable-device-id',
 				alias: 'Water recirculating pump',
@@ -263,9 +254,9 @@ test('upsert promotes existing stable plug adoption from host fallback rows', ()
 				lastSeenAt: '2026-06-24T17:52:30.000Z',
 			},
 		])
-		adoptKasaPlug(storage, 'default', 'host:192.168.1.145')
+		await adoptKasaPlug(storage, 'default', 'host:192.168.1.145')
 
-		upsertDiscoveredKasaPlugs(storage, 'default', [
+		await upsertDiscoveredKasaPlugs(storage, 'default', [
 			{
 				plugId: 'stable-device-id',
 				alias: 'Water recirculating pump',
@@ -285,7 +276,7 @@ test('upsert promotes existing stable plug adoption from host fallback rows', ()
 			},
 		])
 
-		expect(listKasaPlugs(storage, 'default')).toEqual([
+		expect(await listKasaPlugs(storage, 'default')).toEqual([
 			expect.objectContaining({
 				plugId: 'stable-device-id',
 				adopted: true,
@@ -293,7 +284,7 @@ test('upsert promotes existing stable plug adoption from host fallback rows', ()
 			}),
 		])
 	} finally {
-		storage.close()
+		await storage.close()
 		rmSync(directory, {
 			force: true,
 			recursive: true,
@@ -301,15 +292,15 @@ test('upsert promotes existing stable plug adoption from host fallback rows', ()
 	}
 })
 
-test('empty Kasa scan does not prune existing unadopted plugs', () => {
+test('empty Kasa scan does not prune existing unadopted plugs', async () => {
 	const directory = mkdtempSync(
 		path.join(tmpdir(), 'kody-home-connector-kasa-'),
 	)
 	const dbPath = path.join(directory, 'home-connector.sqlite')
-	const storage = createHomeConnectorStorage(createConfig(dbPath))
+	const storage = await createHomeConnectorStorage(createConfig(dbPath))
 
 	try {
-		upsertDiscoveredKasaPlugs(storage, 'default', [
+		await upsertDiscoveredKasaPlugs(storage, 'default', [
 			{
 				plugId: 'plug-1',
 				alias: 'Water recirculating pump',
@@ -325,16 +316,16 @@ test('empty Kasa scan does not prune existing unadopted plugs', () => {
 			},
 		])
 
-		upsertDiscoveredKasaPlugs(storage, 'default', [])
+		await upsertDiscoveredKasaPlugs(storage, 'default', [])
 
-		expect(listKasaPlugs(storage, 'default')).toEqual([
+		expect(await listKasaPlugs(storage, 'default')).toEqual([
 			expect.objectContaining({
 				plugId: 'plug-1',
 				adopted: false,
 			}),
 		])
 	} finally {
-		storage.close()
+		await storage.close()
 		rmSync(directory, {
 			force: true,
 			recursive: true,

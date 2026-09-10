@@ -27,14 +27,18 @@ function createConfig(dbPath: string) {
 	}
 }
 
-test('sqlite storage persists Lutron processors and associated credentials', () => {
+test('sqlite storage persists Lutron processors and associated credentials', async () => {
 	const directory = mkdtempSync(path.join(tmpdir(), 'kody-home-connector-'))
 	const dbPath = path.join(directory, 'home-connector.sqlite')
-	const storage = createHomeConnectorStorage(createConfig(dbPath))
+	const storage = await createHomeConnectorStorage(createConfig(dbPath))
 
 	try {
-		upsertDiscoveredLutronProcessors(storage, 'default', mockLutronProcessors)
-		saveLutronCredentials({
+		await upsertDiscoveredLutronProcessors(
+			storage,
+			'default',
+			mockLutronProcessors,
+		)
+		await saveLutronCredentials({
 			storage,
 			connectorId: 'default',
 			processorId: 'lutron-qsx-wireless',
@@ -43,7 +47,7 @@ test('sqlite storage persists Lutron processors and associated credentials', () 
 			lastAuthenticatedAt: '2026-03-25T17:05:00.000Z',
 		})
 
-		const processors = listLutronProcessors(storage, 'default')
+		const processors = await listLutronProcessors(storage, 'default')
 		expect(processors).toHaveLength(2)
 		expect(processors[0]).toMatchObject({
 			processorId: 'lutron-qsx-main',
@@ -59,7 +63,7 @@ test('sqlite storage persists Lutron processors and associated credentials', () 
 			lastAuthenticatedAt: '2026-03-25T17:05:00.000Z',
 		})
 	} finally {
-		storage.close()
+		await storage.close()
 		rmSync(directory, {
 			force: true,
 			recursive: true,

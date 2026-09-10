@@ -4,6 +4,7 @@ import path from 'node:path'
 import { expect, test, vi } from 'vitest'
 import { type HomeConnectorConfig } from '../../config.ts'
 import { createHomeConnectorStorage } from '../../storage/index.ts'
+import { islandRouterApiCredentials } from '../../storage/schema.ts'
 import {
 	createIslandRouterApiAdapter,
 	islandRouterApiWriteConfirmation,
@@ -64,62 +65,56 @@ function createJsonResponse(data: unknown, status = 200) {
 	})
 }
 
-test('encrypted PIN round-trips in sqlite and requires HOME_CONNECTOR_SHARED_SECRET', () => {
+test('encrypted PIN round-trips in sqlite and requires HOME_CONNECTOR_SHARED_SECRET', async () => {
 	const directory = mkdtempSync(path.join(tmpdir(), 'kody-island-router-api-'))
 	const dbPath = path.join(directory, 'home-connector.sqlite')
-	const storage = createHomeConnectorStorage(createConfig(dbPath))
+	const storage = await createHomeConnectorStorage(createConfig(dbPath))
 	try {
 		const adapter = createIslandRouterApiAdapter({
 			config: createConfig(dbPath),
 			storage,
 			fetchImpl: async () => createJsonResponse({}),
 		})
-		expect(adapter.getStatus()).toMatchObject({
+		expect(await adapter.getStatus()).toMatchObject({
 			configured: false,
 			hasStoredPin: false,
 		})
-		expect(adapter.setPin(' 123456 ')).toMatchObject({
+		expect(await adapter.setPin(' 123456 ')).toMatchObject({
 			configured: true,
 			hasStoredPin: true,
 		})
-		const row = storage.db
-			.query(
-				`
-					SELECT pin
-					FROM island_router_api_credentials
-					WHERE connector_id = ?
-				`,
-			)
-			.get('default') as { pin: string } | undefined
+		const row = await storage.db.find(islandRouterApiCredentials, {
+			connector_id: 'default',
+		})
 		expect(row?.pin).toMatch(/^enc:v1:/)
 		expect(row?.pin).not.toContain('123456')
-		adapter.clearPin()
-		expect(adapter.getStatus()).toMatchObject({
+		await adapter.clearPin()
+		expect(await adapter.getStatus()).toMatchObject({
 			configured: false,
 			hasStoredPin: false,
 		})
 
-		const missingSecretStorage = createHomeConnectorStorage(
+		const missingSecretStorage = await createHomeConnectorStorage(
 			createConfig(':memory:', { sharedSecret: null }),
 		)
 		try {
-			expect(() =>
+			await expect(
 				saveIslandRouterApiPin({
 					storage: missingSecretStorage,
 					connectorId: 'default',
 					pin: '123456',
 				}),
-			).toThrow('HOME_CONNECTOR_SHARED_SECRET')
+			).rejects.toThrow('HOME_CONNECTOR_SHARED_SECRET')
 		} finally {
-			missingSecretStorage.close()
+			await missingSecretStorage.close()
 		}
 	} finally {
-		storage.close()
+		await storage.close()
 		rmSync(directory, { force: true, recursive: true })
 	}
 })
 
-test('HOTP computation matches RFC 4226 vectors', () => {
+test('HOTP computation matches RFC 4226 vectors', async () => {
 	const secret = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ'
 	expect(computeIslandRouterHotp({ secret, counter: 0 })).toBe('755224')
 	expect(computeIslandRouterHotp({ secret, counter: 1 })).toBe('287082')
@@ -130,7 +125,7 @@ test('HOTP computation matches RFC 4226 vectors', () => {
 })
 
 test('auth handshake sends startup, PIN OTP exchange, and bearer request', async () => {
-	const storage = createHomeConnectorStorage(createConfig(':memory:'))
+	const storage = await createHomeConnectorStorage(createConfig(':memory:'))
 	const requests: Array<{
 		url: string
 		init: RequestInit
@@ -170,7 +165,7 @@ test('auth handshake sends startup, PIN OTP exchange, and bearer request', async
 			storage,
 			fetchImpl,
 		})
-		adapter.setPin('246810')
+		await adapter.setPin('246810')
 		const result = await adapter.request({
 			method: 'GET',
 			path: '/api/filters',
@@ -202,12 +197,12 @@ test('auth handshake sends startup, PIN OTP exchange, and bearer request', async
 		).toBe('Bearer access-token')
 	} finally {
 		vi.useRealTimers()
-		storage.close()
+		await storage.close()
 	}
 })
 
 test('401 refreshes tokens and retries once, but a second 401 surfaces auth error', async () => {
-	const storage = createHomeConnectorStorage(createConfig(':memory:'))
+	const storage = await createHomeConnectorStorage(createConfig(':memory:'))
 	let filtersCalls = 0
 	let refreshCalls = 0
 	let startupCalls = 0
@@ -253,7 +248,7 @@ test('401 refreshes tokens and retries once, but a second 401 surfaces auth erro
 			storage,
 			fetchImpl,
 		})
-		adapter.setPin('246810')
+		await adapter.setPin('246810')
 		await expect(
 			adapter.request({
 				method: 'GET',
@@ -266,10 +261,12 @@ test('401 refreshes tokens and retries once, but a second 401 surfaces auth erro
 		expect(startupCalls).toBe(2)
 		expect(refreshCalls).toBe(1)
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 
-	const failingStorage = createHomeConnectorStorage(createConfig(':memory:'))
+	const failingStorage = await createHomeConnectorStorage(
+		createConfig(':memory:'),
+	)
 	let failingFiltersCalls = 0
 	let failingStartupCalls = 0
 	const failingFetch: IslandRouterApiFetch = async (url) => {
@@ -310,7 +307,7 @@ test('401 refreshes tokens and retries once, but a second 401 surfaces auth erro
 			storage: failingStorage,
 			fetchImpl: failingFetch,
 		})
-		adapter.setPin('246810')
+		await adapter.setPin('246810')
 		await expect(
 			adapter.request({
 				method: 'GET',
@@ -324,14 +321,14 @@ test('401 refreshes tokens and retries once, but a second 401 surfaces auth erro
 })
 
 test('request rejects invalid paths and high-risk writes without acknowledgement', async () => {
-	const storage = createHomeConnectorStorage(createConfig(':memory:'))
+	const storage = await createHomeConnectorStorage(createConfig(':memory:'))
 	try {
 		const adapter = createIslandRouterApiAdapter({
 			config: createConfig(':memory:'),
 			storage,
 			fetchImpl: async () => createJsonResponse({}),
 		})
-		adapter.setPin('246810')
+		await adapter.setPin('246810')
 		await expect(
 			adapter.request({ method: 'GET', path: '/filters' }),
 		).rejects.toThrow('begin with /api/')
@@ -372,6 +369,6 @@ test('request rejects invalid paths and high-risk writes without acknowledgement
 			}),
 		).rejects.toThrow('confirmation must exactly equal')
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })

@@ -154,15 +154,19 @@ export async function upsertDiscoveredAccessNetworksUnleashedControllers(
 				: null,
 			last_seen_at: controller.lastSeenAt,
 		}
-		await storage.db.query(accessNetworksUnleashedControllers).upsert(
-			{
-				connector_id: connectorId,
-				controller_id: controller.controllerId,
-				adopted: existing.get(controller.controllerId)?.adopted ? 1 : 0,
+		const key = {
+			connector_id: connectorId,
+			controller_id: controller.controllerId,
+		}
+		if (existing.has(controller.controllerId)) {
+			await storage.db.update(accessNetworksUnleashedControllers, key, values)
+		} else {
+			await storage.db.create(accessNetworksUnleashedControllers, {
+				...key,
+				adopted: 0,
 				...values,
-			},
-			{ update: values },
-		)
+			})
+		}
 	}
 	const credentialed = await storage.db.findMany(
 		accessNetworksUnleashedCredentials,

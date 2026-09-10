@@ -20,14 +20,14 @@ function createConfig() {
 
 installHomeConnectorMockServer()
 
-beforeEach(() => {
+beforeEach(async () => {
 	resetMockSonosState()
 })
 
 test('sonos scan persists discovered players and diagnostics', async () => {
 	const config = createConfig()
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const sonos = createSonosAdapter({
 		config,
 		state,
@@ -36,20 +36,20 @@ test('sonos scan persists discovered players and diagnostics', async () => {
 
 	try {
 		const players = await sonos.scan()
-		const status = sonos.getStatus()
+		const status = await sonos.getStatus()
 
 		expect(players.length).toBeGreaterThan(0)
 		expect(status.allPlayers.length).toBe(players.length)
 		expect(status.diagnostics).not.toBeNull()
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })
 
 test('sonos favorite playback and queue operations work in mock mode', async () => {
 	const config = createConfig()
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const sonos = createSonosAdapter({
 		config,
 		state,
@@ -59,7 +59,7 @@ test('sonos favorite playback and queue operations work in mock mode', async () 
 	try {
 		const players = await sonos.scan()
 		const playerId = players[0]!.playerId
-		sonos.adoptPlayer(playerId)
+		await sonos.adoptPlayer(playerId)
 
 		const favorite = await sonos.playFavorite({
 			playerId,
@@ -78,14 +78,14 @@ test('sonos favorite playback and queue operations work in mock mode', async () 
 		expect(statusAfterPlay.transportState).toBe('PLAYING')
 		expect(queueAfterRemove.length).toBe(queue.length - 1)
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })
 
 test('sonos enqueue uri supports bare Spotify playlist containers in mock mode', async () => {
 	const config = createConfig()
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const sonos = createSonosAdapter({
 		config,
 		state,
@@ -95,7 +95,7 @@ test('sonos enqueue uri supports bare Spotify playlist containers in mock mode',
 	try {
 		const players = await sonos.scan()
 		const playerId = players[0]!.playerId
-		sonos.adoptPlayer(playerId)
+		await sonos.adoptPlayer(playerId)
 
 		await sonos.playFavorite({
 			playerId,
@@ -125,14 +125,14 @@ test('sonos enqueue uri supports bare Spotify playlist containers in mock mode',
 			'spotify:playlist:37i9dQZF1DXcBWIGoYBM5M Track 1',
 		)
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })
 
 test('sonos create and delete favorite update mock favorites', async () => {
 	const config = createConfig()
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const sonos = createSonosAdapter({
 		config,
 		state,
@@ -142,7 +142,7 @@ test('sonos create and delete favorite update mock favorites', async () => {
 	try {
 		const players = await sonos.scan()
 		const playerId = players[0]!.playerId
-		sonos.adoptPlayer(playerId)
+		await sonos.adoptPlayer(playerId)
 
 		const favorite = await sonos.createFavorite({
 			playerId,
@@ -185,14 +185,14 @@ test('sonos create and delete favorite update mock favorites', async () => {
 		).toBe(false)
 		expect(secondFavoriteIdAfterDelete).toBe(originalSecondFavoriteId)
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })
 
 test('sonos caller selection errors are marked as expected Sentry noise', async () => {
 	const config = createConfig()
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const sonos = createSonosAdapter({
 		config,
 		state,
@@ -202,7 +202,7 @@ test('sonos caller selection errors are marked as expected Sentry noise', async 
 	try {
 		const players = await sonos.scan()
 		for (const player of players) {
-			sonos.adoptPlayer(player.playerId)
+			await sonos.adoptPlayer(player.playerId)
 		}
 
 		const multiplePlayersError = await sonos
@@ -220,7 +220,7 @@ test('sonos caller selection errors are marked as expected Sentry noise', async 
 			},
 		})
 
-		expect(() => sonos.adoptPlayer('missing-player')).toThrowError(
+		await expect(sonos.adoptPlayer('missing-player')).rejects.toThrowError(
 			expect.objectContaining({
 				name: 'SonosCallerError',
 				message: 'Sonos player "missing-player" was not found.',
@@ -234,14 +234,14 @@ test('sonos caller selection errors are marked as expected Sentry noise', async 
 			}),
 		)
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })
 
 test('sonos grouping and audio input commands work in mock mode', async () => {
 	const config = createConfig()
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const sonos = createSonosAdapter({
 		config,
 		state,
@@ -252,8 +252,8 @@ test('sonos grouping and audio input commands work in mock mode', async () => {
 		const players = await sonos.scan()
 		const sourcePlayerId = players[0]!.playerId
 		const secondPlayerId = players[1]!.playerId
-		sonos.adoptPlayer(sourcePlayerId)
-		sonos.adoptPlayer(secondPlayerId)
+		await sonos.adoptPlayer(sourcePlayerId)
+		await sonos.adoptPlayer(secondPlayerId)
 
 		await sonos.groupPlayers({
 			playerId: secondPlayerId,
@@ -279,6 +279,6 @@ test('sonos grouping and audio input commands work in mock mode', async () => {
 			groupsAfterUngroup.every((group) => group.members.length === 1),
 		).toBe(true)
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })

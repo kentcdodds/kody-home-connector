@@ -83,7 +83,7 @@ async function connectPhone(
 	return socket
 }
 
-test('authorizePhoneUpgrade accepts query, header, and bearer tokens', () => {
+test('authorizePhoneUpgrade accepts query, header, and bearer tokens', async () => {
 	const expectedToken = 'phone-token'
 	expect(
 		authorizePhoneUpgrade({
@@ -111,7 +111,7 @@ test('authorizePhoneUpgrade accepts query, header, and bearer tokens', () => {
 	).toEqual({ ok: true })
 })
 
-test('authorizePhoneUpgrade prefers query token over later sources', () => {
+test('authorizePhoneUpgrade prefers query token over later sources', async () => {
 	expect(
 		authorizePhoneUpgrade({
 			request: {
@@ -126,7 +126,7 @@ test('authorizePhoneUpgrade prefers query token over later sources', () => {
 	).toMatchObject({ ok: false, status: 401 })
 })
 
-test('authorizePhoneUpgrade rejects missing, wrong, and unconfigured tokens', () => {
+test('authorizePhoneUpgrade rejects missing, wrong, and unconfigured tokens', async () => {
 	expect(
 		authorizePhoneUpgrade({
 			request: { url: '/phone/ws', headers: {} },
@@ -169,7 +169,7 @@ test('hello is acknowledged and call/result round-trips', async () => {
 	expect(socket.parsedSent()).toEqual([
 		{ type: 'hello_ack', protocolVersion: 1 },
 	])
-	expect(phone.getStatus()).toMatchObject({
+	expect(await phone.getStatus()).toMatchObject({
 		connected: true,
 		tokenConfigured: true,
 		deviceId: 'pixel-9',
@@ -181,6 +181,7 @@ test('hello is acknowledged and call/result round-trips', async () => {
 	})
 
 	const pending = phone.call('phone_network', {})
+	await new Promise((resolve) => setImmediate(resolve))
 	expect(socket.parsedSent()[1]).toEqual({
 		type: 'call',
 		id: 'call-1',
@@ -232,7 +233,7 @@ test('offline and missing-token calls return structured errors', async () => {
 			message: 'Phone token not configured.',
 		},
 	})
-	expect(unconfigured.getCallReadiness()).toMatchObject({
+	expect(await unconfigured.getCallReadiness()).toMatchObject({
 		error: { code: 'phone_token_not_configured' },
 	})
 })
@@ -248,14 +249,14 @@ test('a newer deviceId replaces the previous primary socket', async () => {
 		deviceName: 'Kent Fold',
 	})
 	expect(first.closed).toBe(true)
-	expect(phone.getStatus()).toMatchObject({
+	expect(await phone.getStatus()).toMatchObject({
 		connected: true,
 		deviceId: 'pixel-fold',
 		lastHello: { deviceName: 'Kent Fold' },
 	})
 })
 
-test('a delayed hello from an older socket does not replace the newer primary', () => {
+test('a delayed hello from an older socket does not replace the newer primary', async () => {
 	const phone = createAdapter()
 	const older = new FakePhoneSocket()
 	const newer = new FakePhoneSocket()
@@ -266,7 +267,7 @@ test('a delayed hello from an older socket does not replace the newer primary', 
 		deviceId: 'pixel-fold',
 		deviceName: 'Kent Fold',
 	})
-	expect(phone.getStatus()).toMatchObject({
+	expect(await phone.getStatus()).toMatchObject({
 		connected: true,
 		deviceId: 'pixel-fold',
 		lastHello: { deviceName: 'Kent Fold' },
@@ -275,14 +276,14 @@ test('a delayed hello from an older socket does not replace the newer primary', 
 	expect(older.closed).toBe(true)
 	expect(newer.closed).toBe(false)
 	expect(older.parsedSent()).toEqual([])
-	expect(phone.getStatus()).toMatchObject({
+	expect(await phone.getStatus()).toMatchObject({
 		connected: true,
 		deviceId: 'pixel-fold',
 		lastHello: { deviceName: 'Kent Fold' },
 	})
 })
 
-test('status URLs use the configured port for loopback and LAN', () => {
+test('status URLs use the configured port for loopback and LAN', async () => {
 	const phone = createPhoneAdapter({
 		config: createTestHomeConnectorConfig({
 			phoneDeviceToken: 'phone-token',
@@ -290,15 +291,15 @@ test('status URLs use the configured port for loopback and LAN', () => {
 			publicBaseUrl: 'https://kody-home.doddsfamily.us',
 		}),
 	})
-	expect(phone.getStatus()).toMatchObject({
+	expect(await phone.getStatus()).toMatchObject({
 		publicWebSocketUrl: 'wss://kody-home.doddsfamily.us/phone/ws',
 		localWebSocketUrl: 'ws://127.0.0.1:4141/phone/ws',
 		lanWebSocketUrl: 'ws://192.168.1.234:4141/phone/ws',
 	})
 })
 
-test('stored token is used for auth and takes precedence over env', () => {
-	const storage = createHomeConnectorStorage(
+test('stored token is used for auth and takes precedence over env', async () => {
+	const storage = await createHomeConnectorStorage(
 		createTestHomeConnectorConfig({
 			dbPath: ':memory:',
 			phoneDeviceToken: 'env-token',
@@ -311,50 +312,50 @@ test('stored token is used for auth and takes precedence over env', () => {
 			}),
 			storage,
 		})
-		expect(phone.getStatus()).toMatchObject({
+		expect(await phone.getStatus()).toMatchObject({
 			tokenConfigured: true,
 			hasStoredToken: false,
 			hasEnvToken: true,
 			tokenSource: 'env',
 		})
-		phone.setDeviceToken('stored-token')
-		expect(phone.getStatus()).toMatchObject({
+		await phone.setDeviceToken('stored-token')
+		expect(await phone.getStatus()).toMatchObject({
 			tokenConfigured: true,
 			hasStoredToken: true,
 			hasEnvToken: true,
 			tokenSource: 'stored',
 		})
 		expect(
-			phone.authorizeUpgrade({
+			await phone.authorizeUpgrade({
 				url: '/phone/ws?token=stored-token',
 				headers: {},
 			}),
 		).toEqual({ ok: true })
 		expect(
-			phone.authorizeUpgrade({
+			await phone.authorizeUpgrade({
 				url: '/phone/ws?token=env-token',
 				headers: {},
 			}),
 		).toMatchObject({ ok: false, status: 401 })
-		phone.clearStoredDeviceToken()
-		expect(phone.getStatus()).toMatchObject({
+		await phone.clearStoredDeviceToken()
+		expect(await phone.getStatus()).toMatchObject({
 			tokenConfigured: true,
 			hasStoredToken: false,
 			tokenSource: 'env',
 		})
 		expect(
-			phone.authorizeUpgrade({
+			await phone.authorizeUpgrade({
 				url: '/phone/ws?token=env-token',
 				headers: {},
 			}),
 		).toEqual({ ok: true })
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })
 
 test('rotating the stored token disconnects the current companion', async () => {
-	const storage = createHomeConnectorStorage(
+	const storage = await createHomeConnectorStorage(
 		createTestHomeConnectorConfig({
 			dbPath: ':memory:',
 			phoneDeviceToken: null,
@@ -367,20 +368,20 @@ test('rotating the stored token disconnects the current companion', async () => 
 			}),
 			storage,
 		})
-		phone.setDeviceToken('first-token')
+		await phone.setDeviceToken('first-token')
 		const socket = await connectPhone(phone)
-		expect(phone.getStatus().connected).toBe(true)
-		phone.setDeviceToken('second-token')
+		expect((await phone.getStatus()).connected).toBe(true)
+		await phone.setDeviceToken('second-token')
 		expect(socket.closed).toBe(true)
-		expect(phone.getStatus().connected).toBe(false)
+		expect((await phone.getStatus()).connected).toBe(false)
 		expect(
-			phone.authorizeUpgrade({
+			await phone.authorizeUpgrade({
 				url: '/phone/ws?token=second-token',
 				headers: {},
 			}),
 		).toEqual({ ok: true })
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })
 
@@ -394,14 +395,14 @@ test('ping from the phone is answered with pong', async () => {
 	})
 })
 
-test('upgrade path is /phone/ws not /phone', () => {
+test('upgrade path is /phone/ws not /phone', async () => {
 	expect(isPhoneWebSocketUpgradePath('/phone/ws')).toBe(true)
 	expect(isPhoneWebSocketUpgradePath('/phone')).toBe(false)
 	expect(phoneWebSocketPath).toBe('/phone/ws')
 
 	const phone = createAdapter()
 	const phoneRoot = new FakeUpgradeSocket()
-	const handledRoot = handlePhoneHttpUpgrade({
+	const handledRoot = await handlePhoneHttpUpgrade({
 		request: {
 			url: '/phone?token=phone-token',
 			headers: {},
@@ -423,7 +424,7 @@ test('upgrade path is /phone/ws not /phone', () => {
 
 	let accepted = false
 	const wsSocket = new FakeUpgradeSocket()
-	const handledWs = handlePhoneHttpUpgrade({
+	const handledWs = await handlePhoneHttpUpgrade({
 		request: {
 			url: '/phone/ws?token=phone-token',
 			headers: {},

@@ -104,7 +104,7 @@ function installLoginAndCmdstat(handler: (body: string) => Response) {
 test('adapter exposes scan, adopt, set-credentials, authenticate, and request workflow', async () => {
 	const config = createConfig()
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const adapter = createAccessNetworksUnleashedAdapter({
 		config,
 		state,
@@ -117,7 +117,7 @@ test('adapter exposes scan, adopt, set-credentials, authenticate, and request wo
 	)
 
 	try {
-		expect(adapter.getConfigStatus()).toMatchObject({
+		expect(await adapter.getConfigStatus()).toMatchObject({
 			configured: false,
 			missingRequirements: ['controller', 'credentials'],
 		})
@@ -130,7 +130,7 @@ test('adapter exposes scan, adopt, set-credentials, authenticate, and request wo
 			hasStoredCredentials: false,
 		})
 
-		const adopted = adapter.adoptController({
+		const adopted = await adapter.adoptController({
 			controllerId: '192.168.10.60',
 		})
 		expect(adopted).toMatchObject({
@@ -138,7 +138,7 @@ test('adapter exposes scan, adopt, set-credentials, authenticate, and request wo
 			adopted: true,
 		})
 
-		adapter.setCredentials({
+		await adapter.setCredentials({
 			controllerId: '192.168.10.60',
 			username: 'admin',
 			password: 'secret-password',
@@ -163,18 +163,18 @@ test('adapter exposes scan, adopt, set-credentials, authenticate, and request wo
 			},
 		})
 
-		const adoptedController = adapter.getAdoptedController()
+		const adoptedController = await adapter.getAdoptedController()
 		expect(adoptedController?.lastAuthenticatedAt).toEqual(expect.any(String))
 		expect(adoptedController?.lastAuthError).toBeNull()
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })
 
 test('request rejects without acknowledgement, confirmation, or sufficient reason', async () => {
 	const config = createConfig()
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const adapter = createAccessNetworksUnleashedAdapter({
 		config,
 		state,
@@ -191,8 +191,8 @@ test('request rejects without acknowledgement, confirmation, or sufficient reaso
 
 	try {
 		await adapter.scan()
-		adapter.adoptController({ controllerId: '192.168.10.60' })
-		adapter.setCredentials({
+		await adapter.adoptController({ controllerId: '192.168.10.60' })
+		await adapter.setCredentials({
 			controllerId: '192.168.10.60',
 			username: 'admin',
 			password: 'secret-password',
@@ -231,14 +231,14 @@ test('request rejects without acknowledgement, confirmation, or sufficient reaso
 			}),
 		).rejects.toThrow('confirmation must exactly equal')
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })
 
 test('request rejects unknown actions and empty comp', async () => {
 	const config = createConfig()
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const adapter = createAccessNetworksUnleashedAdapter({
 		config,
 		state,
@@ -255,8 +255,8 @@ test('request rejects unknown actions and empty comp', async () => {
 
 	try {
 		await adapter.scan()
-		adapter.adoptController({ controllerId: '192.168.10.60' })
-		adapter.setCredentials({
+		await adapter.adoptController({ controllerId: '192.168.10.60' })
+		await adapter.setCredentials({
 			controllerId: '192.168.10.60',
 			username: 'admin',
 			password: 'secret-password',
@@ -285,14 +285,14 @@ test('request rejects unknown actions and empty comp', async () => {
 			}),
 		).rejects.toThrow('comp must not be empty')
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })
 
 test('request requires an adopted controller with stored credentials', async () => {
 	const config = createConfig()
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const adapter = createAccessNetworksUnleashedAdapter({
 		config,
 		state,
@@ -311,14 +311,14 @@ test('request requires an adopted controller with stored credentials', async () 
 			}),
 		).rejects.toThrow('No Access Networks Unleashed controller is adopted')
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })
 
 test('request preserves last successful authentication on transient failure', async () => {
 	const config = createConfig()
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const adapter = createAccessNetworksUnleashedAdapter({
 		config,
 		state,
@@ -336,8 +336,8 @@ test('request preserves last successful authentication on transient failure', as
 
 	try {
 		await adapter.scan()
-		adapter.adoptController({ controllerId: '192.168.10.60' })
-		adapter.setCredentials({
+		await adapter.adoptController({ controllerId: '192.168.10.60' })
+		await adapter.setCredentials({
 			controllerId: '192.168.10.60',
 			username: 'admin',
 			password: 'secret-password',
@@ -361,18 +361,18 @@ test('request preserves last successful authentication on transient failure', as
 		// A non-auth transport error must not be recorded as an authentication
 		// failure; the previous successful auth state is kept intact so the next
 		// retry does not look like the controller has bad credentials.
-		const adopted = adapter.getAdoptedController()
+		const adopted = await adapter.getAdoptedController()
 		expect(adopted?.lastAuthenticatedAt).toBe(lastAuthenticatedAt)
 		expect(adopted?.lastAuthError).toBeNull()
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })
 
 test('request records lastAuthError when the underlying call is an auth failure', async () => {
 	const config = createConfig()
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const adapter = createAccessNetworksUnleashedAdapter({
 		config,
 		state,
@@ -391,8 +391,8 @@ test('request records lastAuthError when the underlying call is an auth failure'
 
 	try {
 		await adapter.scan()
-		adapter.adoptController({ controllerId: '192.168.10.60' })
-		adapter.setCredentials({
+		await adapter.adoptController({ controllerId: '192.168.10.60' })
+		await adapter.setCredentials({
 			controllerId: '192.168.10.60',
 			username: 'admin',
 			password: 'secret-password',
@@ -409,9 +409,9 @@ test('request records lastAuthError when the underlying call is an auth failure'
 			}),
 		).rejects.toThrow('login was rejected')
 
-		const adopted = adapter.getAdoptedController()
+		const adopted = await adapter.getAdoptedController()
 		expect(adopted?.lastAuthError).toMatch(/login was rejected/)
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })

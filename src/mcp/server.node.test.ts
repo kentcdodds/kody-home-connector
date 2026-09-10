@@ -288,7 +288,7 @@ function createFakeAccessNetworksUnleashedClient() {
 function createAccessNetworksUnleashedFixture(input: {
 	config: ReturnType<typeof loadHomeConnectorConfig>
 	state: ReturnType<typeof createAppState>
-	storage: ReturnType<typeof createHomeConnectorStorage>
+	storage: Awaited<ReturnType<typeof createHomeConnectorStorage>>
 }) {
 	const fakeClient = createFakeAccessNetworksUnleashedClient()
 	const scannedControllers = [
@@ -345,7 +345,7 @@ installHomeConnectorMockServer()
 test('mcp server exposes Samsung tools and executes samsung_list_devices', async () => {
 	const config = createConfig()
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const logger = createHomeConnectorLogger({
 		config,
 		storage,
@@ -354,7 +354,7 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 	logger.info('test.event', 'Test log entry', {
 		token: 'super-secret',
 	})
-	upsertVenstarThermostat({
+	await upsertVenstarThermostat({
 		storage,
 		connectorId: config.homeConnectorId,
 		name: 'Hallway',
@@ -469,17 +469,18 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 	await sonos.scan()
 	await bond.scan()
 	await accessNetworksUnleashed.scan()
-	const accessNetworksController =
-		accessNetworksUnleashed.listControllers()[0]?.controllerId
+	const accessNetworksController = (
+		await accessNetworksUnleashed.listControllers()
+	)[0]?.controllerId
 	if (!accessNetworksController) {
 		throw new Error(
 			'Expected a discovered Access Networks Unleashed controller',
 		)
 	}
-	accessNetworksUnleashed.adoptController({
+	await accessNetworksUnleashed.adoptController({
 		controllerId: accessNetworksController,
 	})
-	accessNetworksUnleashed.setCredentials({
+	await accessNetworksUnleashed.setCredentials({
 		controllerId: accessNetworksController,
 		username: 'admin',
 		password: 'password',
@@ -1062,7 +1063,7 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 		})
 
 		await mcp.callTool('bond_adopt_bridge', { bridgeId: 'MOCKBOND1' })
-		bond.setToken('MOCKBOND1', 'mock-bond-token')
+		await bond.setToken('MOCKBOND1', 'mock-bond-token')
 		const bondDevices = await mcp.callTool('bond_list_devices', {
 			bridgeId: 'MOCKBOND1',
 		})
@@ -1130,14 +1131,14 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 			mcp.callTool('bond_release_bridge', { bridgeId: 'not-a-bridge' }),
 		).rejects.toThrow('not-a-bridge')
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })
 
 test('mcp server exposes island router write tools when host verification is configured', async () => {
 	const config = createConfig()
 	const state = createAppState()
-	const storage = createHomeConnectorStorage(config)
+	const storage = await createHomeConnectorStorage(config)
 	const samsungTv = createSamsungTvAdapter({
 		config,
 		state,
@@ -1282,6 +1283,6 @@ test('mcp server exposes island router write tools when host verification is con
 			},
 		})
 	} finally {
-		storage.close()
+		await storage.close()
 	}
 })
