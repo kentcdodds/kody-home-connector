@@ -72,14 +72,12 @@ export async function upsertDiscoveredSamsungTvs(
 	connectorId: string,
 	devices: Array<SamsungTvDeviceRecord>,
 ) {
-	const existing = new Map(
-		(await listSamsungTvDevices(storage, connectorId)).map((device) => [
-			device.deviceId,
-			device,
-		]),
+	const knownDeviceIds = new Set(
+		(await listSamsungTvDevices(storage, connectorId)).map(
+			(device) => device.deviceId,
+		),
 	)
 	for (const device of devices) {
-		const current = existing.get(device.deviceId)
 		const values = {
 			host: device.host,
 			name: device.name,
@@ -96,7 +94,7 @@ export async function upsertDiscoveredSamsungTvs(
 			last_seen_at: device.lastSeenAt,
 		}
 		const key = { connector_id: connectorId, device_id: device.deviceId }
-		if (current) {
+		if (knownDeviceIds.has(device.deviceId)) {
 			await storage.db.update(samsungTvs, key, values)
 		} else {
 			await storage.db.create(samsungTvs, {
@@ -104,6 +102,7 @@ export async function upsertDiscoveredSamsungTvs(
 				adopted: device.adopted ? 1 : 0,
 				...values,
 			})
+			knownDeviceIds.add(device.deviceId)
 		}
 	}
 	await storage.db.deleteMany(samsungTvs, {

@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto'
-import { type TableRow } from 'remix/data-table'
+import { and, gt, isNull, type TableRow } from 'remix/data-table'
 import { type HomeConnectorDatabase } from '../storage/index.ts'
 import { oauthAuthorizationCodes, oauthTokens } from '../storage/schema.ts'
 
@@ -64,11 +64,18 @@ export async function consumeAuthorizationCode(
 	if (!row || row.consumed_at != null || row.expires_at <= nowSeconds) {
 		return null
 	}
-	await db.update(
+	const consumed = await db.updateMany(
 		oauthAuthorizationCodes,
-		{ code_hash: codeHash },
 		{ consumed_at: nowSeconds },
+		{
+			where: and(
+				{ code_hash: codeHash },
+				isNull('consumed_at'),
+				gt('expires_at', nowSeconds),
+			),
+		},
 	)
+	if (consumed.affectedRows !== 1) return null
 	return {
 		codeHash: row.code_hash,
 		clientId: row.client_id,
@@ -124,10 +131,11 @@ export async function readActiveOAuthToken(
 export async function revokeOAuthToken(
 	db: HomeConnectorDatabase,
 	tokenHash: string,
-) {
-	await db.updateMany(
+): Promise<boolean> {
+	const revoked = await db.updateMany(
 		oauthTokens,
 		{ revoked_at: Math.floor(Date.now() / 1000) },
-		{ where: { token_hash: tokenHash } },
+		{ where: and({ token_hash: tokenHash }, isNull('revoked_at')) },
 	)
+	return revoked.affectedRows === 1
 }

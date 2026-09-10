@@ -232,3 +232,34 @@ test('samsung tv refresh keeps the original device id stable', async () => {
 		await storage.close()
 	}
 })
+
+test('samsung tv scan tolerates duplicate discovery records', async () => {
+	const config = createConfig()
+	const storage = await createHomeConnectorStorage(config)
+	const record = {
+		deviceId: 'samsung-tv-duplicate',
+		name: 'Duplicate Frame TV',
+		host: 'duplicate.test',
+		serviceUrl: 'http://duplicate.test:8001/api/v2/',
+		model: null,
+		modelName: null,
+		macAddress: null,
+		frameTvSupport: false,
+		tokenAuthSupport: true,
+		powerState: null,
+		lastSeenAt: new Date().toISOString(),
+		adopted: false,
+		rawDeviceInfo: null,
+	}
+	try {
+		const devices = await upsertDiscoveredSamsungTvs(
+			storage,
+			config.homeConnectorId,
+			[record, { ...record, name: 'Duplicate Frame TV (again)' }],
+		)
+		expect(devices).toHaveLength(1)
+		expect(devices[0]?.name).toBe('Duplicate Frame TV (again)')
+	} finally {
+		await storage.close()
+	}
+})

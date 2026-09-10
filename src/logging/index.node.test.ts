@@ -338,3 +338,25 @@ test('logger prunes entries older than eight days', async () => {
 
 	expect(await logger.listLogs()).toHaveLength(0)
 })
+
+test('logger prune failures reject the caller without poisoning later writes', async () => {
+	const config = createConfig()
+	const storage = await createHomeConnectorStorage(config)
+	const deleteMany = vi
+		.spyOn(storage.db, 'deleteMany')
+		.mockRejectedValue(new Error('delete failed'))
+	const logger = createHomeConnectorLogger({
+		config,
+		storage,
+		console: silentConsole,
+		now: () => new Date('2026-05-12T18:00:00.000Z'),
+	})
+
+	await expect(logger.pruneExpiredLogs()).rejects.toThrow('delete failed')
+	deleteMany.mockRestore()
+
+	logger.info('test.after-failure', 'Written after a failed prune')
+	await logger.flush()
+
+	expect(await logger.listLogs({ event: 'test.after-failure' })).toHaveLength(1)
+})

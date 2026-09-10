@@ -312,7 +312,9 @@ async function handleToken(input: {
 		) {
 			return jsonError(400, 'invalid_grant', 'Refresh token is invalid.')
 		}
-		await revokeOAuthToken(input.storage.db, record.tokenHash)
+		if (!(await revokeOAuthToken(input.storage.db, record.tokenHash))) {
+			return jsonError(400, 'invalid_grant', 'Refresh token is invalid.')
+		}
 		return issueTokenPair({
 			storage: input.storage,
 			clientId,

@@ -277,8 +277,9 @@ export function createHomeConnectorLogger(input: {
 	}
 
 	function enqueue(task: () => Promise<void>) {
-		pendingWrites = pendingWrites.then(task, task)
-		return pendingWrites
+		const result = pendingWrites.then(task, task)
+		pendingWrites = result.catch(() => {})
+		return result
 	}
 
 	async function pruneExpiredLogs() {

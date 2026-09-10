@@ -90,14 +90,12 @@ export async function upsertDiscoveredSonosPlayers(
 	connectorId: string,
 	players: Array<SonosPlayerRecord>,
 ) {
-	const existing = new Map(
-		(await listSonosPlayers(storage, connectorId)).map((player) => [
-			player.playerId,
-			player,
-		]),
+	const knownPlayerIds = new Set(
+		(await listSonosPlayers(storage, connectorId)).map(
+			(player) => player.playerId,
+		),
 	)
 	for (const player of players) {
-		const current = existing.get(player.playerId)
 		const values = {
 			udn: player.udn,
 			room_name: player.roomName,
@@ -114,7 +112,7 @@ export async function upsertDiscoveredSonosPlayers(
 			raw_description_xml: player.rawDescriptionXml,
 		}
 		const key = { connector_id: connectorId, player_id: player.playerId }
-		if (current) {
+		if (knownPlayerIds.has(player.playerId)) {
 			await storage.db.update(sonosPlayers, key, values)
 		} else {
 			await storage.db.create(sonosPlayers, {
@@ -122,6 +120,7 @@ export async function upsertDiscoveredSonosPlayers(
 				adopted: player.adopted ? 1 : 0,
 				...values,
 			})
+			knownPlayerIds.add(player.playerId)
 		}
 	}
 	await storage.db.deleteMany(sonosPlayers, {

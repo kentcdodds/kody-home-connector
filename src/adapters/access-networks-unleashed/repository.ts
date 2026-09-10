@@ -139,9 +139,9 @@ export async function upsertDiscoveredAccessNetworksUnleashedControllers(
 	connectorId: string,
 	controllers: Array<AccessNetworksUnleashedDiscoveredController>,
 ) {
-	const existing = new Map(
+	const knownControllerIds = new Set(
 		(await listAccessNetworksUnleashedControllers(storage, connectorId)).map(
-			(controller) => [controller.controllerId, controller],
+			(controller) => controller.controllerId,
 		),
 	)
 	for (const controller of controllers) {
@@ -158,7 +158,7 @@ export async function upsertDiscoveredAccessNetworksUnleashedControllers(
 			connector_id: connectorId,
 			controller_id: controller.controllerId,
 		}
-		if (existing.has(controller.controllerId)) {
+		if (knownControllerIds.has(controller.controllerId)) {
 			await storage.db.update(accessNetworksUnleashedControllers, key, values)
 		} else {
 			await storage.db.create(accessNetworksUnleashedControllers, {
@@ -166,6 +166,7 @@ export async function upsertDiscoveredAccessNetworksUnleashedControllers(
 				adopted: 0,
 				...values,
 			})
+			knownControllerIds.add(controller.controllerId)
 		}
 	}
 	const credentialed = await storage.db.findMany(
