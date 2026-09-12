@@ -365,8 +365,8 @@ export function createAudiobookAdapter(input: {
 			})
 		}
 
-		const downloadedPath = `${target.path}.aaxc.partial`
-		const convertPath = `${target.path}.partial`
+		const downloadedPath = `${target.path}.partial.aaxc`
+		const convertPath = `${target.path}.partial.m4b`
 		const metadataPath = `${target.path}.ffmetadata`
 		const coverDestPath = `${target.path}.cover`
 		let sourcePath = request.aaxcPath?.trim() ?? ''

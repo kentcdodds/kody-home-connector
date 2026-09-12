@@ -137,6 +137,10 @@ export function buildFfmpegConvertArgs(input: {
 		'-hide_banner',
 		'-y',
 		...buildFfmpegDecryptArgs(input.credentials),
+		// Pin the Audible demuxer so temp `*.partial.aaxc` (and `.aax`) still
+		// apply `-audible_key`/`-audible_iv` / `-activation_bytes`.
+		'-f',
+		'aax',
 		'-i',
 		input.sourcePath,
 	]
@@ -166,6 +170,7 @@ export function buildFfmpegConvertArgs(input: {
 	if (title) {
 		args.push('-metadata', `title=${title}`)
 	}
-	args.push('-c', 'copy', input.outputPath)
+	// Pin ipod/m4b so a `*.partial.m4b` temp file still muxes as audiobook MP4.
+	args.push('-c', 'copy', '-f', 'ipod', input.outputPath)
 	return args
 }

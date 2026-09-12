@@ -162,10 +162,14 @@ test('buildFfmpegConvertArgs uses audible_key/iv or activation_bytes', () => {
 		sampleKey,
 		'-audible_iv',
 		sampleIv,
+		'-f',
+		'aax',
 		'-i',
 		'/tmp/book.aaxc',
 		'-c',
 		'copy',
+		'-f',
+		'ipod',
 		'/tmp/book.m4b',
 	])
 	expect(
@@ -189,12 +193,16 @@ test('buildFfmpegConvertArgs uses audible_key/iv or activation_bytes', () => {
 		sampleKey,
 		'-audible_iv',
 		sampleIv,
+		'-f',
+		'aax',
 		'-i',
 		'/tmp/book.aaxc',
 		'-metadata',
 		'title=Blightfall',
 		'-c',
 		'copy',
+		'-f',
+		'ipod',
 		'/tmp/book.m4b',
 	])
 	expect(
@@ -289,6 +297,10 @@ test('import writes a flat Title.m4b and reports library status', async () => {
 		)
 		expect(ffmpegCalls[0]).not.toContain('-map')
 		expect(ffmpegCalls[0]).not.toContain('-map_metadata')
+		expect(ffmpegCalls[0]).toEqual(
+			expect.arrayContaining(['-f', 'aax', '-c', 'copy', '-f', 'ipod']),
+		)
+		expect(ffmpegCalls[0]?.at(-1)).toMatch(/\.partial\.m4b$/)
 
 		const exists = await adapter.exists('Project Hail Mary.m4b')
 		expect(exists).toEqual({
@@ -363,6 +375,10 @@ test('import accepts aaxcBase64 bytes and optional chapters/cover', async () => 
 			]),
 		)
 		expect(ffmpegCalls[0]).not.toContain('-map_metadata')
+		expect(ffmpegCalls[0]?.[ffmpegCalls[0].indexOf('-i') + 1]).toMatch(
+			/\.partial\.aaxc$/,
+		)
+		expect(ffmpegCalls[0]?.at(-1)).toMatch(/\.partial\.m4b$/)
 	})
 })
 
@@ -384,7 +400,7 @@ test('import downloads aaxcUrl then converts with voucher JSON', async () => {
 		expect(imported.filename).toBe('Owned Title.m4b')
 		expect(
 			await pathExistsSafe(
-				path.join(libraryPath, 'Owned Title.m4b.aaxc.partial'),
+				path.join(libraryPath, 'Owned Title.m4b.partial.aaxc'),
 			),
 		).toBe(false)
 	})
@@ -411,7 +427,7 @@ test('import surfaces ffmpeg failures without leaving a partial file', async () 
 			false,
 		)
 		expect(
-			await pathExistsSafe(path.join(libraryPath, 'Broken.m4b.partial')),
+			await pathExistsSafe(path.join(libraryPath, 'Broken.m4b.partial.m4b')),
 		).toBe(false)
 	})
 })
