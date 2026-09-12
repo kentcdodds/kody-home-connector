@@ -131,6 +131,7 @@ export function buildFfmpegConvertArgs(input: {
 	outputPath: string
 	metadataPath?: string
 	coverPath?: string
+	title?: string
 }): Array<string> {
 	const args = [
 		'-hide_banner',
@@ -145,19 +146,25 @@ export function buildFfmpegConvertArgs(input: {
 	if (input.coverPath) {
 		args.push('-i', input.coverPath)
 	}
-	if (input.metadataPath || input.coverPath) {
-		args.push('-map', '0:a?')
-		if (input.metadataPath) {
-			args.push('-map_metadata', '1')
-		}
-		if (input.coverPath) {
-			args.push(
-				'-map',
-				input.metadataPath ? '2' : '1',
-				'-disposition:v:0',
-				'attached_pic',
-			)
-		}
+	// Only remux streams when replacing cover. A title/chapter sidecar must
+	// not use `-map 0:a?` or `-map_metadata 1` — those drop the source cover
+	// and wipe author/narrator tags. Default mapping keeps source audio+art.
+	if (input.coverPath) {
+		args.push(
+			'-map',
+			'0:a?',
+			'-map',
+			input.metadataPath ? '2' : '1',
+			'-disposition:v:0',
+			'attached_pic',
+		)
+	}
+	if (input.metadataPath) {
+		args.push('-map_chapters', '1')
+	}
+	const title = input.title?.trim()
+	if (title) {
+		args.push('-metadata', `title=${title}`)
 	}
 	args.push('-c', 'copy', input.outputPath)
 	return args

@@ -450,7 +450,7 @@ export function createAudiobookAdapter(input: {
 			}
 
 			let resolvedMetadataPath: string | undefined
-			if (hasChapters || request.title?.trim()) {
+			if (hasChapters) {
 				await writeFile(
 					metadataPath,
 					buildFfmetadata({
@@ -470,6 +470,7 @@ export function createAudiobookAdapter(input: {
 					outputPath: convertPath,
 					metadataPath: resolvedMetadataPath,
 					coverPath: resolvedCoverPath,
+					title: request.title,
 				}),
 				timeoutMs: importTimeoutMs,
 			})

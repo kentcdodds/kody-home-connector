@@ -180,21 +180,63 @@ test('buildFfmpegConvertArgs uses audible_key/iv or activation_bytes', () => {
 			credentials: { kind: 'aaxc', key: sampleKey, iv: sampleIv },
 			sourcePath: '/tmp/book.aaxc',
 			outputPath: '/tmp/book.m4b',
+			title: 'Blightfall',
+		}),
+	).toEqual([
+		'-hide_banner',
+		'-y',
+		'-audible_key',
+		sampleKey,
+		'-audible_iv',
+		sampleIv,
+		'-i',
+		'/tmp/book.aaxc',
+		'-metadata',
+		'title=Blightfall',
+		'-c',
+		'copy',
+		'/tmp/book.m4b',
+	])
+	expect(
+		buildFfmpegConvertArgs({
+			credentials: { kind: 'aaxc', key: sampleKey, iv: sampleIv },
+			sourcePath: '/tmp/book.aaxc',
+			outputPath: '/tmp/book.m4b',
 			metadataPath: '/tmp/book.ffmetadata',
 			coverPath: '/tmp/cover.jpg',
+			title: 'Blightfall',
 		}),
 	).toEqual(
 		expect.arrayContaining([
 			'-map',
 			'0:a?',
-			'-map_metadata',
-			'1',
 			'-map',
 			'2',
 			'-disposition:v:0',
 			'attached_pic',
+			'-map_chapters',
+			'1',
+			'-metadata',
+			'title=Blightfall',
 		]),
 	)
+	const chaptersOnly = buildFfmpegConvertArgs({
+		credentials: { kind: 'aaxc', key: sampleKey, iv: sampleIv },
+		sourcePath: '/tmp/book.aaxc',
+		outputPath: '/tmp/book.m4b',
+		metadataPath: '/tmp/book.ffmetadata',
+		title: 'Blightfall',
+	})
+	expect(chaptersOnly).toEqual(
+		expect.arrayContaining([
+			'-map_chapters',
+			'1',
+			'-metadata',
+			'title=Blightfall',
+		]),
+	)
+	expect(chaptersOnly).not.toContain('-map')
+	expect(chaptersOnly).not.toContain('-map_metadata')
 	expect(
 		buildFfmetadata({
 			title: 'Blightfall',
@@ -241,8 +283,12 @@ test('import writes a flat Title.m4b and reports library status', async () => {
 				sampleKey,
 				'-audible_iv',
 				sampleIv,
+				'-metadata',
+				'title=Project Hail Mary',
 			]),
 		)
+		expect(ffmpegCalls[0]).not.toContain('-map')
+		expect(ffmpegCalls[0]).not.toContain('-map_metadata')
 
 		const exists = await adapter.exists('Project Hail Mary.m4b')
 		expect(exists).toEqual({
@@ -308,8 +354,15 @@ test('import accepts aaxcBase64 bytes and optional chapters/cover', async () => 
 			coverAttached: true,
 		})
 		expect(ffmpegCalls[0]).toEqual(
-			expect.arrayContaining(['-map_metadata', '1', '-disposition:v:0']),
+			expect.arrayContaining([
+				'-map_chapters',
+				'1',
+				'-disposition:v:0',
+				'-metadata',
+				'title=Blightfall',
+			]),
 		)
+		expect(ffmpegCalls[0]).not.toContain('-map_metadata')
 	})
 })
 
