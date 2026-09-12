@@ -262,6 +262,9 @@ test('sonos grouping and audio input commands work in mock mode', async () => {
 		const groupsAfterGroup = await sonos.listGroups(sourcePlayerId)
 		await sonos.selectAudioInput(sourcePlayerId)
 		const audioInput = await sonos.getAudioInput(sourcePlayerId)
+		const statusAfterLineIn = await sonos.getPlayerStatus(sourcePlayerId)
+		const tvInput = await sonos.selectTvInput(sourcePlayerId)
+		const statusAfterTv = await sonos.getPlayerStatus(sourcePlayerId)
 		await sonos.setLineInLevel(sourcePlayerId, 8, 8)
 		await sonos.startLineInToGroup({
 			sourcePlayerId,
@@ -275,6 +278,11 @@ test('sonos grouping and audio input commands work in mock mode', async () => {
 		)
 		expect(audioInput.supported).toBe(true)
 		expect(audioInput.lineInUri).toContain('x-rincon-stream:')
+		expect(audioInput.tvInputUri).toMatch(/x-sonos-htastream:.*:spdif/)
+		expect(statusAfterLineIn.currentUri).toBe(audioInput.lineInUri)
+		expect(tvInput.uri).toBe(audioInput.tvInputUri)
+		expect(statusAfterTv.currentUri).toBe(audioInput.tvInputUri)
+		expect(statusAfterTv.currentUri).not.toBe(statusAfterLineIn.currentUri)
 		expect(
 			groupsAfterUngroup.every((group) => group.members.length === 1),
 		).toBe(true)

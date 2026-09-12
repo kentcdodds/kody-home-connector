@@ -197,8 +197,10 @@ MCP surface:
 - `globalcache_list_ir_commands`
 - `globalcache_send_ir`
 - `court_get_status`
-- `court_start_roku` (PJLink projector ON + IR fallback, HDMI 1, Sonos HDMI/TV,
-  Roku Home or app)
+- `sonos_select_tv_input` (Amp/HT HDMI/TV ARC via `x-sonos-htastream:…:spdif`)
+- `sonos_select_audio_input` (analog line-in only; not the court Amp TV path)
+- `court_start_roku` (PJLink projector ON + IR fallback, HDMI 1, Sport Court
+  Sonos TV/HDMI via `sonos_select_tv_input`, Roku Home or app)
 - `court_set_hdmi_input`
 - `court_projector_on` / `court_projector_standby`
 - `court_set_rotosphere`
@@ -206,7 +208,10 @@ MCP surface:
 
 `court_start_roku` resolves the Court Projector Roku by name (`/court/i`) or
 `COURT_ROKU_DEVICE_ID`, and Sport Court Sonos by room name or
-`COURT_SONOS_PLAYER_ID`. Adopt those devices first.
+`COURT_SONOS_PLAYER_ID`. Adopt those devices first. Sport Court Amp
+(`sonos-rincon-804af2a8db1f01400` @ `192.168.1.111`) must use HDMI/TV (ARC),
+not analog line-in. `court_start_roku` calls the TV/SPDIF URI
+(`x-sonos-htastream:RINCON_…:spdif`) via `sonos_select_tv_input`.
 
 ### Deploy onto kody-home.doddsfamily.us
 

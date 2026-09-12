@@ -5,9 +5,12 @@ import {
 	playSonosLive,
 	removeSonosQueueTrackRangeLive,
 	seekSonosQueueTrackLive,
+	selectSonosAudioInputLive,
+	selectSonosTvInputLive,
 	setSonosTransportUriLive,
 	setSonosVolumeLive,
 } from './soap-client.ts'
+import { type SonosPersistedPlayer } from './types.ts'
 
 type CapturedRequest = {
 	url: string
@@ -104,6 +107,51 @@ test('createSonosFavoriteLive builds escaped Favorites CreateObject payload', as
 	)
 	expect(request?.body).toContain('&lt;r:resMD&gt;&amp;lt;DIDL-Lite')
 	expect(request?.body).toContain('Spotify &amp;amp; Sonos')
+})
+
+test('Amp HT TV input uses htastream SPDIF and line-in uses rincon-stream', async () => {
+	const requests = installSoapFetchMock()
+	const player = {
+		playerId: 'sonos-rincon-804af2a8db1f01400',
+		udn: 'uuid:RINCON_804AF2A8DB1F01400',
+		roomName: 'Sport Court',
+		displayName: 'Amp',
+		friendlyName: 'Sport Court Sonos Amp',
+		modelName: 'Sonos Amp',
+		modelNumber: 'S16',
+		serialNum: '80-4A-F2-A8-DB-1F:0',
+		householdId: 'Sonos_Household',
+		host: '192.168.1.111',
+		descriptionUrl: 'http://192.168.1.111:1400/xml/device_description.xml',
+		audioInputSupported: true,
+		adopted: true,
+		lastSeenAt: '2026-09-12T00:00:00.000Z',
+		rawDescriptionXml: null,
+	} satisfies SonosPersistedPlayer
+
+	await selectSonosAudioInputLive({
+		host: player.host,
+		player,
+	})
+	await selectSonosTvInputLive({
+		host: player.host,
+		player,
+	})
+
+	const lineInSetUri = requests[0]
+	const tvSetUri = requests[2]
+	expect(requests.map((request) => request.action)).toEqual([
+		'urn:schemas-upnp-org:service:AVTransport:1#SetAVTransportURI',
+		'urn:schemas-upnp-org:service:AVTransport:1#Play',
+		'urn:schemas-upnp-org:service:AVTransport:1#SetAVTransportURI',
+		'urn:schemas-upnp-org:service:AVTransport:1#Play',
+	])
+	expect(lineInSetUri?.body).toContain(
+		'<CurrentURI>x-rincon-stream:RINCON_804AF2A8DB1F01400</CurrentURI>',
+	)
+	expect(tvSetUri?.body).toContain(
+		'<CurrentURI>x-sonos-htastream:RINCON_804AF2A8DB1F01400:spdif</CurrentURI>',
+	)
 })
 
 test('queue playback helpers target the Sonos queue and TRACK_NR seek unit', async () => {

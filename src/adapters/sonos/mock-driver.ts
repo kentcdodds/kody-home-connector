@@ -15,6 +15,7 @@ import {
 	type SonosQueueTrack,
 	type SonosSavedQueue,
 } from './types.ts'
+import { buildSonosLineInUri, buildSonosTvInputUri } from './input-uris.ts'
 
 type MockQueueTrack = SonosQueueTrack
 
@@ -474,7 +475,8 @@ export function resetMockSonosState() {
 				icon: 'line-in',
 				leftLevel: 5,
 				rightLevel: 5,
-				lineInUri: `x-rincon-stream:${stripUuidPrefix(basePlayer.udn)}`,
+				lineInUri: buildSonosLineInUri(basePlayer.udn),
+				tvInputUri: buildSonosTvInputUri(basePlayer.udn),
 			},
 			currentUri: null,
 		})
@@ -947,6 +949,14 @@ export function selectMockSonosAudioInput(playerId: string) {
 	const coordinator = getCoordinatorState(playerId)
 	const player = getPlayerState(playerId)
 	coordinator.currentUri = player.audioInput.lineInUri
+	coordinator.transportState = 'PLAYING'
+}
+
+export function selectMockSonosTvInput(playerId: string) {
+	const coordinator = getCoordinatorState(playerId)
+	const player = getPlayerState(playerId)
+	coordinator.currentUri =
+		player.audioInput.tvInputUri ?? buildSonosTvInputUri(player.player.udn)
 	coordinator.transportState = 'PLAYING'
 }
 

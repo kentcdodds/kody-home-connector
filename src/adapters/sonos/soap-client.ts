@@ -10,6 +10,7 @@ import {
 	type SonosQueueEnqueueResult,
 	type SonosQueueTrack,
 } from './types.ts'
+import { buildSonosLineInUri, buildSonosTvInputUri } from './input-uris.ts'
 
 const sonosSoapTimeoutMs = 10_000
 const sonosSoapRetryDelayMs = 250
@@ -874,6 +875,7 @@ export async function getSonosAudioInputLive(input: {
 			leftLevel: null,
 			rightLevel: null,
 			lineInUri: null,
+			tvInputUri: buildSonosTvInputUri(input.player.udn),
 		} satisfies SonosAudioInputStatus
 	}
 	const attributesXml = await audioIn(
@@ -896,7 +898,8 @@ export async function getSonosAudioInputLive(input: {
 		rightLevel: Number(
 			extractTag(lineLevelXml, 'CurrentRightLineInLevel') ?? '0',
 		),
-		lineInUri: `x-rincon-stream:${stripSonosUuidPrefix(input.player.udn)}`,
+		lineInUri: buildSonosLineInUri(input.player.udn),
+		tvInputUri: buildSonosTvInputUri(input.player.udn),
 	} satisfies SonosAudioInputStatus
 }
 
@@ -906,7 +909,18 @@ export async function selectSonosAudioInputLive(input: {
 }) {
 	await setSonosTransportUriLive({
 		host: input.host,
-		uri: `x-rincon-stream:${stripSonosUuidPrefix(input.player.udn)}`,
+		uri: buildSonosLineInUri(input.player.udn),
+	})
+	await playSonosLive(input.host)
+}
+
+export async function selectSonosTvInputLive(input: {
+	host: string
+	player: SonosPersistedPlayer
+}) {
+	await setSonosTransportUriLive({
+		host: input.host,
+		uri: buildSonosTvInputUri(input.player.udn),
 	})
 	await playSonosLive(input.host)
 }

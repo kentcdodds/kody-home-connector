@@ -306,7 +306,7 @@ export function createCourtAdapter(input: {
 			const projector = await sendProjectorCommand('on')
 			const hdmi = await input.globalCache.sendIr('hdmi-input-1')
 			const sonosPlayerId = await resolveSonosPlayerId(startInput.sonosPlayerId)
-			await input.sonos.selectAudioInput(sonosPlayerId)
+			const sonosInput = await input.sonos.selectTvInput(sonosPlayerId)
 			let rokuResult: unknown
 			if (appId) {
 				rokuResult = await input.roku.launchApp(rokuDevice.deviceId, appId)
@@ -318,6 +318,8 @@ export function createCourtAdapter(input: {
 				rokuName: rokuDevice.name,
 				appId,
 				sonosPlayerId: sonosPlayerId ?? null,
+				sonosInput: 'tv' as const,
+				sonosInputUri: sonosInput.uri,
 				projector,
 				hdmi,
 				roku: rokuResult,
