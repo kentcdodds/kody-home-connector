@@ -3,6 +3,10 @@ import { createTestHomeConnectorConfig } from '../../test-home-connector-config.
 import { createAppState } from '../../state.ts'
 import { createCourtAdapter } from './index.ts'
 import { type createGlobalCacheAdapter } from '../global-cache/index.ts'
+import {
+	PjlinkUnreachableError,
+	type createPjlinkAdapter,
+} from '../pjlink/index.ts'
 import { type createRokuAdapter } from '../roku/index.ts'
 import { type createSonosAdapter } from '../sonos/index.ts'
 import { type RokuDeviceRecord } from '../roku/types.ts'
@@ -44,6 +48,51 @@ function createFakeGlobalCache() {
 				}
 			},
 		} as unknown as ReturnType<typeof createGlobalCacheAdapter>,
+	}
+}
+
+function createFakePjlink(
+	input: {
+		unreachable?: boolean
+		projector?: { projectorId: string; name: string; host: string } | null
+	} = {},
+) {
+	const commands: Array<string> = []
+	const projector =
+		input.projector === undefined
+			? {
+					projectorId: 'pjlink-005041b2fd09',
+					name: 'Court Optoma ZK810TST',
+					host: '192.168.0.128',
+					adopted: true,
+				}
+			: input.projector
+	return {
+		commands,
+		adapter: {
+			async resolveCourtProjector() {
+				return projector
+			},
+			async setPower(
+				_selector: { projectorId?: string },
+				command: 'on' | 'off',
+			) {
+				if (input.unreachable) {
+					throw new PjlinkUnreachableError({
+						host: '192.168.0.128',
+						port: 4352,
+						message: 'connect EHOSTUNREACH 192.168.0.128:4352',
+					})
+				}
+				commands.push(command)
+				return {
+					projector,
+					power: command === 'on' ? 'on' : 'standby',
+					command,
+					raw: `%1POWR=OK`,
+				}
+			},
+		} as unknown as ReturnType<typeof createPjlinkAdapter>,
 	}
 }
 
@@ -111,16 +160,19 @@ test('startRoku powers the projector, selects HDMI 1, routes Sonos, and opens Ho
 	const globalCache = createFakeGlobalCache()
 	const roku = createFakeRoku()
 	const sonos = createFakeSonos()
+	const pjlink = createFakePjlink()
 	const court = createCourtAdapter({
 		config: createTestHomeConnectorConfig(),
 		state,
 		globalCache: globalCache.adapter,
+		pjlink: pjlink.adapter,
 		roku: roku.adapter,
 		sonos: sonos.adapter,
 	})
 
 	const result = await court.startRoku()
-	expect(globalCache.sent).toEqual(['projector-on', 'hdmi-input-1'])
+	expect(pjlink.commands).toEqual(['on'])
+	expect(globalCache.sent).toEqual(['hdmi-input-1'])
 	expect(sonos.selected).toEqual(['sonos-rincon-804af2a8db1f01400'])
 	expect(roku.keys).toEqual(['Home'])
 	expect(result.appId).toBeNull()
@@ -136,6 +188,7 @@ test('startRoku can launch a Roku app by name', async () => {
 		config: createTestHomeConnectorConfig(),
 		state,
 		globalCache: globalCache.adapter,
+		pjlink: createFakePjlink().adapter,
 		roku: roku.adapter,
 		sonos: sonos.adapter,
 	})
@@ -152,6 +205,7 @@ test('Rotosphere green is marked unreliable except proven colors', async () => {
 		config: createTestHomeConnectorConfig(),
 		state,
 		globalCache: globalCache.adapter,
+		pjlink: createFakePjlink().adapter,
 		roku: createFakeRoku().adapter,
 		sonos: createFakeSonos().adapter,
 	})
@@ -159,4 +213,59 @@ test('Rotosphere green is marked unreliable except proven colors', async () => {
 	expect(green.reliability).toBe('unreliable-flipper')
 	const blackOut = await court.setRotosphere('black-out')
 	expect(blackOut.reliability).toBe('proven')
+})
+
+test('projectorOn falls back to iTach IR when PJLink is unreachable', async () => {
+	const state = createAppState()
+	const globalCache = createFakeGlobalCache()
+	const pjlink = createFakePjlink({ unreachable: true })
+	const court = createCourtAdapter({
+		config: createTestHomeConnectorConfig(),
+		state,
+		globalCache: globalCache.adapter,
+		pjlink: pjlink.adapter,
+		roku: createFakeRoku().adapter,
+		sonos: createFakeSonos().adapter,
+	})
+
+	const result = await court.projectorOn()
+	expect(result.transport).toBe('itach-ir')
+	expect(result.irFallback).toBe(true)
+	expect(result.fallbackReason).toBe('pjlink-unreachable')
+	expect(globalCache.sent).toEqual(['projector-on'])
+})
+
+test('projectorStandby uses PJLink when the court projector is adopted', async () => {
+	const state = createAppState()
+	const globalCache = createFakeGlobalCache()
+	const pjlink = createFakePjlink()
+	const court = createCourtAdapter({
+		config: createTestHomeConnectorConfig(),
+		state,
+		globalCache: globalCache.adapter,
+		pjlink: pjlink.adapter,
+		roku: createFakeRoku().adapter,
+		sonos: createFakeSonos().adapter,
+	})
+
+	const result = await court.projectorStandby()
+	expect(result.transport).toBe('pjlink')
+	expect(pjlink.commands).toEqual(['off'])
+	expect(globalCache.sent).toEqual([])
+})
+
+test('getStatus documents Roku hard-off and LAN-dark caveats', async () => {
+	const state = createAppState()
+	const court = createCourtAdapter({
+		config: createTestHomeConnectorConfig(),
+		state,
+		globalCache: createFakeGlobalCache().adapter,
+		pjlink: createFakePjlink().adapter,
+		roku: createFakeRoku().adapter,
+		sonos: createFakeSonos().adapter,
+	})
+	const status = await court.getStatus()
+	expect(status.rokuPower.reliableHardOff).toBe(false)
+	expect(status.projector.lanDarkAfterFullOff).toBe(true)
+	expect(status.projector.preferredTransport).toBe('pjlink')
 })

@@ -5,12 +5,14 @@ import { resetMockLutronSystem } from '../src/adapters/lutron/mock-driver.ts'
 import { resetMockSonosState } from '../src/adapters/sonos/mock-driver.ts'
 import { resetMockSamsungDevices } from '../src/adapters/samsung-tv/mock-driver.ts'
 import { resetMockVenstarState } from './venstar.ts'
+import { resetMockPjlinkState } from '../src/adapters/pjlink/mock-driver.ts'
 
 resetMockLutronSystem()
 resetMockSonosState()
 resetMockSamsungDevices()
 resetMockBondState()
 resetMockVenstarState()
+resetMockPjlinkState()
 const server = setupServer(...mswHandlers)
 
 server.listen({

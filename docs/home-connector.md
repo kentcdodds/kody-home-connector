@@ -93,8 +93,10 @@ The connector exposes these local-device families:
   high-risk writes over the local AJAX management interface
 - JellyFish Lighting controller discovery, zones, patterns, and daily/calendar
   schedules over the controller's local WebSocket API
-- Court AV through the cage Global Cache iTach IP2IR (HDMI switch, Optoma
-  projector, Chauvet Rotosphere) plus composed Roku/Sonos scene tools
+- PJLink Class 1 projectors over TCP 4352 (scan/adopt, power, INPT, AVMT, LAMP)
+- Court AV through PJLink (preferred) plus the cage Global Cache iTach IP2IR
+  (HDMI switch, Optoma IR fallback, Chauvet Rotosphere) and composed Roku/Sonos
+  scene tools
 
 All surfaces are registered as MCP tools on this process and served at `/mcp`.
 
@@ -124,19 +126,52 @@ before `kody.mcp["home"].bond_get_bridge_version({ bridgeId })`. When health
 says the bridge is cooling down, the monitor should record a skipped/backoff
 sample and avoid the version fetch until `nextRecommendedAttemptAt`.
 
-## Court AV (Global Cache iTach)
+## Court AV (PJLink + Global Cache iTach)
 
 The sport-court cage stack is driven from this connector, not from Elan:
 
+- Optoma ZK810TST at `192.168.0.128` (`00:50:41:B2:FD:09`), PJLink port 4352, no
+  auth (`PJLINK 0`). `%1POWR 0` is the reliable lamp-off path.
 - iTach IP2IR at `192.168.1.70:4998` (`GLOBAL_CACHE_HOST` / `GLOBAL_CACHE_PORT`)
 - IR1 stick-on emitter → MROCIOA HDMI switch
-- IR2 stick-on emitter → Optoma projector
+- IR2 stick-on emitter → Optoma projector (fallback when PJLink is unreachable)
 - IR3 hanging blaster → Chauvet Rotosphere (must be `IR_BLASTER`)
-- Court Roku ECP + Sport Court Sonos HDMI/TV input for picture and court audio
+- Court Roku Ultra ECP at `192.168.1.98` + Sport Court Sonos HDMI/TV input
 
 Do not bypass the HDMI switch: Roku is on switch IN 1, the switch feeds an HDMI
 audio extractor, and that extractor is the Sport Court Sonos path. Blu-ray is
 switch IN 2.
+
+Court projector power (`court_projector_on`, `court_projector_standby`,
+`court_start_roku`, `court_shutdown`) prefers PJLink on the adopted court
+Optoma. If PJLink is unreachable — typical after a **full** projector off, when
+LAN/ping/PJLink all go dark — those tools fall back to iTach IR2. Enable
+“network standby” on the projector if power-on should stay on PJLink. IR standby
+was the unreliable path; use PJLink standby when the LAN is up.
+
+Register the court Optoma once after deploy:
+
+```
+kody.mcp["home"].pjlink_adopt_projector({
+  host: "192.168.0.128",
+  macAddress: "00:50:41:B2:FD:09",
+  name: "Court Optoma ZK810TST"
+})
+```
+
+Or scan (`pjlink_scan_projectors`) and adopt the discovered `projectorId`.
+`PJLINK_SCAN_EXTRA_HOSTS` defaults to `192.168.0.128` because that subnet may
+not be on the NAS NIC. Optional `COURT_PJLINK_PROJECTOR_ID` pins the court
+projector when more than one PJLink device is adopted.
+
+Court Roku Ultra ECP `PowerOff` / `Power` leave `power-mode=PowerOn`. There is
+no court Kasa plug. There is **no reliable Roku hard-off path**.
+
+`@kentcdodds/court-projector` (`start-court` / `shutdown`) lives in that
+package, not this repo. It should keep calling `court_start_roku` /
+`court_shutdown` / `court_projector_*`; Patch can rewire the package after this
+connector ships. No package change is required for the PJLink preference because
+those court tools now own the transport choice.
 
 Named IR commands live in `src/adapters/global-cache/codes.ts`. Reliability:
 
@@ -148,11 +183,18 @@ Named IR commands live in `src/adapters/global-cache/codes.ts`. Reliability:
 
 MCP surface:
 
+- `pjlink_scan_projectors` / `pjlink_list_projectors`
+- `pjlink_adopt_projector` / `pjlink_forget_projector`
+- `pjlink_get_power` / `pjlink_power_on` / `pjlink_power_off`
+- `pjlink_get_input` / `pjlink_set_input`
+- `pjlink_get_av_mute` / `pjlink_set_av_mute`
+- `pjlink_get_lamp` / `pjlink_get_info`
 - `globalcache_get_status`
 - `globalcache_list_ir_commands`
 - `globalcache_send_ir`
 - `court_get_status`
-- `court_start_roku` (projector ON, HDMI 1, Sonos HDMI/TV, Roku Home or app)
+- `court_start_roku` (PJLink projector ON + IR fallback, HDMI 1, Sonos HDMI/TV,
+  Roku Home or app)
 - `court_set_hdmi_input`
 - `court_projector_on` / `court_projector_standby`
 - `court_set_rotosphere`
@@ -162,8 +204,21 @@ MCP surface:
 `COURT_ROKU_DEVICE_ID`, and Sport Court Sonos by room name or
 `COURT_SONOS_PLAYER_ID`. Adopt those devices first.
 
-There is no Kody workflow package in this repo yet. These tools are the
-connector capabilities that package should call.
+### Deploy onto kody-home.doddsfamily.us
+
+This connector is not deployed by merging the PR. After merge to `main`:
+
+1. GitHub Actions workflow **Publish Home Connector** tests, then pushes
+   `kentcdodds/kody-home-connector:latest` (and a `sha-` tag) to Docker Hub.
+2. On the Synology NAS (`192.168.1.234`), Howie/Patch pull the new image and
+   restart the container with the existing `start-kody-home-connector.sh` next
+   to `/volume1/docker/` (see `scripts/nas/README.md`). Cloudflare already
+   tunnels `kody-home.doddsfamily.us` → `http://192.168.1.234:4040`.
+3. Startup applies the `pjlink_projectors` SQLite migration automatically.
+4. Adopt the court Optoma with `pjlink_adopt_projector` (no password).
+
+There is no Kody workflow package in this repo. These tools are the connector
+capabilities `@kentcdodds/court-projector` should call.
 
 ## JellyFish Lighting integration
 
@@ -599,6 +654,7 @@ The connector stores a local SQLite database containing:
 - discovered Bond bridges and tokens
 - discovered Sonos players
 - managed Venstar thermostats
+- discovered and adopted PJLink projectors (optional encrypted password)
 
 By default the database is stored at
 `~/.kody/home-connector/home-connector.sqlite`. Operators can override the base

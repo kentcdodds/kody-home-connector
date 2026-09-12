@@ -2,9 +2,15 @@ import { type HomeConnectorConfig } from '../../config.ts'
 import { type HomeConnectorState } from '../../state.ts'
 import { type createGlobalCacheAdapter } from '../global-cache/index.ts'
 import { getGlobalCacheIrCommand } from '../global-cache/codes.ts'
+import {
+	isPjlinkUnreachableError,
+	type createPjlinkAdapter,
+} from '../pjlink/index.ts'
+import { courtOptomaDefaults } from '../pjlink/types.ts'
 import { type createRokuAdapter } from '../roku/index.ts'
 import { type createSonosAdapter } from '../sonos/index.ts'
 import { type RokuDeviceRecord } from '../roku/types.ts'
+import { type GlobalCacheSendIrResult } from '../global-cache/types.ts'
 
 export const rotosphereActions = [
 	'black-out',
@@ -145,10 +151,21 @@ async function resolveRokuAppId(input: {
 	throw new Error(`No installed Roku app matches "${appName}".`)
 }
 
+export type CourtProjectorTransport = 'pjlink' | 'itach-ir'
+
+export type CourtProjectorCommandResult = {
+	transport: CourtProjectorTransport
+	irFallback: boolean
+	fallbackReason: 'pjlink-unreachable' | 'pjlink-not-configured' | null
+	pjlink: unknown
+	ir: GlobalCacheSendIrResult | null
+}
+
 export function createCourtAdapter(input: {
 	config: HomeConnectorConfig
 	state: HomeConnectorState
 	globalCache: ReturnType<typeof createGlobalCacheAdapter>
+	pjlink: ReturnType<typeof createPjlinkAdapter>
 	roku: ReturnType<typeof createRokuAdapter>
 	sonos: ReturnType<typeof createSonosAdapter>
 }) {
@@ -174,11 +191,64 @@ export function createCourtAdapter(input: {
 		)
 	}
 
+	async function sendProjectorCommand(
+		command: 'on' | 'standby',
+	): Promise<CourtProjectorCommandResult> {
+		const irCommandId = command === 'on' ? 'projector-on' : 'projector-standby'
+		try {
+			const projector = await input.pjlink.resolveCourtProjector()
+			if (!projector) {
+				const ir = await input.globalCache.sendIr(irCommandId)
+				return {
+					transport: 'itach-ir',
+					irFallback: true,
+					fallbackReason: 'pjlink-not-configured',
+					pjlink: null,
+					ir,
+				}
+			}
+			const pjlink =
+				command === 'on'
+					? await input.pjlink.setPower(
+							{ projectorId: projector.projectorId },
+							'on',
+						)
+					: await input.pjlink.setPower(
+							{ projectorId: projector.projectorId },
+							'off',
+						)
+			return {
+				transport: 'pjlink',
+				irFallback: false,
+				fallbackReason: null,
+				pjlink,
+				ir: null,
+			}
+		} catch (error) {
+			if (!isPjlinkUnreachableError(error)) {
+				throw error
+			}
+			const ir = await input.globalCache.sendIr(irCommandId)
+			return {
+				transport: 'itach-ir',
+				irFallback: true,
+				fallbackReason: 'pjlink-unreachable',
+				pjlink: {
+					error: error.message,
+					host: error.host,
+					port: error.port,
+				},
+				ir,
+			}
+		}
+	}
+
 	return {
-		getStatus() {
+		async getStatus() {
 			const rokuDevice = input.state.devices.find(
 				(device) => device.adopted && matchesCourtName(device.name, /court/i),
 			)
+			const pjlinkProjector = await input.pjlink.resolveCourtProjector()
 			return {
 				globalCache: input.globalCache.getStatus(),
 				rokuDeviceId:
@@ -194,6 +264,35 @@ export function createCourtAdapter(input: {
 				},
 				rotosphere:
 					'IRC-6 codes from Flipper. Black Out / Manual / Red were seen on the court; other buttons are unreliable and should be re-learned.',
+				projector: {
+					preferredTransport: 'pjlink',
+					fallbackTransport: 'itach-ir2',
+					pjlink: pjlinkProjector
+						? {
+								projectorId: pjlinkProjector.projectorId,
+								name: pjlinkProjector.name,
+								host: pjlinkProjector.host,
+								macAddress: pjlinkProjector.macAddress,
+								adopted: pjlinkProjector.adopted,
+							}
+						: {
+								projectorId: null,
+								name: courtOptomaDefaults.name,
+								host: courtOptomaDefaults.host,
+								macAddress: courtOptomaDefaults.macAddress,
+								adopted: false,
+							},
+					lanDarkAfterFullOff: true,
+					notes:
+						'Prefer PJLink %1POWR for court power. After a full Optoma off the LAN goes dark (ping/PJLink fail); court_projector_on then falls back to iTach IR2. Enable network standby on the projector if power-on should stay on PJLink.',
+				},
+				rokuPower: {
+					reliableHardOff: false,
+					ecpPowerOffLeavesPowerModeOn: true,
+					kasaPlug: null,
+					notes:
+						'Court Roku Ultra ECP PowerOff/Power leave power-mode=PowerOn. There is no court Kasa plug and no reliable hard-off path.',
+				},
 			}
 		},
 		async startRoku(startInput: CourtStartRokuInput = {}) {
@@ -208,7 +307,7 @@ export function createCourtAdapter(input: {
 				appId: startInput.appId,
 				appName: startInput.appName,
 			})
-			const projector = await input.globalCache.sendIr('projector-on')
+			const projector = await sendProjectorCommand('on')
 			const hdmi = await input.globalCache.sendIr('hdmi-input-1')
 			const sonosPlayerId = await resolveSonosPlayerId(startInput.sonosPlayerId)
 			await input.sonos.selectAudioInput(sonosPlayerId)
@@ -227,7 +326,7 @@ export function createCourtAdapter(input: {
 				hdmi,
 				roku: rokuResult,
 				notes:
-					'Projector lamp may take 15-30s. HDMI 1 is the Roku. Sport Court Sonos is on the HDMI/TV (spdif) input. Do not bypass the HDMI switch or court audio is lost.',
+					'Projector uses PJLink when reachable, otherwise iTach IR2. Lamp may take 15-30s. HDMI 1 is the Roku. Sport Court Sonos is on the HDMI/TV (spdif) input. Do not bypass the HDMI switch or court audio is lost. After full projector off, LAN/PJLink are dark until IR (or network standby) brings it back.',
 			}
 		},
 		async setHdmiInput(hdmiInput: CourtHdmiInput) {
@@ -241,10 +340,10 @@ export function createCourtAdapter(input: {
 			}
 		},
 		async projectorOn() {
-			return await input.globalCache.sendIr('projector-on')
+			return await sendProjectorCommand('on')
 		},
 		async projectorStandby() {
-			return await input.globalCache.sendIr('projector-standby')
+			return await sendProjectorCommand('standby')
 		},
 		async setRotosphere(action: CourtRotosphereAction) {
 			const commandId = rotosphereCommandId(action)
@@ -257,7 +356,7 @@ export function createCourtAdapter(input: {
 			}
 		},
 		async shutdown(inputArgs: { rotosphereBlackOut?: boolean } = {}) {
-			const projector = await input.globalCache.sendIr('projector-standby')
+			const projector = await sendProjectorCommand('standby')
 			const rotosphere = inputArgs.rotosphereBlackOut
 				? await input.globalCache.sendIr('rotosphere-black-out')
 				: null
@@ -265,7 +364,7 @@ export function createCourtAdapter(input: {
 				projector,
 				rotosphere,
 				notes:
-					'Projector standby is IR2. HDMI switch power/auto were never learned and are not sent. Rotosphere Black Out is optional and uses the Flipper codeset.',
+					'Projector standby prefers PJLink %1POWR 0 and falls back to iTach IR2 when PJLink is unreachable. HDMI switch power/auto were never learned and are not sent. Rotosphere Black Out is optional and uses the Flipper codeset. Court Roku ECP has no reliable hard-off.',
 			}
 		},
 	}
