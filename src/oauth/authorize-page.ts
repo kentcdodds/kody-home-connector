@@ -288,6 +288,11 @@ const styles = `
 		.consent-actions {
 			flex-direction: column;
 		}
+
+		.consent-actions button {
+			flex: none;
+			width: 100%;
+		}
 	}
 
 	@media (prefers-reduced-motion: reduce) {

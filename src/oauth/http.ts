@@ -78,16 +78,20 @@ function htmlResponse(body: string, status = 200) {
 	})
 }
 
+// RFC 9207: error responses carry `iss` too, since the metadata advertises
+// authorization_response_iss_parameter_supported.
 function oauthErrorRedirect(input: {
 	redirectUri: string
 	error: string
 	description: string
 	state?: string | null
+	issuer: string
 }) {
 	const url = new URL(input.redirectUri)
 	url.searchParams.set('error', input.error)
 	url.searchParams.set('error_description', input.description)
 	if (input.state) url.searchParams.set('state', input.state)
+	url.searchParams.set('iss', input.issuer)
 	return Response.redirect(url.toString(), 302)
 }
 
@@ -204,6 +208,7 @@ async function handleAuthorizeGet(input: {
 				error: 'invalid_request',
 				description: message,
 				state,
+				issuer: input.config.publicBaseUrl,
 			})
 		}
 		return errorPageResponse(input.config, message)
@@ -253,6 +258,7 @@ async function handleAuthorizePost(input: {
 				error: 'access_denied',
 				description: 'The resource owner denied the request.',
 				state,
+				issuer: input.config.publicBaseUrl,
 			})
 		}
 		if (params.get('response_type') !== 'code') {
@@ -294,6 +300,7 @@ async function handleAuthorizePost(input: {
 				error: 'invalid_request',
 				description: message,
 				state,
+				issuer: input.config.publicBaseUrl,
 			})
 		}
 		return errorPageResponse(input.config, message)

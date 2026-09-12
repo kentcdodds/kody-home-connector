@@ -173,6 +173,36 @@ test('GET /authorize without a redirect_uri renders a styled error page', async 
 	}
 })
 
+test('invalid authorize requests redirect back with invalid_request and iss', async () => {
+	const { storage, oauth, config } = await createOAuthApp()
+	const restoreFetch = mockClientMetadataFetch()
+	try {
+		const query = createAuthorizeQuery(config.mcpUrl)
+		query.set('response_type', 'token')
+		const response = await dispatch(
+			oauth,
+			new Request('https://kody-home.doddsfamily.us/authorize', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+				body: new URLSearchParams({
+					intent: 'approve',
+					query: `?${query.toString()}`,
+				}),
+			}),
+		)
+		expect(response?.status).toBe(302)
+		const redirected = new URL(response?.headers.get('Location') ?? '')
+		expect(redirected.origin + redirected.pathname).toBe(redirectUri)
+		expect(redirected.searchParams.get('error')).toBe('invalid_request')
+		expect(redirected.searchParams.get('state')).toBe('abc')
+		expect(redirected.searchParams.get('iss')).toBe(config.publicBaseUrl)
+		expect(redirected.searchParams.get('code')).toBeNull()
+	} finally {
+		restoreFetch()
+		await storage.close()
+	}
+})
+
 test('denying the consent page redirects with access_denied and no code', async () => {
 	const { storage, oauth, config } = await createOAuthApp()
 	const restoreFetch = mockClientMetadataFetch()
@@ -194,6 +224,7 @@ test('denying the consent page redirects with access_denied and no code', async 
 		expect(redirected.origin + redirected.pathname).toBe(redirectUri)
 		expect(redirected.searchParams.get('error')).toBe('access_denied')
 		expect(redirected.searchParams.get('state')).toBe('abc')
+		expect(redirected.searchParams.get('iss')).toBe(config.publicBaseUrl)
 		expect(redirected.searchParams.get('code')).toBeNull()
 	} finally {
 		restoreFetch()
