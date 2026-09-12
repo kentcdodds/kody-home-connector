@@ -152,6 +152,51 @@ test('Amp HT TV input uses htastream SPDIF and line-in uses rincon-stream', asyn
 	expect(tvSetUri?.body).toContain(
 		'<CurrentURI>x-sonos-htastream:RINCON_804AF2A8DB1F01400:spdif</CurrentURI>',
 	)
+	expect(tvSetUri?.body).not.toContain('x-sonos-ht:spdif')
+	expect(tvSetUri?.body).not.toContain('x-sonos-ht:hdmi')
+	expect(tvSetUri?.body).not.toContain('x-rincon-stream:')
+})
+
+test('TV input UPnP 714 fails clearly and does not select line-in', async () => {
+	vi.stubGlobal('fetch', async () => {
+		return new Response(
+			'<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"><s:Body><s:Fault><faultcode>s:Client</faultcode><faultstring>UPnPError</faultstring><detail><UPnPError xmlns="urn:schemas-upnp-org:control-1-0"><errorCode>714</errorCode></UPnPError></detail></s:Fault></s:Body></s:Envelope>',
+			{ status: 500 },
+		)
+	})
+	const player = {
+		playerId: 'sonos-rincon-804af2a8db1f01400',
+		udn: 'uuid:RINCON_804AF2A8DB1F01400',
+		roomName: 'Sport Court',
+		displayName: 'Amp',
+		friendlyName: 'Sport Court Sonos Amp',
+		modelName: 'Sonos Amp',
+		modelNumber: 'S16',
+		serialNum: '80-4A-F2-A8-DB-1F:0',
+		householdId: 'Sonos_Household',
+		host: '192.168.1.111',
+		descriptionUrl: 'http://192.168.1.111:1400/xml/device_description.xml',
+		audioInputSupported: true,
+		adopted: true,
+		lastSeenAt: '2026-09-12T00:00:00.000Z',
+		rawDescriptionXml: null,
+	} satisfies SonosPersistedPlayer
+
+	const error = await selectSonosTvInputLive({
+		host: player.host,
+		player,
+	}).catch((caught: unknown) => caught)
+
+	expect(error).toMatchObject({
+		name: 'SonosTvInputUnavailableError',
+		message: expect.stringContaining(
+			'x-sonos-htastream:RINCON_804AF2A8DB1F01400:spdif',
+		),
+	})
+	expect((error as Error).message).toContain('line-in was not selected')
+	expect((error as Error).message).not.toMatch(
+		/selected the sonos audio input/i,
+	)
 })
 
 test('queue playback helpers target the Sonos queue and TRACK_NR seek unit', async () => {
