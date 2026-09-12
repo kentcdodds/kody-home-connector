@@ -33,6 +33,7 @@ function fixtureHttp(input: {
 	host?: string
 	hosts?: Array<string>
 	failControl?: boolean
+	controlStatus?: number
 	postedBodies?: Array<string>
 	postedHeaders?: Array<Record<string, string> | undefined>
 }): SonyIrccHttpClient {
@@ -49,6 +50,13 @@ function fixtureHttp(input: {
 			}
 			expect(request.body ?? '').toContain('<IRCCCode>')
 			expect(request.headers?.['SOAPACTION']).toContain('X_SendIRCC')
+			if (input.controlStatus) {
+				return {
+					status: input.controlStatus,
+					headers: {},
+					body: 'IRCC rejected',
+				}
+			}
 			return { status: 200, headers: {}, body: mockSonyIrccSoapOk }
 		}
 		const host = hosts.find((candidate) =>
@@ -418,6 +426,28 @@ test('changing COURT_BLURAY_HOST does not reuse the previous player credentials'
 			authCookie: 'auth=old-court-cookie',
 			psk: 'old-psk',
 		})
+		const powerOnHeaders: Array<Record<string, string> | undefined> = []
+		const dark = createSonyBlurayAdapter({
+			config: createTestHomeConnectorConfig({
+				courtBlurayHost: mockSonyBlurayHostB,
+			}),
+			storage,
+			http: async (request) => {
+				if (request.method === 'POST') {
+					powerOnHeaders.push(request.headers)
+				}
+				throw new Error(`connect EHOSTUNREACH ${request.url}`)
+			},
+		})
+		const powerOn = await dark.powerOn()
+		expect(powerOn.connected).toBe(false)
+		expect(powerOn.player).toBeNull()
+		expect(powerOnHeaders.length).toBeGreaterThan(0)
+		for (const headers of powerOnHeaders) {
+			expect(headers?.Cookie ?? '').not.toMatch(/old-court-cookie/)
+			expect(headers?.['X-Auth-PSK'] ?? '').not.toBe('old-psk')
+		}
+
 		const second = createSonyBlurayAdapter({
 			config: createTestHomeConnectorConfig({
 				courtBlurayHost: mockSonyBlurayHostB,
@@ -436,6 +466,23 @@ test('changing COURT_BLURAY_HOST does not reuse the previous player credentials'
 			expect(headers?.Cookie ?? '').not.toMatch(/old-court-cookie/)
 			expect(headers?.['X-Auth-PSK'] ?? '').not.toBe('old-psk')
 		}
+	} finally {
+		await storage.close()
+	}
+})
+
+test('powerOn reports IRCC send failure instead of the probe success', async () => {
+	const { storage, bluray } = await createFixture(
+		{ courtBlurayHost: mockSonyBlurayHost },
+		fixtureHttp({ controlStatus: 401 }),
+	)
+	try {
+		const result = await bluray.powerOn()
+		expect(result.connected).toBe(false)
+		expect(result.reasonCode).toBe('unreachable')
+		expect(result.httpStatus).toBe(401)
+		expect(result.transport).toBe('ircc')
+		expect(result.reason).toMatch(/401|Pair the player/i)
 	} finally {
 		await storage.close()
 	}

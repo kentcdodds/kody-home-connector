@@ -241,7 +241,7 @@ export function createSonyBlurayAdapter(input: {
 				host: target.host,
 				macAddress: target.macAddress,
 				name: target.name,
-				playerId: target.player?.playerId ?? courtBlurayPlayerId,
+				playerId: target.player?.playerId ?? null,
 				player: target.player,
 			})
 		}
@@ -273,7 +273,7 @@ export function createSonyBlurayAdapter(input: {
 				host: target.host,
 				macAddress: target.macAddress,
 				name: target.name,
-				playerId: target.player?.playerId ?? courtBlurayPlayerId,
+				playerId: target.player?.playerId ?? null,
 				irccControlUrl: target.player?.irccControlUrl ?? null,
 				hasAuth,
 				probedEndpoints: probe.probedEndpoints,
@@ -320,11 +320,11 @@ export function createSonyBlurayAdapter(input: {
 				httpStatus: null,
 			})
 		}
-		const auth = status.playerId
+		const auth = status.player
 			? await getSonyIrccAuth({
 					storage,
 					connectorId,
-					playerId: status.playerId,
+					playerId: status.player.playerId,
 				})
 			: { authCookie: null, psk: null }
 		const sent = await sendSonyIrccCommand({
@@ -614,11 +614,11 @@ export function createSonyBlurayAdapter(input: {
 			}
 
 			const irccCode = getSonyIrccCode('powerOn')
-			const auth = status.playerId
+			const auth = status.player
 				? await getSonyIrccAuth({
 						storage,
 						connectorId,
-						playerId: status.playerId,
+						playerId: status.player.playerId,
 					})
 				: {
 						authCookie: config.courtBlurayAuthCookie,
@@ -650,11 +650,26 @@ export function createSonyBlurayAdapter(input: {
 					},
 				)
 			}
+			const failed = disconnectedStatus({
+				reason: sent.error ?? probeFailedReason(target.host),
+				reasonCode: 'unreachable',
+				configured: true,
+				host: target.host,
+				macAddress: status.macAddress ?? target.macAddress,
+				name: status.name,
+				model: status.model,
+				manufacturer: status.manufacturer,
+				playerId: status.player?.playerId ?? null,
+				irccControlUrl: sent.controlUrl ?? status.irccControlUrl,
+				hasAuth: status.hasAuth,
+				probedEndpoints: status.probedEndpoints,
+				player: status.player,
+			})
 			if (wake.sent) {
 				return withCommand(
 					{
-						...status,
-						reason: `${status.reason} Wake-on-LAN was sent to ${target.macAddress}; the player may still be unplugged or network standby may be off.`,
+						...failed,
+						reason: `${failed.reason} Wake-on-LAN was sent to ${target.macAddress}; the player may still be unplugged or network standby may be off.`,
 					},
 					{
 						command: 'powerOn',
@@ -665,10 +680,10 @@ export function createSonyBlurayAdapter(input: {
 					},
 				)
 			}
-			return withCommand(status, {
+			return withCommand(failed, {
 				command: 'powerOn',
 				irccCode,
-				transport: null,
+				transport: 'ircc',
 				wakeOnLan: wake,
 				httpStatus: sent.httpStatus,
 			})
