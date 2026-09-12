@@ -145,6 +145,7 @@ test('baseline migration adopts a database created by the previous release', asy
 			)
 			expect(status.map((entry) => [entry.name, entry.status])).toEqual([
 				['baseline_schema', 'applied'],
+				['pjlink_projectors', 'applied'],
 			])
 
 			expect(await listVenstarThermostats(storage, 'default')).toEqual([
@@ -178,7 +179,11 @@ test('baseline migration adopts a database created by the previous release', asy
 		}
 
 		expect(listSchemaObjects(dbPath)).toEqual(
-			[...legacyObjects, { type: 'table', name: 'data_table_migrations' }].sort(
+			[
+				...legacyObjects,
+				{ type: 'table', name: 'data_table_migrations' },
+				{ type: 'table', name: 'pjlink_projectors' },
+			].sort(
 				(a, b) => a.type.localeCompare(b.type) || a.name.localeCompare(b.name),
 			),
 		)
@@ -188,7 +193,10 @@ test('baseline migration adopts a database created by the previous release', asy
 			const status = await reopened.db.migrationStatus(
 				await loadHomeConnectorMigrations(),
 			)
-			expect(status.map((entry) => entry.status)).toEqual(['applied'])
+			expect(status.map((entry) => entry.status)).toEqual([
+				'applied',
+				'applied',
+			])
 			expect(await listVenstarThermostats(reopened, 'default')).toHaveLength(1)
 		} finally {
 			await reopened.close()
@@ -224,7 +232,15 @@ test('an empty database receives the full schema and a journaled baseline', asyn
 				listSchemaObjects(dbPath).filter(
 					(object) => object.name !== 'data_table_migrations',
 				),
-			).toEqual(listSchemaObjects(legacyDbPath))
+			).toEqual(
+				[
+					...listSchemaObjects(legacyDbPath),
+					{ type: 'table', name: 'pjlink_projectors' },
+				].sort(
+					(a, b) =>
+						a.type.localeCompare(b.type) || a.name.localeCompare(b.name),
+				),
+			)
 		} finally {
 			rmSync(legacyDirectory, { force: true, recursive: true })
 		}

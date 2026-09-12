@@ -16,6 +16,10 @@ import {
 } from './adapters/venstar/types.ts'
 import { type AccessNetworksUnleashedDiscoveryDiagnostics } from './adapters/access-networks-unleashed/types.ts'
 import { type KasaDiscoveryDiagnostics } from './adapters/kasa/types.ts'
+import {
+	type PjlinkDiscoveredProjector,
+	type PjlinkDiscoveryDiagnostics,
+} from './adapters/pjlink/types.ts'
 
 export type HomeConnectorConnectionState = {
 	connectorId: string
@@ -40,6 +44,8 @@ export type HomeConnectorState = {
 	venstarDiscoveredThermostats: Array<VenstarDiscoveredThermostat>
 	accessNetworksUnleashedDiscoveryDiagnostics: AccessNetworksUnleashedDiscoveryDiagnostics | null
 	kasaDiscoveryDiagnostics: KasaDiscoveryDiagnostics | null
+	pjlinkDiscoveryDiagnostics: PjlinkDiscoveryDiagnostics | null
+	pjlinkDiscoveredProjectors: Array<PjlinkDiscoveredProjector>
 }
 
 const initialConnectionState: HomeConnectorConnectionState = {
@@ -65,6 +71,8 @@ const initialState: HomeConnectorState = {
 	venstarDiscoveredThermostats: [],
 	accessNetworksUnleashedDiscoveryDiagnostics: null,
 	kasaDiscoveryDiagnostics: null,
+	pjlinkDiscoveryDiagnostics: null,
+	pjlinkDiscoveredProjectors: [],
 }
 
 export function createAppState(): HomeConnectorState {
@@ -176,6 +184,22 @@ export function setKasaDiscoveryDiagnostics(
 ) {
 	state.kasaDiscoveryDiagnostics = diagnostics
 	return state.kasaDiscoveryDiagnostics
+}
+
+export function setPjlinkDiscoveryDiagnostics(
+	state: HomeConnectorState,
+	diagnostics: PjlinkDiscoveryDiagnostics | null,
+) {
+	state.pjlinkDiscoveryDiagnostics = diagnostics
+	return state.pjlinkDiscoveryDiagnostics
+}
+
+export function setPjlinkDiscoveredProjectors(
+	state: HomeConnectorState,
+	projectors: Array<PjlinkDiscoveredProjector>,
+) {
+	state.pjlinkDiscoveredProjectors = [...projectors]
+	return state.pjlinkDiscoveredProjectors
 }
 
 export function getDiscoveredRokuDevices(state: HomeConnectorState) {

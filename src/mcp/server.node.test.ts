@@ -10,6 +10,8 @@ import { createIslandRouterAdapter } from '../adapters/island-router/index.ts'
 import { createJellyfishAdapter } from '../adapters/jellyfish/index.ts'
 import { createKasaAdapter } from '../adapters/kasa/index.ts'
 import { createPhoneAdapter } from '../adapters/phone/index.ts'
+import { createPjlinkAdapter } from '../adapters/pjlink/index.ts'
+import { resetMockPjlinkState } from '../adapters/pjlink/mock-driver.ts'
 import { createLutronAdapter } from '../adapters/lutron/index.ts'
 import { createSonosAdapter } from '../adapters/sonos/index.ts'
 import { createSamsungTvAdapter } from '../adapters/samsung-tv/index.ts'
@@ -29,6 +31,7 @@ const silentConsole = {
 }
 
 function createConfig() {
+	resetMockPjlinkState()
 	process.env.MOCKS = 'true'
 	process.env.HOME_CONNECTOR_ID = 'default'
 	process.env.HOME_CONNECTOR_SHARED_SECRET =
@@ -53,6 +56,7 @@ function createConfig() {
 	process.env.ISLAND_ROUTER_API_REQUEST_TIMEOUT_MS = '5000'
 	process.env.ACCESS_NETWORKS_UNLEASHED_SCAN_CIDRS = '192.168.10.88/32'
 	process.env.KASA_SCAN_CIDRS = '192.168.10.99/32'
+	process.env.PJLINK_SCAN_CIDRS = '192.168.0.128/32'
 	return loadHomeConnectorConfig()
 }
 
@@ -505,6 +509,7 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 		accessNetworksUnleashed,
 		kasa,
 		phone: createPhoneAdapter({ config }),
+		pjlink: createPjlinkAdapter({ config, state, storage }),
 	})
 
 	try {
@@ -567,6 +572,10 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 		})
 		expect(tools.some((tool) => tool.name === 'court_start_roku')).toBe(true)
 		expect(tools.some((tool) => tool.name === 'globalcache_send_ir')).toBe(true)
+		expect(tools.some((tool) => tool.name === 'pjlink_power_off')).toBe(true)
+		expect(tools.some((tool) => tool.name === 'pjlink_adopt_projector')).toBe(
+			true,
+		)
 		const courtStatus = await mcp.callTool('court_get_status')
 		expect(courtStatus.content[0]?.type).toBe('text')
 		expect(courtStatus.structuredContent).toMatchObject({
@@ -574,6 +583,31 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 				1: 'proven',
 				2: 'proven',
 			},
+			projector: {
+				preferredTransport: 'pjlink',
+				lanDarkAfterFullOff: true,
+			},
+			rokuPower: {
+				reliableHardOff: false,
+			},
+		})
+		const adopted = await mcp.callTool('pjlink_adopt_projector', {
+			host: '192.168.0.128',
+			macAddress: '00:50:41:B2:FD:09',
+			name: 'Court Optoma ZK810TST',
+		})
+		expect(adopted.structuredContent).toMatchObject({
+			projector: {
+				projectorId: 'pjlink-005041b2fd09',
+				adopted: true,
+			},
+		})
+		const pjlinkOff = await mcp.callTool('pjlink_power_off', {
+			projectorId: 'pjlink-005041b2fd09',
+		})
+		expect(pjlinkOff.structuredContent).toMatchObject({
+			power: 'standby',
+			command: 'off',
 		})
 		const lutronCredentialsTool = tools.find(
 			(tool) => tool.name === 'lutron_set_credentials',
@@ -1215,6 +1249,7 @@ test('mcp server exposes island router write tools when host verification is con
 		accessNetworksUnleashed,
 		kasa,
 		phone: createPhoneAdapter({ config }),
+		pjlink: createPjlinkAdapter({ config, state, storage }),
 	})
 
 	try {

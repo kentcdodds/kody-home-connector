@@ -291,6 +291,28 @@ export const sonosPlayers = table({
 	timestamps,
 })
 
+export const pjlinkProjectors = table({
+	name: 'pjlink_projectors',
+	columns: {
+		connector_id: c.text(),
+		projector_id: c.text(),
+		name: c.text(),
+		host: c.text(),
+		port: c.integer(),
+		mac_address: c.text().nullable(),
+		manufacturer: c.text().nullable(),
+		model: c.text().nullable(),
+		auth_required: c.integer(),
+		password: c.text().nullable(),
+		adopted: c.integer(),
+		raw_discovery_json: c.text().nullable(),
+		last_seen_at: c.text().nullable(),
+		updated_at: c.text(),
+	},
+	primaryKey: ['connector_id', 'projector_id'],
+	timestamps,
+})
+
 export const venstarThermostats = table({
 	name: 'venstar_thermostats',
 	columns: {

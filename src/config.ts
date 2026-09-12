@@ -46,6 +46,25 @@ export type HomeConnectorConfig = {
 	globalCachePort?: number
 	courtRokuDeviceId?: string | null
 	courtSonosPlayerId?: string | null
+	courtPjlinkProjectorId?: string | null
+	/**
+	 * PJLink Class 1 discovery probes TCP 4352 across these CIDRs. When unset,
+	 * the connector derives private `/24` networks from local IPv4 interfaces.
+	 * `PJLINK_SCAN_CIDRS` can override the derived list.
+	 */
+	pjlinkScanCidrs: Array<string>
+	/**
+	 * Extra hosts always probed during PJLink scans. Defaults to the court
+	 * Optoma at 192.168.0.128 because that subnet may not be on the NAS NIC.
+	 */
+	pjlinkScanExtraHosts: Array<string>
+	pjlinkRequestTimeoutMs: number
+	/**
+	 * Court power tools use this shorter PJLink timeout so a dark LAN
+	 * (typical after full Optoma off) fails fast into iTach IR2. Direct
+	 * `pjlink_*` tools keep `pjlinkRequestTimeoutMs`.
+	 */
+	courtPjlinkTimeoutMs: number
 	/**
 	 * Optional env fallback for the Android companion token on `/phone/ws`.
 	 * Prefer the encrypted token stored from `/phone/setup`. Never log the raw
@@ -270,6 +289,12 @@ export function deriveAccessNetworksUnleashedAutoscanCidrsFromInterfaces(
 	return derivePrivateAutoscanCidrsFromInterfaces(interfaces)
 }
 
+export function derivePjlinkAutoscanCidrsFromInterfaces(
+	interfaces: ReturnType<typeof networkInterfaces>,
+) {
+	return derivePrivateAutoscanCidrsFromInterfaces(interfaces)
+}
+
 export function deriveKasaAutoscanCidrsFromInterfaces(
 	interfaces: ReturnType<typeof networkInterfaces>,
 ) {
@@ -290,6 +315,10 @@ function deriveKasaAutoscanCidrs() {
 	return deriveKasaAutoscanCidrsFromInterfaces(networkInterfaces())
 }
 
+function derivePjlinkAutoscanCidrs() {
+	return derivePjlinkAutoscanCidrsFromInterfaces(networkInterfaces())
+}
+
 function deriveJellyfishAutoscanCidrs() {
 	return derivePrivateAutoscanCidrsFromInterfaces(networkInterfaces())
 }
@@ -307,6 +336,14 @@ export function loadHomeConnectorConfig(): HomeConnectorConfig {
 	)
 	const kasaRequestTimeoutMs = Number.parseInt(
 		process.env.KASA_REQUEST_TIMEOUT_MS ?? '8000',
+		10,
+	)
+	const pjlinkRequestTimeoutMs = Number.parseInt(
+		process.env.PJLINK_REQUEST_TIMEOUT_MS ?? '5000',
+		10,
+	)
+	const courtPjlinkTimeoutMs = Number.parseInt(
+		process.env.COURT_PJLINK_TIMEOUT_MS ?? '1500',
 		10,
 	)
 	const islandRouterApiRequestTimeoutMs = Number.parseInt(
@@ -334,6 +371,20 @@ export function loadHomeConnectorConfig(): HomeConnectorConfig {
 	const explicitKasaCidrs = resolveScanCidrsFromEnv('KASA_SCAN_CIDRS')
 	const kasaScanCidrs =
 		explicitKasaCidrs.length > 0 ? explicitKasaCidrs : deriveKasaAutoscanCidrs()
+	const explicitPjlinkCidrs = resolveScanCidrsFromEnv('PJLINK_SCAN_CIDRS')
+	const pjlinkScanCidrs =
+		explicitPjlinkCidrs.length > 0
+			? explicitPjlinkCidrs
+			: derivePjlinkAutoscanCidrs()
+	const explicitPjlinkExtraHosts = resolveScanCidrsFromEnv(
+		'PJLINK_SCAN_EXTRA_HOSTS',
+	)
+	const pjlinkScanExtraHosts =
+		process.env.PJLINK_SCAN_EXTRA_HOSTS?.trim() === ''
+			? []
+			: explicitPjlinkExtraHosts.length > 0
+				? explicitPjlinkExtraHosts
+				: ['192.168.0.128']
 	const explicitVenstarCidrs = resolveScanCidrsFromEnv('VENSTAR_SCAN_CIDRS')
 	const venstarScanCidrs =
 		explicitVenstarCidrs.length > 0
@@ -370,6 +421,18 @@ export function loadHomeConnectorConfig(): HomeConnectorConfig {
 			parseStrictIntegerEnv(process.env.GLOBAL_CACHE_PORT) ?? 4998,
 		courtRokuDeviceId: process.env.COURT_ROKU_DEVICE_ID?.trim() || null,
 		courtSonosPlayerId: process.env.COURT_SONOS_PLAYER_ID?.trim() || null,
+		courtPjlinkProjectorId:
+			process.env.COURT_PJLINK_PROJECTOR_ID?.trim() || null,
+		pjlinkScanCidrs,
+		pjlinkScanExtraHosts,
+		pjlinkRequestTimeoutMs:
+			Number.isFinite(pjlinkRequestTimeoutMs) && pjlinkRequestTimeoutMs >= 1000
+				? pjlinkRequestTimeoutMs
+				: 5000,
+		courtPjlinkTimeoutMs:
+			Number.isFinite(courtPjlinkTimeoutMs) && courtPjlinkTimeoutMs >= 250
+				? courtPjlinkTimeoutMs
+				: 1500,
 		phoneDeviceToken: process.env.PHONE_DEVICE_TOKEN?.trim() || null,
 		islandRouterHost: process.env.ISLAND_ROUTER_HOST?.trim() || null,
 		islandRouterPort:
