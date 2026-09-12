@@ -18,6 +18,7 @@ import {
 	resolveSafeLibraryFile,
 } from './paths.ts'
 import {
+	aaxcDownloadUserAgent,
 	AudiobookError,
 	macAudiobookLibraryHostPath,
 	synologyAudiobookLibraryHostPath,
@@ -31,6 +32,7 @@ import {
 } from './types.ts'
 
 export {
+	aaxcDownloadUserAgent,
 	AudiobookError,
 	defaultAudiobookImportTimeoutMs,
 	defaultAudiobookLibraryPath,
@@ -188,7 +190,11 @@ async function downloadAaxc(input: {
 
 	let response: Response
 	try {
-		response = await input.fetchImpl(input.url)
+		response = await input.fetchImpl(input.url, {
+			headers: {
+				'User-Agent': aaxcDownloadUserAgent,
+			},
+		})
 	} catch (error) {
 		throw createAudiobookError({
 			code: 'audiobook_download_failed',

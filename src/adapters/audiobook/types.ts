@@ -2,6 +2,12 @@ export const defaultAudiobookLibraryPath = '/media/audiobooks'
 export const defaultFfmpegPath = 'ffmpeg'
 export const defaultAudiobookImportTimeoutMs = 30 * 60 * 1000
 
+/**
+ * CloudFront AAXC URLs return 403 for Mozilla/Node default User-Agents.
+ * Audible Download Manager (and similar non-browser UAs) receive 200.
+ */
+export const aaxcDownloadUserAgent = 'Audible Download Manager'
+
 /** Synology host path for Kent's NAS pull (mounted RW at `/media/audiobooks`). */
 export const synologyAudiobookLibraryHostPath =
 	'/volume1/media/audio/audiobooks'
