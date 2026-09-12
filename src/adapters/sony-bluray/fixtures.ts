@@ -32,6 +32,32 @@ export const mockSonyActionListXml = `<?xml version="1.0"?>
   </action>
 </actionList>`
 
+export const mockSonyBlurayHostB = '192.168.0.201'
+
+export const mockSonyDmrXmlAvTransportFirst = `<?xml version="1.0"?>
+<root xmlns="urn:schemas-upnp-org:device-1-0">
+  <device>
+    <friendlyName>Court Sony UHD Blu-ray</friendlyName>
+    <manufacturer>Sony Corporation</manufacturer>
+    <modelName>UBP-X800M2</modelName>
+    <deviceType>urn:schemas-upnp-org:device:MediaRenderer:1</deviceType>
+    <serviceList>
+      <service>
+        <serviceType>urn:schemas-upnp-org:service:AVTransport:1</serviceType>
+        <serviceId>urn:upnp-org:serviceId:AVTransport</serviceId>
+        <SCPDURL>/AVTransportSCPD.xml</SCPDURL>
+        <controlURL>/upnp/control/AVTransport</controlURL>
+      </service>
+      <service>
+        <serviceType>urn:schemas-sony-com:service:IRCC:1</serviceType>
+        <serviceId>urn:schemas-sony-com:serviceId:IRCC</serviceId>
+        <SCPDURL>/IRCCSCPD.xml</SCPDURL>
+        <controlURL>/upnp/control/IRCC</controlURL>
+      </service>
+    </serviceList>
+  </device>
+</root>`
+
 export const mockSonyDmrXml = `<?xml version="1.0"?>
 <root xmlns="urn:schemas-upnp-org:device-1-0" xmlns:av="urn:schemas-sony-com:av">
   <device>

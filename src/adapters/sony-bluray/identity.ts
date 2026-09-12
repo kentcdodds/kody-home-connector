@@ -1,4 +1,5 @@
 import {
+	courtBlurayPlayerId,
 	courtSonyCameraNotThePlayer,
 	type SonyIrccDisconnectReason,
 } from './types.ts'
@@ -80,7 +81,16 @@ export function extractIrccControlUrl(input: {
 	body: string
 	baseUrl?: string
 }) {
-	const controlPath = extractXmlTag(input.body, ['controlURL', 'controlUrl'])
+	const serviceBlocks =
+		input.body.match(/<service\b[\s\S]*?<\/service>/gi) ?? []
+	let controlPath: string | null = null
+	for (const block of serviceBlocks) {
+		const serviceType = extractXmlTag(block, ['serviceType']) ?? ''
+		const serviceId = extractXmlTag(block, ['serviceId']) ?? ''
+		if (!/IRCC/i.test(serviceType) && !/IRCC/i.test(serviceId)) continue
+		controlPath = extractXmlTag(block, ['controlURL', 'controlUrl'])
+		if (controlPath) break
+	}
 	if (!controlPath) return null
 	if (/^https?:\/\//i.test(controlPath)) return controlPath
 	const path = controlPath.startsWith('/') ? controlPath : `/${controlPath}`
@@ -92,6 +102,27 @@ export function extractIrccControlUrl(input: {
 		}
 	}
 	return `http://${input.host}:50001${path}`
+}
+
+export function resolveScanSonyIrccPlayerId(input: {
+	host: string
+	envHost: string | null
+	courtPlayerHost: string | null
+	existingPlayerIdForHost: string | null
+	assignedCourtThisScan: boolean
+}) {
+	if (input.existingPlayerIdForHost) return input.existingPlayerIdForHost
+	if (input.envHost && input.envHost === input.host) {
+		return courtBlurayPlayerId
+	}
+	if (
+		!input.envHost &&
+		!input.courtPlayerHost &&
+		!input.assignedCourtThisScan
+	) {
+		return courtBlurayPlayerId
+	}
+	return buildSonyIrccPlayerId(input.host)
 }
 
 export function buildSonyIrccPlayerId(host: string) {

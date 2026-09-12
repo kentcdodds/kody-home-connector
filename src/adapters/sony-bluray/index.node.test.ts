@@ -1,11 +1,16 @@
 import { expect, test } from 'vitest'
 import { createTestHomeConnectorConfig } from '../../test-home-connector-config.ts'
 import { createHomeConnectorStorage } from '../../storage/index.ts'
-import { encodeSonyIrccBd1Code, getSonyIrccCode } from './commands.ts'
+import {
+	encodeSonyIrccBd1Code,
+	getSonyIrccCode,
+	sonyIrccTvCodes,
+} from './commands.ts'
 import { createSonyBlurayAdapter } from './index.ts'
 import {
 	mockSonyActionListXml,
 	mockSonyBlurayHost,
+	mockSonyBlurayHostB,
 	mockSonyBlurayMac,
 	mockSonyCameraXml,
 	mockSonyDmrXml,
@@ -13,6 +18,7 @@ import {
 	mockSonyIrccXml,
 } from './fixtures.ts'
 import {
+	courtBlurayPlayerId,
 	courtSonyCameraNotThePlayer,
 	type SonyIrccHttpClient,
 } from './types.ts'
@@ -25,20 +31,29 @@ function unreachableHttp(): SonyIrccHttpClient {
 
 function fixtureHttp(input: {
 	host?: string
+	hosts?: Array<string>
 	failControl?: boolean
+	postedBodies?: Array<string>
 }): SonyIrccHttpClient {
-	const host = input.host ?? mockSonyBlurayHost
+	const hosts = input.hosts ?? [input.host ?? mockSonyBlurayHost]
 	return async (request) => {
 		if (request.url.includes(courtSonyCameraNotThePlayer.host)) {
 			throw new Error(`connect ECONNREFUSED ${request.url}`)
 		}
 		if (request.method === 'POST' && request.url.includes('IRCC')) {
+			input.postedBodies?.push(request.body ?? '')
 			if (input.failControl) {
 				throw new Error(`connect EHOSTUNREACH ${request.url}`)
 			}
 			expect(request.body ?? '').toContain('<IRCCCode>')
 			expect(request.headers?.['SOAPACTION']).toContain('X_SendIRCC')
 			return { status: 200, headers: {}, body: mockSonyIrccSoapOk }
+		}
+		const host = hosts.find((candidate) =>
+			request.url.startsWith(`http://${candidate}:`),
+		)
+		if (!host) {
+			throw new Error(`connect EHOSTUNREACH ${request.url}`)
 		}
 		if (request.url === `http://${host}:50001/Ircc.xml`) {
 			return { status: 200, headers: {}, body: mockSonyIrccXml }
@@ -275,4 +290,66 @@ test('scan with no hosts does not invent the Sony camera', async () => {
 test('BD1 IRCC encoding matches sonyapilib pack format', () => {
 	expect(encodeSonyIrccBd1Code(26)).toBe('AAAAAwAAHFoAAAAaAw==')
 	expect(getSonyIrccCode('play')).toBe('AAAAAwAAHFoAAAAaAw==')
+})
+
+test('named powerOn and powerOff use distinct TV IRCC codes, not the BD1 toggle', () => {
+	expect(getSonyIrccCode('powerOn')).toBe(sonyIrccTvCodes.powerOn)
+	expect(getSonyIrccCode('powerOff')).toBe(sonyIrccTvCodes.powerOff)
+	expect(getSonyIrccCode('powerOn')).not.toBe(getSonyIrccCode('powerOff'))
+	expect(getSonyIrccCode('powerOn')).not.toBe(encodeSonyIrccBd1Code(21))
+	expect(getSonyIrccCode('powerOff')).not.toBe(encodeSonyIrccBd1Code(21))
+})
+
+test('powerOn skips IRCC when the player is already reachable', async () => {
+	const postedBodies: Array<string> = []
+	const { storage, bluray, wakeCalls } = await createFixture(
+		{
+			courtBlurayHost: mockSonyBlurayHost,
+			courtBlurayMacAddress: mockSonyBlurayMac,
+		},
+		fixtureHttp({ postedBodies }),
+	)
+	try {
+		const result = await bluray.powerOn()
+		expect(result.connected).toBe(true)
+		expect(result.command).toBe('powerOn')
+		expect(result.transport).toBeNull()
+		expect(result.httpStatus).toBeNull()
+		expect(postedBodies).toEqual([])
+		expect(wakeCalls).toEqual([])
+	} finally {
+		await storage.close()
+	}
+})
+
+test('scan adopts only the first unmatched host as court-bluray', async () => {
+	const { storage, bluray } = await createFixture(
+		{},
+		fixtureHttp({ hosts: [mockSonyBlurayHost, mockSonyBlurayHostB] }),
+	)
+	try {
+		const scanned = await bluray.scan({
+			hosts: [mockSonyBlurayHost, mockSonyBlurayHostB],
+		})
+		expect(scanned.players.map((player) => player.playerId)).toEqual([
+			courtBlurayPlayerId,
+			`sony-ircc-${mockSonyBlurayHostB.replaceAll('.', '-')}`,
+		])
+		expect(scanned.players[0]?.host).toBe(mockSonyBlurayHost)
+		expect(scanned.players[1]?.host).toBe(mockSonyBlurayHostB)
+
+		const again = await bluray.scan({
+			hosts: [mockSonyBlurayHostB, mockSonyBlurayHost],
+		})
+		const court = again.players.find(
+			(player) => player.playerId === courtBlurayPlayerId,
+		)
+		expect(court?.host).toBe(mockSonyBlurayHost)
+		expect(
+			again.players.find((player) => player.host === mockSonyBlurayHostB)
+				?.playerId,
+		).toBe(`sony-ircc-${mockSonyBlurayHostB.replaceAll('.', '-')}`)
+	} finally {
+		await storage.close()
+	}
 })

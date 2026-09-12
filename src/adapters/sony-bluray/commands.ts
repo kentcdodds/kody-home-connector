@@ -127,8 +127,10 @@ export function encodeSonyIrccBd1Code(
 function buildBd1Codes() {
 	return {
 		power: encodeSonyIrccBd1Code(sonyIrccBd1CommandIds.power),
-		powerOn: encodeSonyIrccBd1Code(sonyIrccBd1CommandIds.power),
-		powerOff: encodeSonyIrccBd1Code(sonyIrccBd1CommandIds.power),
+		// BD1 Power=21 is a toggle. Named powerOn/powerOff must not use it —
+		// court_start_bluray / bluray_power_on would turn an already-on player off.
+		powerOn: sonyIrccTvCodes.powerOn,
+		powerOff: sonyIrccTvCodes.powerOff,
 		eject: encodeSonyIrccBd1Code(sonyIrccBd1CommandIds.eject),
 		stop: encodeSonyIrccBd1Code(sonyIrccBd1CommandIds.stop),
 		pause: encodeSonyIrccBd1Code(sonyIrccBd1CommandIds.pause),
@@ -157,6 +159,9 @@ export function getSonyIrccCode(
 	command: SonyIrccCommandName,
 	family: 'bd1' | 'tv' = 'bd1',
 ) {
+	if (command === 'powerOn' || command === 'powerOff') {
+		return sonyIrccTvCodes[command]
+	}
 	if (family === 'tv') {
 		const tvCode = sonyIrccTvCodes[command as keyof typeof sonyIrccTvCodes]
 		if (tvCode) return tvCode

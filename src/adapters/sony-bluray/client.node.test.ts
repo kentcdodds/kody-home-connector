@@ -3,6 +3,7 @@ import { getSonyIrccCode } from './commands.ts'
 import { probeSonyIrccHost, sendSonyIrccCommand } from './client.ts'
 import {
 	mockSonyBlurayHost,
+	mockSonyDmrXmlAvTransportFirst,
 	mockSonyIrccSoapOk,
 	mockSonyIrccXml,
 } from './fixtures.ts'
@@ -26,6 +27,25 @@ test('probe matches Ircc.xml and extracts the control URL', async () => {
 		`http://${mockSonyBlurayHost}:50001/upnp/control/IRCC`,
 	)
 	expect(probe.probedEndpoints.some((endpoint) => endpoint.matched)).toBe(true)
+})
+
+test('probe uses the IRCC controlURL when AVTransport is listed first', async () => {
+	const http: SonyIrccHttpClient = async (request) => {
+		if (request.url.endsWith('/dmr.xml')) {
+			return { status: 200, headers: {}, body: mockSonyDmrXmlAvTransportFirst }
+		}
+		throw new Error(`timeout ${request.url}`)
+	}
+	const probe = await probeSonyIrccHost({
+		host: mockSonyBlurayHost,
+		http,
+		timeoutMs: 250,
+	})
+	expect(probe.connected).toBe(true)
+	expect(probe.irccControlUrl).toBe(
+		`http://${mockSonyBlurayHost}:52323/upnp/control/IRCC`,
+	)
+	expect(probe.irccControlUrl).not.toMatch(/AVTransport/)
 })
 
 test('probe-fail returns matched false without throwing', async () => {

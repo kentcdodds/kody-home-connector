@@ -8,10 +8,10 @@ import {
 } from './client.ts'
 import {
 	blockedSonyCameraReason,
-	buildSonyIrccPlayerId,
 	isBlockedSonyCamera,
 	normalizeSonyIrccHost,
 	normalizeSonyIrccMacAddress,
+	resolveScanSonyIrccPlayerId,
 } from './identity.ts'
 import {
 	getCourtSonyIrccPlayer,
@@ -50,7 +50,11 @@ export {
 	sonyIrccTvCodes,
 	type SonyIrccCommandName,
 } from './commands.ts'
-export { isBlockedSonyCamera, normalizeSonyIrccHost } from './identity.ts'
+export {
+	isBlockedSonyCamera,
+	normalizeSonyIrccHost,
+	resolveScanSonyIrccPlayerId,
+} from './identity.ts'
 
 const pairingNotes =
 	'Live pairing needs the player powered with network standby on. After on-screen confirm, persist the auth cookie or PSK with bluray_set_host. 192.168.0.115 is the Sony camera (bisyamon), not the Blu-ray.'
@@ -456,6 +460,9 @@ export function createSonyBlurayAdapter(input: {
 				rejected: [],
 				probes: [],
 			}
+			const courtPlayer = await getCourtSonyIrccPlayer(storage, connectorId)
+			const knownPlayers = await listSonyIrccPlayers(storage, connectorId)
+			let assignedCourtThisScan = false
 			for (const host of hosts) {
 				if (isBlockedSonyCamera({ host })) {
 					const blocked = blockedSonyCameraReason()
@@ -485,6 +492,17 @@ export function createSonyBlurayAdapter(input: {
 					})
 					continue
 				}
+				const existingForHost = knownPlayers.find(
+					(player) => player.host === host,
+				)
+				const playerId = resolveScanSonyIrccPlayerId({
+					host,
+					envHost: envHost(),
+					courtPlayerHost: courtPlayer?.host ?? null,
+					existingPlayerIdForHost: existingForHost?.playerId ?? null,
+					assignedCourtThisScan,
+				})
+				if (playerId === courtBlurayPlayerId) assignedCourtThisScan = true
 				const player = await persistSuccessfulProbe({
 					host,
 					macAddress: null,
@@ -493,12 +511,12 @@ export function createSonyBlurayAdapter(input: {
 					manufacturer: probe.manufacturer,
 					irccControlUrl: probe.irccControlUrl,
 					probedEndpoints: probe.probedEndpoints,
-					playerId:
-						envHost() === host || !envHost()
-							? courtBlurayPlayerId
-							: buildSonyIrccPlayerId(host),
+					playerId,
 				})
-				if (player) result.players.push(player)
+				if (player) {
+					result.players.push(player)
+					knownPlayers.push(player)
+				}
 			}
 			if (result.players.length === 0 && result.rejected.length === 0) {
 				result.rejected.push({
@@ -556,6 +574,17 @@ export function createSonyBlurayAdapter(input: {
 						httpStatus: null,
 					},
 				)
+			}
+
+			const alreadyOn = await statusFromProbe()
+			if (alreadyOn.connected) {
+				return withCommand(alreadyOn, {
+					command: 'powerOn',
+					irccCode: getSonyIrccCode('powerOn'),
+					transport: null,
+					wakeOnLan: emptyWol,
+					httpStatus: null,
+				})
 			}
 
 			let wake: SonyIrccCommandResult['wakeOnLan'] = emptyWol
