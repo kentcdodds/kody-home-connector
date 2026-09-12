@@ -255,7 +255,8 @@ MCP tools (`kody.mcp["home"]`):
 - `audiobook_exists({ filename })` — exists check (rejects `..` / subdirs)
 - `audiobook_import_aaxc` — AAXC bytes (`aaxcBase64`) or temp path (`aaxcPath`)
   plus voucher `key`/`iv`; optional `chapters` and `coverBase64`. Writes flat
-  `Title.m4b`. `aaxcUrl` is the large-file variant.
+  `Title.m4b`. `aaxcUrl` is the large-file variant (fetched with User-Agent
+  `Audible Download Manager` so Audible CloudFront does not 403 browser UAs).
 
 Patch handoff (`@kody/audible` downloads, then calls this after the image
 publishes):

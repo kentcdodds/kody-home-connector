@@ -5,6 +5,7 @@ import { expect, test } from 'vitest'
 import { createTestHomeConnectorConfig } from '../../test-home-connector-config.ts'
 import {
 	buildLibraryFilename,
+	aaxcDownloadUserAgent,
 	createAudiobookAdapter,
 	parseAudiobookCredentials,
 	sanitizeAudiobookFilename,
@@ -384,8 +385,12 @@ test('import accepts aaxcBase64 bytes and optional chapters/cover', async () => 
 
 test('import downloads aaxcUrl then converts with voucher JSON', async () => {
 	await withLibrary(async (libraryPath) => {
+		const fetchCalls: Array<{ url: string; init?: RequestInit }> = []
 		const { adapter } = createAdapter(libraryPath, {
-			fetchImpl: async () => new Response('downloaded-aaxc', { status: 200 }),
+			fetchImpl: async (url, init) => {
+				fetchCalls.push({ url: String(url), init })
+				return new Response('downloaded-aaxc', { status: 200 })
+			},
 		})
 		const imported = await adapter.importAaxc({
 			aaxcUrl: 'https://example.test/owned.aaxc',
@@ -398,6 +403,14 @@ test('import downloads aaxcUrl then converts with voucher JSON', async () => {
 		})
 		expect(imported.source).toBe('url')
 		expect(imported.filename).toBe('Owned Title.m4b')
+		expect(fetchCalls).toHaveLength(1)
+		expect(fetchCalls[0]?.url).toBe('https://example.test/owned.aaxc')
+		const userAgent = new Headers(fetchCalls[0]?.init?.headers).get(
+			'User-Agent',
+		)
+		expect(userAgent).toBe(aaxcDownloadUserAgent)
+		expect(userAgent).toBe('Audible Download Manager')
+		expect(userAgent).not.toMatch(/Mozilla/i)
 		expect(
 			await pathExistsSafe(
 				path.join(libraryPath, 'Owned Title.m4b.partial.aaxc'),
