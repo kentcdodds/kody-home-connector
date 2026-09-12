@@ -4,6 +4,11 @@ import {
 	isValidRemoteConnectorName,
 	normalizeRemoteConnectorInstanceId,
 } from '@kody-bot/connector-kit/urls'
+import {
+	defaultAudiobookImportTimeoutMs,
+	defaultAudiobookLibraryPath,
+	defaultFfmpegPath,
+} from './adapters/audiobook/types.ts'
 
 export const defaultHomePublicBaseUrl = 'https://kody-home.doddsfamily.us'
 export const defaultHomeLanListenHost = '192.168.1.234'
@@ -101,6 +106,14 @@ export type HomeConnectorConfig = {
 	 * discovery feed.
 	 */
 	jellyfishScanCidrs: Array<string>
+	/**
+	 * Personal audiobook archive root. Docker mounts the NAS/Mac share here
+	 * (default `/media/audiobooks`, matching mediarss). Host path on Kent's
+	 * Synology is `/volume1/media/audio/audiobooks`.
+	 */
+	audiobookLibraryPath: string
+	ffmpegPath: string
+	audiobookImportTimeoutMs: number
 	dataPath: string
 	dbPath: string
 	port: number
@@ -350,6 +363,11 @@ export function loadHomeConnectorConfig(): HomeConnectorConfig {
 		process.env.ISLAND_ROUTER_API_REQUEST_TIMEOUT_MS ?? '8000',
 		10,
 	)
+	const audiobookImportTimeoutMs = Number.parseInt(
+		process.env.AUDIOBOOK_IMPORT_TIMEOUT_MS ??
+			String(defaultAudiobookImportTimeoutMs),
+		10,
+	)
 	const homeConnectorId = resolveHomeConnectorId(process.env.HOME_CONNECTOR_ID)
 	const publicBaseUrl = resolvePublicBaseUrl()
 	const mcpPath = homeMcpPath
@@ -487,6 +505,14 @@ export function loadHomeConnectorConfig(): HomeConnectorConfig {
 		jellyfishDiscoveryUrl: process.env.JELLYFISH_DISCOVERY_URL?.trim() || null,
 		venstarScanCidrs,
 		jellyfishScanCidrs,
+		audiobookLibraryPath:
+			process.env.AUDIOBOOK_LIBRARY_PATH?.trim() || defaultAudiobookLibraryPath,
+		ffmpegPath: process.env.FFMPEG_PATH?.trim() || defaultFfmpegPath,
+		audiobookImportTimeoutMs:
+			Number.isFinite(audiobookImportTimeoutMs) &&
+			audiobookImportTimeoutMs >= 5_000
+				? audiobookImportTimeoutMs
+				: defaultAudiobookImportTimeoutMs,
 		dataPath,
 		dbPath: resolveHomeConnectorDbPath(dataPath),
 		port: Number.isFinite(port) ? port : 4040,

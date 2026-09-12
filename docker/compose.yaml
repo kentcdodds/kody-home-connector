@@ -1,0 +1,18 @@
+# Reference compose for the NAS / Mac audiobook mount.
+# Production still uses start-kody-home-connector.sh with --network host.
+# Copy secrets from the existing NAS start script; do not commit them here.
+
+services:
+  kody-home-connector:
+    image: kentcdodds/kody-home-connector:latest
+    container_name: kody-home-connector
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      HOME_CONNECTOR_DATA_PATH: /data/home-connector
+      AUDIOBOOK_LIBRARY_PATH: /media/audiobooks
+    volumes:
+      - ${HOST_DATA_PATH:-/volume1/docker/kody-home-connector}:/data/home-connector
+      # Synology: /volume1/media/audio/audiobooks
+      # Mac: /Volumes/media/audio/audiobooks
+      - ${HOST_AUDIOBOOK_LIBRARY_PATH:-/volume1/media/audio/audiobooks}:/media/audiobooks

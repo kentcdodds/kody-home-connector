@@ -445,6 +445,49 @@ test('Kasa env vars are loaded with safe defaults and explicit overrides', () =>
 	}
 })
 
+test('audiobook library env vars default to the mediarss in-container path', () => {
+	{
+		using _env = createTemporaryEnv({
+			...requiredConfigEnv,
+			AUDIOBOOK_LIBRARY_PATH: undefined,
+			FFMPEG_PATH: undefined,
+			AUDIOBOOK_IMPORT_TIMEOUT_MS: undefined,
+		})
+
+		expect(loadHomeConnectorConfig()).toMatchObject({
+			audiobookLibraryPath: '/media/audiobooks',
+			ffmpegPath: 'ffmpeg',
+			audiobookImportTimeoutMs: 30 * 60 * 1000,
+		})
+	}
+
+	{
+		using _env = createTemporaryEnv({
+			...requiredConfigEnv,
+			AUDIOBOOK_LIBRARY_PATH: ' /Volumes/media/audio/audiobooks ',
+			FFMPEG_PATH: ' /usr/bin/ffmpeg ',
+			AUDIOBOOK_IMPORT_TIMEOUT_MS: '120000',
+		})
+
+		expect(loadHomeConnectorConfig()).toMatchObject({
+			audiobookLibraryPath: '/Volumes/media/audio/audiobooks',
+			ffmpegPath: '/usr/bin/ffmpeg',
+			audiobookImportTimeoutMs: 120000,
+		})
+	}
+
+	{
+		using _env = createTemporaryEnv({
+			...requiredConfigEnv,
+			AUDIOBOOK_IMPORT_TIMEOUT_MS: '100',
+		})
+
+		expect(loadHomeConnectorConfig().audiobookImportTimeoutMs).toBe(
+			30 * 60 * 1000,
+		)
+	}
+})
+
 test('Island Router API env vars are loaded with safe defaults and explicit overrides', () => {
 	{
 		using _env = createTemporaryEnv({

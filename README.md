@@ -59,6 +59,17 @@ present.
 PHONE_DEVICE_TOKEN=...
 ```
 
+Personal audiobook archive (AAXC/AAX → flat `Title.m4b`). Defaults match
+mediarss. On Kent's Synology the host path is `/volume1/media/audio/audiobooks`;
+on Mac it is `/Volumes/media/audio/audiobooks`. Mount that share RW at
+`/media/audiobooks` in the home connector container (see `docker/README.md`).
+
+```bash
+AUDIOBOOK_LIBRARY_PATH=/media/audiobooks
+# FFMPEG_PATH=ffmpeg
+# AUDIOBOOK_IMPORT_TIMEOUT_MS=1800000
+```
+
 The phone app dials `wss://kody-home.doddsfamily.us/phone/ws` (LAN:
 `ws://192.168.1.234:4040/phone/ws`) with that token. Cloudflare Access Bypass
 must include `/phone/ws`. The MCP machine app is already at the five-destination

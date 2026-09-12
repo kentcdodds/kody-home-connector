@@ -571,6 +571,13 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 			bondLocalApiDocsUrl: 'https://docs-local.appbond.com/',
 		})
 		expect(tools.some((tool) => tool.name === 'court_start_roku')).toBe(true)
+		expect(tools.some((tool) => tool.name === 'audiobook_import_aaxc')).toBe(
+			true,
+		)
+		expect(tools.some((tool) => tool.name === 'audiobook_library_path')).toBe(
+			true,
+		)
+		expect(tools.some((tool) => tool.name === 'audiobook_exists')).toBe(true)
 		expect(tools.some((tool) => tool.name === 'globalcache_send_ir')).toBe(true)
 		expect(tools.some((tool) => tool.name === 'pjlink_power_off')).toBe(true)
 		expect(tools.some((tool) => tool.name === 'pjlink_adopt_projector')).toBe(
