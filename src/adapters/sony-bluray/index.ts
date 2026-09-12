@@ -469,7 +469,11 @@ export function createSonyBlurayAdapter(input: {
 				rejected: [],
 				probes: [],
 			}
-			const courtPlayer = await getCourtSonyIrccPlayer(storage, connectorId)
+			const courtPlayer = await getSonyIrccPlayer(
+				storage,
+				connectorId,
+				courtBlurayPlayerId,
+			)
 			const knownPlayers = await listSonyIrccPlayers(storage, connectorId)
 			let assignedCourtThisScan = false
 			for (const host of hosts) {
@@ -585,19 +589,9 @@ export function createSonyBlurayAdapter(input: {
 				)
 			}
 
-			const alreadyOn = await statusFromProbe()
-			if (alreadyOn.connected) {
-				return withCommand(alreadyOn, {
-					command: 'powerOn',
-					irccCode: getSonyIrccCode('powerOn'),
-					transport: null,
-					wakeOnLan: emptyWol,
-					httpStatus: null,
-				})
-			}
-
+			const status = await statusFromProbe()
 			let wake: SonyIrccCommandResult['wakeOnLan'] = emptyWol
-			if (target.macAddress) {
+			if (!status.connected && target.macAddress) {
 				try {
 					const sent = await wakeOnLan({
 						host: target.host,
@@ -619,26 +613,65 @@ export function createSonyBlurayAdapter(input: {
 				}
 			}
 
-			const command = await sendCommand('powerOn')
-			if (command.connected) {
-				return {
-					...command,
-					transport: command.transport ?? 'ircc',
-					wakeOnLan: wake,
-				}
+			const irccCode = getSonyIrccCode('powerOn')
+			const auth = status.playerId
+				? await getSonyIrccAuth({
+						storage,
+						connectorId,
+						playerId: status.playerId,
+					})
+				: {
+						authCookie: config.courtBlurayAuthCookie,
+						psk: config.courtBlurayPsk,
+					}
+			const sent = await sendSonyIrccCommand({
+				host: target.host,
+				http,
+				irccCode,
+				controlUrl: status.irccControlUrl,
+				authCookie: auth.authCookie ?? config.courtBlurayAuthCookie,
+				psk: auth.psk ?? config.courtBlurayPsk,
+				timeoutMs,
+			})
+			if (sent.ok) {
+				const after = status.connected ? status : await statusFromProbe()
+				return withCommand(
+					{
+						...(after.connected ? after : status),
+						reason: `Sent IRCC powerOn to ${target.host}.`,
+						irccControlUrl: sent.controlUrl ?? status.irccControlUrl,
+					},
+					{
+						command: 'powerOn',
+						irccCode,
+						transport: 'ircc',
+						wakeOnLan: wake,
+						httpStatus: sent.httpStatus,
+					},
+				)
 			}
 			if (wake.sent) {
-				return {
-					...command,
-					reason: `${command.reason} Wake-on-LAN was sent to ${target.macAddress}; the player may still be unplugged or network standby may be off.`,
-					transport: 'wol',
-					wakeOnLan: wake,
-				}
+				return withCommand(
+					{
+						...status,
+						reason: `${status.reason} Wake-on-LAN was sent to ${target.macAddress}; the player may still be unplugged or network standby may be off.`,
+					},
+					{
+						command: 'powerOn',
+						irccCode,
+						transport: 'wol',
+						wakeOnLan: wake,
+						httpStatus: sent.httpStatus,
+					},
+				)
 			}
-			return {
-				...command,
+			return withCommand(status, {
+				command: 'powerOn',
+				irccCode,
+				transport: null,
 				wakeOnLan: wake,
-			}
+				httpStatus: sent.httpStatus,
+			})
 		},
 		async powerOff() {
 			return await sendCommand('powerOff')

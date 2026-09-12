@@ -302,7 +302,7 @@ test('named powerOn and powerOff use distinct TV IRCC codes, not the BD1 toggle'
 	expect(getSonyIrccCode('powerOff')).not.toBe(encodeSonyIrccBd1Code(21))
 })
 
-test('powerOn skips IRCC when the player is already reachable', async () => {
+test('powerOn sends the discrete TV PowerOn code when IRCC is reachable', async () => {
 	const postedBodies: Array<string> = []
 	const { storage, bluray, wakeCalls } = await createFixture(
 		{
@@ -315,9 +315,15 @@ test('powerOn skips IRCC when the player is already reachable', async () => {
 		const result = await bluray.powerOn()
 		expect(result.connected).toBe(true)
 		expect(result.command).toBe('powerOn')
-		expect(result.transport).toBeNull()
-		expect(result.httpStatus).toBeNull()
-		expect(postedBodies).toEqual([])
+		expect(result.transport).toBe('ircc')
+		expect(result.httpStatus).toBe(200)
+		expect(result.irccCode).toBe(sonyIrccTvCodes.powerOn)
+		expect(
+			postedBodies.some((body) => body.includes(sonyIrccTvCodes.powerOn)),
+		).toBe(true)
+		expect(
+			postedBodies.some((body) => body.includes(encodeSonyIrccBd1Code(21))),
+		).toBe(false)
 		expect(wakeCalls).toEqual([])
 	} finally {
 		await storage.close()
@@ -381,6 +387,18 @@ test('forget does not fall back to an unadopted scanned player', async () => {
 		expect(status.reasonCode).toBe('not_configured')
 		expect(status.host).toBeNull()
 		expect(status.player).toBeNull()
+
+		const readopt = await bluray.scan({
+			hosts: [mockSonyBlurayHost, mockSonyBlurayHostB],
+		})
+		expect(
+			readopt.players.find((player) => player.host === mockSonyBlurayHost)
+				?.playerId,
+		).toBe(courtBlurayPlayerId)
+		expect(
+			readopt.players.find((player) => player.host === mockSonyBlurayHostB)
+				?.playerId,
+		).toBe(`sony-ircc-${mockSonyBlurayHostB.replaceAll('.', '-')}`)
 	} finally {
 		await storage.close()
 	}
