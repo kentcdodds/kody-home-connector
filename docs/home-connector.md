@@ -101,6 +101,9 @@ The connector exposes these local-device families:
 - Court AV through PJLink (preferred) plus the cage Global Cache iTach IP2IR
   (HDMI switch, Optoma IR fallback, Chauvet Rotosphere) and composed Roku/Sonos
   scene tools
+- Personal Audible archive import: ffmpeg convert of an already-downloaded AAXC
+  (voucher or key+iv) or AAX (activation_bytes) to a flat `Title.m4b` in the
+  mounted audiobook library. No Audible API lives here.
 
 All surfaces are registered as MCP tools on this process and served at `/mcp`.
 
@@ -230,13 +233,64 @@ This connector is not deployed by merging the PR. After merge to `main`:
    `kentcdodds/kody-home-connector:latest` (and a `sha-` tag) to Docker Hub.
 2. On the Synology NAS (`192.168.1.234`), Howie/Patch pull the new image and
    restart the container with the existing `start-kody-home-connector.sh` next
-   to `/volume1/docker/` (see `scripts/nas/README.md`). Cloudflare already
-   tunnels `kody-home.doddsfamily.us` → `http://192.168.1.234:4040`.
+   to `/volume1/docker/` (see `scripts/nas/README.md` and `docker/README.md`).
+   Mount `/volume1/media/audio/audiobooks` RW at `/media/audiobooks`. Cloudflare
+   already tunnels `kody-home.doddsfamily.us` → `http://192.168.1.234:4040`.
 3. Startup applies the `pjlink_projectors` SQLite migration automatically.
 4. Adopt the court Optoma with `pjlink_adopt_projector` (no password).
 
 There is no Kody workflow package in this repo. These tools are the connector
 capabilities `@kentcdodds/court-projector` should call.
+
+## Personal Audible archive (AAXC → M4B)
+
+`@kody/audible` owns Audible auth, library/wishlist, and download. This
+connector only converts and writes a personal archive of owned titles.
+
+MCP tools (`kody.mcp["home"]`):
+
+- `audiobook_library_path({ filename? })` — mount / writable / ffmpeg status
+- `audiobook_library_filename({ title })` — `Title.m4b` matching the existing
+  flat library (no `Author -` prefix)
+- `audiobook_exists({ filename })` — exists check (rejects `..` / subdirs)
+- `audiobook_import_aaxc` — AAXC bytes (`aaxcBase64`) or temp path (`aaxcPath`)
+  plus voucher `key`/`iv`; optional `chapters` and `coverBase64`. Writes flat
+  `Title.m4b`. `aaxcUrl` is the large-file variant.
+
+Patch handoff (`@kody/audible` downloads, then calls this after the image
+publishes):
+
+```
+kody.mcp["home"].audiobook_library_filename({ title: "Blightfall" })
+// => { filename: "Blightfall.m4b" }
+
+kody.mcp["home"].audiobook_exists({ filename: "Blightfall.m4b" })
+
+kody.mcp["home"].audiobook_import_aaxc({
+  aaxcPath: "/tmp/owned.aaxc",   // or aaxcBase64, or aaxcUrl
+  key: "<voucher hex>",
+  iv: "<voucher hex>",
+  title: "Blightfall",
+  chapters: [{ title: "Opening", startMs: 0, lengthMs: 1500 }],
+  coverBase64: "<optional jpeg/png>"
+})
+```
+
+ffmpeg in the image uses `-audible_key`/`-audible_iv` for AAXC and
+`-activation_bytes` for AAX, then `-c copy` to M4B.
+
+Library mount (must be **RW** on this container; same in-container path as
+mediarss):
+
+| Role              | Path                                           |
+| ----------------- | ---------------------------------------------- |
+| In-container      | `/media/audiobooks` (`AUDIOBOOK_LIBRARY_PATH`) |
+| Synology NAS host | `/volume1/media/audio/audiobooks`              |
+| Mac host          | `/Volumes/media/audio/audiobooks`              |
+
+See `docker/README.md` for the volume flags to merge into the NAS start script.
+After **Publish Home Connector**, the NAS pull must remount that share RW or
+`audiobook_import_aaxc` cannot write.
 
 ## JellyFish Lighting integration
 

@@ -17,6 +17,18 @@ Optional env file for credential comparison tests:
 The probe reads `HOME_CONNECTOR_SHARED_SECRET` from the environment or from
 `start-kody-home-connector.sh` in the same directory.
 
+Audiobook archive mount (required for AAXC→M4B import): merge the RW volume from
+`docker/README.md` into `start-kody-home-connector.sh`:
+
+```bash
+# Synology host path for Kent's NAS pull
+-v /volume1/media/audio/audiobooks:/media/audiobooks
+-e AUDIOBOOK_LIBRARY_PATH=/media/audiobooks
+```
+
+Mac equivalent host path: `/Volumes/media/audio/audiobooks`. Do not mark the
+home-connector mount `:ro`.
+
 Override plug hosts for `probe-kasa-all.sh`:
 
 ```bash
