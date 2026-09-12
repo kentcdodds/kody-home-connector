@@ -163,7 +163,7 @@ test('buildFfmpegConvertArgs uses audible_key/iv or activation_bytes', () => {
 		'-audible_iv',
 		sampleIv,
 		'-f',
-		'aax',
+		'mov',
 		'-i',
 		'/tmp/book.aaxc',
 		'-c',
@@ -194,7 +194,7 @@ test('buildFfmpegConvertArgs uses audible_key/iv or activation_bytes', () => {
 		'-audible_iv',
 		sampleIv,
 		'-f',
-		'aax',
+		'mov',
 		'-i',
 		'/tmp/book.aaxc',
 		'-metadata',
@@ -298,7 +298,7 @@ test('import writes a flat Title.m4b and reports library status', async () => {
 		expect(ffmpegCalls[0]).not.toContain('-map')
 		expect(ffmpegCalls[0]).not.toContain('-map_metadata')
 		expect(ffmpegCalls[0]).toEqual(
-			expect.arrayContaining(['-f', 'aax', '-c', 'copy', '-f', 'ipod']),
+			expect.arrayContaining(['-f', 'mov', '-c', 'copy', '-f', 'ipod']),
 		)
 		expect(ffmpegCalls[0]?.at(-1)).toMatch(/\.partial\.m4b$/)
 

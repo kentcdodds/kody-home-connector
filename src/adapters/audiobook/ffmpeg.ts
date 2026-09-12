@@ -137,10 +137,10 @@ export function buildFfmpegConvertArgs(input: {
 		'-hide_banner',
 		'-y',
 		...buildFfmpegDecryptArgs(input.credentials),
-		// Pin the Audible demuxer so temp `*.partial.aaxc` (and `.aax`) still
-		// apply `-audible_key`/`-audible_iv` / `-activation_bytes`.
+		// Audible AAX/AAXC is MOV/MP4. Do not use `-f aax` — that is CRI
+		// game audio, not the mov demuxer that honors `-audible_key`/`-iv`.
 		'-f',
-		'aax',
+		'mov',
 		'-i',
 		input.sourcePath,
 	]
