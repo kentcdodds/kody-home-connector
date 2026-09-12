@@ -247,15 +247,34 @@ capabilities `@kentcdodds/court-projector` should call.
 `@kody/audible` owns Audible auth, library/wishlist, and download. This
 connector only converts and writes a personal archive of owned titles.
 
-MCP tools:
+MCP tools (`kody.mcp["home"]`):
 
-- `audiobook_library_path` — configured library path (default
-  `/media/audiobooks`), mount/writable/ffmpeg status, optional filename exists
-  check
-- `audiobook_exists` — flat `Title.m4b` exists check (rejects `..` and
-  subdirectories)
-- `audiobook_import_aaxc` — AAXC path or URL plus voucher (or key+iv), or AAX
-  plus `activationBytes`, writes flat `Title.m4b` into the library root
+- `audiobook_library_path({ filename? })` — mount / writable / ffmpeg status
+- `audiobook_library_filename({ title })` — `Title.m4b` matching the existing
+  flat library (no `Author -` prefix)
+- `audiobook_exists({ filename })` — exists check (rejects `..` / subdirs)
+- `audiobook_import_aaxc` — AAXC bytes (`aaxcBase64`) or temp path (`aaxcPath`)
+  plus voucher `key`/`iv`; optional `chapters` and `coverBase64`. Writes flat
+  `Title.m4b`. `aaxcUrl` is the large-file variant.
+
+Patch handoff (`@kody/audible` downloads, then calls this after the image
+publishes):
+
+```
+kody.mcp["home"].audiobook_library_filename({ title: "Blightfall" })
+// => { filename: "Blightfall.m4b" }
+
+kody.mcp["home"].audiobook_exists({ filename: "Blightfall.m4b" })
+
+kody.mcp["home"].audiobook_import_aaxc({
+  aaxcPath: "/tmp/owned.aaxc",   // or aaxcBase64, or aaxcUrl
+  key: "<voucher hex>",
+  iv: "<voucher hex>",
+  title: "Blightfall",
+  chapters: [{ title: "Opening", startMs: 0, lengthMs: 1500 }],
+  coverBase64: "<optional jpeg/png>"
+})
+```
 
 ffmpeg in the image uses `-audible_key`/`-audible_iv` for AAXC and
 `-activation_bytes` for AAX, then `-c copy` to M4B.

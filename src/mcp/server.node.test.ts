@@ -578,6 +578,9 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 			true,
 		)
 		expect(tools.some((tool) => tool.name === 'audiobook_exists')).toBe(true)
+		expect(
+			tools.some((tool) => tool.name === 'audiobook_library_filename'),
+		).toBe(true)
 		expect(tools.some((tool) => tool.name === 'globalcache_send_ir')).toBe(true)
 		expect(tools.some((tool) => tool.name === 'pjlink_power_off')).toBe(true)
 		expect(tools.some((tool) => tool.name === 'pjlink_adopt_projector')).toBe(

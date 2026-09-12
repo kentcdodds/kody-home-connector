@@ -75,6 +75,15 @@ async function handleExpectedAudiobookError(
 	}
 }
 
+const chapterSchema = z.object({
+	title: z.string().min(1),
+	startMs: z.number().int().min(0).optional(),
+	start_offset_ms: z.number().int().min(0).optional(),
+	endMs: z.number().int().min(0).optional(),
+	lengthMs: z.number().int().min(0).optional(),
+	length_ms: z.number().int().min(0).optional(),
+})
+
 const importSchema = buildToolInputSchema(
 	z
 		.object({
@@ -83,14 +92,21 @@ const importSchema = buildToolInputSchema(
 				.min(1)
 				.optional()
 				.describe(
-					'Local AAXC/AAX path already on the connector host. Provide exactly one of aaxcPath or aaxcUrl.',
+					'Temp AAXC/AAX path on the connector host. Provide exactly one source: aaxcPath, aaxcBase64, or aaxcUrl.',
+				),
+			aaxcBase64: z
+				.string()
+				.min(1)
+				.optional()
+				.describe(
+					'Base64-encoded AAXC bytes. Full-length titles usually exceed MCP payload limits — prefer aaxcPath or aaxcUrl.',
 				),
 			aaxcUrl: z
 				.string()
 				.min(1)
 				.optional()
 				.describe(
-					'http(s) URL for an already-downloaded AAXC/AAX. The @kody/audible package owns Audible download; home only fetches and converts.',
+					'http(s) URL for already-downloaded AAXC bytes. @kody/audible owns Audible download; home only fetches and converts.',
 				),
 			voucher: z
 				.union([z.string().min(1), z.record(z.string(), z.unknown())])
@@ -107,23 +123,47 @@ const importSchema = buildToolInputSchema(
 				.string()
 				.min(1)
 				.optional()
-				.describe('AAXC audible_key hex, if not providing a voucher.'),
+				.describe('AAXC audible_key hex from the voucher. Preferred with iv.'),
 			iv: z
 				.string()
 				.min(1)
 				.optional()
-				.describe('AAXC audible_iv hex, if not providing a voucher.'),
+				.describe('AAXC audible_iv hex from the voucher. Preferred with key.'),
 			activationBytes: z
 				.string()
 				.min(1)
 				.optional()
 				.describe('AAX activation_bytes hex. Not used for AAXC.'),
+			title: z
+				.string()
+				.min(1)
+				.optional()
+				.describe(
+					'Book title. Home turns this into the existing library name: flat "Title.m4b" (no Author prefix). Prefer this over outputFilename.',
+				),
 			outputFilename: z
 				.string()
 				.min(1)
+				.optional()
 				.describe(
-					'Flat Title.m4b filename written into the audiobook library root. Subdirectories and ".." are rejected.',
+					'Override flat Title.m4b filename. Subdirectories and ".." are rejected.',
 				),
+			chapters: z
+				.array(chapterSchema)
+				.optional()
+				.describe(
+					'Optional chapter list. startMs (or start_offset_ms) plus endMs or lengthMs/length_ms.',
+				),
+			coverBase64: z
+				.string()
+				.min(1)
+				.optional()
+				.describe('Optional cover image as base64 (jpeg/png, under 10MB).'),
+			coverPath: z
+				.string()
+				.min(1)
+				.optional()
+				.describe('Optional local cover image path on the connector host.'),
 			overwrite: z
 				.boolean()
 				.optional()
@@ -131,9 +171,12 @@ const importSchema = buildToolInputSchema(
 		})
 		.refine(
 			(value) =>
-				Number(Boolean(value.aaxcPath)) + Number(Boolean(value.aaxcUrl)) === 1,
+				Number(Boolean(value.aaxcPath)) +
+					Number(Boolean(value.aaxcUrl)) +
+					Number(Boolean(value.aaxcBase64)) ===
+				1,
 			{
-				message: 'Provide exactly one of aaxcPath or aaxcUrl.',
+				message: 'Provide exactly one of aaxcPath, aaxcBase64, or aaxcUrl.',
 			},
 		)
 		.refine(
@@ -145,7 +188,10 @@ const importSchema = buildToolInputSchema(
 			{
 				message: 'Provide voucher or voucherPath, key+iv, or activationBytes.',
 			},
-		),
+		)
+		.refine((value) => Boolean(value.title) || Boolean(value.outputFilename), {
+			message: 'Provide title (preferred) or outputFilename.',
+		}),
 )
 
 export function registerAudiobookHomeConnectorTools(input: {
@@ -162,7 +208,7 @@ export function registerAudiobookHomeConnectorTools(input: {
 			name: 'audiobook_library_path',
 			title: 'Get Audiobook Library Path',
 			description:
-				'Read the personal audiobook archive path mounted into this home connector (default /media/audiobooks, matching mediarss). Returns whether the directory exists and is writable, plus ffmpeg readiness. Optional filename checks whether that flat Title.m4b already exists. This is convert+disk write only; Audible API/auth lives in @kody/audible.',
+				'Read the personal audiobook archive path mounted into this home connector (default /media/audiobooks, matching mediarss). Returns whether the directory exists and is writable, plus ffmpeg readiness. Optional filename checks whether that flat Title.m4b already exists. Library naming is title-only (Blightfall.m4b), not Author - Title. This is convert+disk write only; Audible API/auth lives in @kody/audible.',
 			...buildToolInputSchema({
 				filename: z
 					.string()
@@ -232,15 +278,48 @@ export function registerAudiobookHomeConnectorTools(input: {
 
 	registerTool(
 		{
+			name: 'audiobook_library_filename',
+			title: 'Build Audiobook Library Filename',
+			description:
+				'Turn a book title into the existing library filename: flat Title.m4b in the audiobooks root (no Author prefix). Use this before audiobook_exists / audiobook_import_aaxc.',
+			...buildToolInputSchema({
+				title: z
+					.string()
+					.min(1)
+					.describe('Book title, as it should appear on disk.'),
+			}),
+			annotations: {
+				readOnlyHint: true,
+				idempotentHint: true,
+			},
+		},
+		async (args) => {
+			return await handleExpectedAudiobookError(async () => {
+				const result = audiobook.libraryFilename(String(args['title'] ?? ''))
+				return structuredTextResult(
+					`Library filename for that title is ${result.filename}.`,
+					{
+						ok: true,
+						...result,
+					},
+				)
+			})
+		},
+	)
+
+	registerTool(
+		{
 			name: 'audiobook_import_aaxc',
 			title: 'Import AAXC/AAX To M4B',
 			description:
-				'Convert an owned Audible AAXC (voucher or key+iv) or AAX (activation_bytes) to a flat Title.m4b in the personal audiobook library. Home-connector does ffmpeg convert and disk write only. The @kody/audible package must already have downloaded the AAXC and extracted the voucher or key+iv. Output stays in the library root; path traversal is rejected.',
+				'Convert an owned Audible AAXC (bytes or temp path + voucher key/iv) to a flat Title.m4b matching the existing library (title only). Optional chapters and cover. Home does ffmpeg convert and disk write only. @kody/audible downloads, then calls this tool.',
 			inputSchema: markSecretInputFields(importSchema.inputSchema, [
 				'voucher',
+				'aaxcBase64',
 				'key',
 				'iv',
 				'activationBytes',
+				'coverBase64',
 			]) as Record<string, unknown>,
 			sdkInputSchema: importSchema.sdkInputSchema,
 			annotations: {
@@ -254,6 +333,8 @@ export function registerAudiobookHomeConnectorTools(input: {
 						args['aaxcPath'] == null ? undefined : String(args['aaxcPath']),
 					aaxcUrl:
 						args['aaxcUrl'] == null ? undefined : String(args['aaxcUrl']),
+					aaxcBase64:
+						args['aaxcBase64'] == null ? undefined : String(args['aaxcBase64']),
 					voucher: args['voucher'],
 					voucherPath:
 						args['voucherPath'] == null
@@ -265,7 +346,27 @@ export function registerAudiobookHomeConnectorTools(input: {
 						args['activationBytes'] == null
 							? undefined
 							: String(args['activationBytes']),
-					outputFilename: String(args['outputFilename'] ?? ''),
+					title: args['title'] == null ? undefined : String(args['title']),
+					outputFilename:
+						args['outputFilename'] == null
+							? undefined
+							: String(args['outputFilename']),
+					chapters: Array.isArray(args['chapters'])
+						? (args['chapters'] as Array<{
+								title: string
+								startMs?: number
+								start_offset_ms?: number
+								endMs?: number
+								lengthMs?: number
+								length_ms?: number
+							}>)
+						: undefined,
+					coverBase64:
+						args['coverBase64'] == null
+							? undefined
+							: String(args['coverBase64']),
+					coverPath:
+						args['coverPath'] == null ? undefined : String(args['coverPath']),
 					overwrite:
 						args['overwrite'] == null ? undefined : Boolean(args['overwrite']),
 				})

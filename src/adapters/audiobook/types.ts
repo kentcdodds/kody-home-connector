@@ -19,6 +19,7 @@ export const audiobookErrorCodes = [
 	'audiobook_ffmpeg_unavailable',
 	'audiobook_ffmpeg_failed',
 	'audiobook_download_failed',
+	'audiobook_cover_invalid',
 ] as const
 
 export type AudiobookErrorCode = (typeof audiobookErrorCodes)[number]
@@ -45,15 +46,29 @@ export type AudiobookExistsResult = {
 	exists: boolean
 }
 
+export type AudiobookChapter = {
+	title: string
+	startMs?: number
+	start_offset_ms?: number
+	endMs?: number
+	lengthMs?: number
+	length_ms?: number
+}
+
 export type AudiobookImportInput = {
 	aaxcPath?: string
 	aaxcUrl?: string
+	aaxcBase64?: string
 	voucher?: unknown
 	voucherPath?: string
 	key?: string
 	iv?: string
 	activationBytes?: string
-	outputFilename: string
+	title?: string
+	outputFilename?: string
+	chapters?: Array<AudiobookChapter>
+	coverBase64?: string
+	coverPath?: string
 	overwrite?: boolean
 }
 
@@ -62,7 +77,9 @@ export type AudiobookImportResult = {
 	path: string
 	bytes: number
 	overwritten: boolean
-	source: 'path' | 'url'
+	source: 'path' | 'url' | 'bytes'
+	chapters: number
+	coverAttached: boolean
 }
 
 export type FfmpegRunResult = {

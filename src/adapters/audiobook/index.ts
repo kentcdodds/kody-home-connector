@@ -1,12 +1,17 @@
 import { createWriteStream } from 'node:fs'
-import { readFile, rename, rm, stat } from 'node:fs/promises'
+import { readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { Readable } from 'node:stream'
 import type { ReadableStream as WebReadableStream } from 'node:stream/web'
 import { pipeline } from 'node:stream/promises'
 import { type HomeConnectorConfig } from '../../config.ts'
 import { type HomeConnectorErrorCaptureContext } from '../../sentry.ts'
-import { buildFfmpegConvertArgs, runFfmpegCommand } from './ffmpeg.ts'
 import {
+	buildFfmetadata,
+	buildFfmpegConvertArgs,
+	runFfmpegCommand,
+} from './ffmpeg.ts'
+import {
+	buildLibraryFilename,
 	isWritableDirectory,
 	pathExists,
 	resolveLibraryRoot,
@@ -34,7 +39,11 @@ export {
 	macAudiobookLibraryHostPath,
 	synologyAudiobookLibraryHostPath,
 } from './types.ts'
-export { resolveSafeLibraryFile, sanitizeAudiobookFilename } from './paths.ts'
+export {
+	buildLibraryFilename,
+	resolveSafeLibraryFile,
+	sanitizeAudiobookFilename,
+} from './paths.ts'
 export { buildFfmpegConvertArgs } from './ffmpeg.ts'
 
 type AudiobookErrorWithCaptureContext = AudiobookError & {
@@ -280,16 +289,32 @@ export function createAudiobookAdapter(input: {
 		}
 	}
 
+	function resolveOutputFilename(request: AudiobookImportInput) {
+		if (request.outputFilename?.trim()) {
+			return request.outputFilename.trim()
+		}
+		if (request.title?.trim()) {
+			return buildLibraryFilename(request.title)
+		}
+		throw createAudiobookError({
+			code: 'audiobook_path_invalid',
+			message:
+				'Provide title (preferred) or outputFilename for the library file.',
+		})
+	}
+
 	async function importAaxc(
 		request: AudiobookImportInput,
 	): Promise<AudiobookImportResult> {
 		const sourceCount =
 			Number(Boolean(request.aaxcPath?.trim())) +
-			Number(Boolean(request.aaxcUrl?.trim()))
+			Number(Boolean(request.aaxcUrl?.trim())) +
+			Number(Boolean(request.aaxcBase64?.trim()))
 		if (sourceCount !== 1) {
 			throw createAudiobookError({
 				code: 'audiobook_source_missing',
-				message: 'Provide exactly one of aaxcPath or aaxcUrl.',
+				message:
+					'Provide exactly one of aaxcPath (temp path), aaxcBase64 (AAXC bytes), or aaxcUrl.',
 			})
 		}
 
@@ -322,7 +347,7 @@ export function createAudiobookAdapter(input: {
 			})
 		}
 
-		const target = resolveSafeLibraryFile(root, request.outputFilename)
+		const target = resolveSafeLibraryFile(root, resolveOutputFilename(request))
 		const alreadyExists = await pathExists(target.path)
 		if (alreadyExists && !request.overwrite) {
 			throw createAudiobookError({
@@ -342,9 +367,18 @@ export function createAudiobookAdapter(input: {
 
 		const downloadedPath = `${target.path}.aaxc.partial`
 		const convertPath = `${target.path}.partial`
+		const metadataPath = `${target.path}.ffmetadata`
+		const coverDestPath = `${target.path}.cover`
 		let sourcePath = request.aaxcPath?.trim() ?? ''
-		let source: 'path' | 'url' = 'path'
+		let source: 'path' | 'url' | 'bytes' = 'path'
 		let downloaded = false
+		let metadataWritten = false
+		let coverWritten = false
+		const chapters = request.chapters ?? []
+		const hasChapters = chapters.length > 0
+		const hasCover = Boolean(
+			request.coverBase64?.trim() || request.coverPath?.trim(),
+		)
 
 		try {
 			if (request.aaxcUrl?.trim()) {
@@ -356,6 +390,26 @@ export function createAudiobookAdapter(input: {
 					fetchImpl,
 				})
 				sourcePath = downloadedPath
+			} else if (request.aaxcBase64?.trim()) {
+				source = 'bytes'
+				downloaded = true
+				let bytes: Buffer
+				try {
+					bytes = Buffer.from(request.aaxcBase64.trim(), 'base64')
+				} catch {
+					throw createAudiobookError({
+						code: 'audiobook_source_missing',
+						message: 'aaxcBase64 is not valid base64.',
+					})
+				}
+				if (bytes.length === 0) {
+					throw createAudiobookError({
+						code: 'audiobook_source_missing',
+						message: 'aaxcBase64 decoded to an empty payload.',
+					})
+				}
+				await writeFile(downloadedPath, bytes)
+				sourcePath = downloadedPath
 			} else if (!(await pathExists(sourcePath))) {
 				throw createAudiobookError({
 					code: 'audiobook_source_missing',
@@ -364,12 +418,58 @@ export function createAudiobookAdapter(input: {
 				})
 			}
 
+			let resolvedCoverPath: string | undefined
+			if (request.coverPath?.trim()) {
+				if (!(await pathExists(request.coverPath.trim()))) {
+					throw createAudiobookError({
+						code: 'audiobook_cover_invalid',
+						message: `coverPath does not exist: ${request.coverPath}`,
+						path: request.coverPath,
+					})
+				}
+				resolvedCoverPath = request.coverPath.trim()
+			} else if (request.coverBase64?.trim()) {
+				let coverBytes: Buffer
+				try {
+					coverBytes = Buffer.from(request.coverBase64.trim(), 'base64')
+				} catch {
+					throw createAudiobookError({
+						code: 'audiobook_cover_invalid',
+						message: 'coverBase64 is not valid base64.',
+					})
+				}
+				if (coverBytes.length === 0 || coverBytes.length > 10 * 1024 * 1024) {
+					throw createAudiobookError({
+						code: 'audiobook_cover_invalid',
+						message: 'coverBase64 must decode to a non-empty image under 10MB.',
+					})
+				}
+				await writeFile(coverDestPath, coverBytes)
+				coverWritten = true
+				resolvedCoverPath = coverDestPath
+			}
+
+			let resolvedMetadataPath: string | undefined
+			if (hasChapters || request.title?.trim()) {
+				await writeFile(
+					metadataPath,
+					buildFfmetadata({
+						title: request.title,
+						chapters,
+					}),
+				)
+				metadataWritten = true
+				resolvedMetadataPath = metadataPath
+			}
+
 			const result = await runFfmpeg({
 				command: ffmpegPath,
 				args: buildFfmpegConvertArgs({
 					credentials,
 					sourcePath,
 					outputPath: convertPath,
+					metadataPath: resolvedMetadataPath,
+					coverPath: resolvedCoverPath,
 				}),
 				timeoutMs: importTimeoutMs,
 			})
@@ -404,18 +504,32 @@ export function createAudiobookAdapter(input: {
 				bytes: outputStat.size,
 				overwritten: alreadyExists,
 				source,
+				chapters: chapters.length,
+				coverAttached: hasCover,
 			}
 		} finally {
 			await rm(convertPath, { force: true })
 			if (downloaded) {
 				await rm(downloadedPath, { force: true })
 			}
+			if (metadataWritten) {
+				await rm(metadataPath, { force: true })
+			}
+			if (coverWritten) {
+				await rm(coverDestPath, { force: true })
+			}
 		}
+	}
+
+	function libraryFilename(title: string) {
+		const filename = buildLibraryFilename(title)
+		return { title: title.trim(), filename }
 	}
 
 	return {
 		getLibraryStatus,
 		exists,
+		libraryFilename,
 		importAaxc,
 	}
 }

@@ -52,6 +52,9 @@ test('registers library path, exists, and import tools', async () => {
 				exists: filename === 'Title.m4b',
 			}
 		},
+		libraryFilename(title: string) {
+			return { title, filename: `${title}.m4b` }
+		},
 		async importAaxc() {
 			return {
 				filename: 'Title.m4b',
@@ -59,6 +62,8 @@ test('registers library path, exists, and import tools', async () => {
 				bytes: 12,
 				overwritten: false,
 				source: 'path' as const,
+				chapters: 0,
+				coverAttached: false,
 			}
 		},
 	} satisfies ReturnType<typeof createAudiobookAdapter>
@@ -66,6 +71,7 @@ test('registers library path, exists, and import tools', async () => {
 	const tools = registerAll(audiobook)
 	expect(tools.get('audiobook_library_path')).toBeDefined()
 	expect(tools.get('audiobook_exists')).toBeDefined()
+	expect(tools.get('audiobook_library_filename')).toBeDefined()
 	expect(tools.get('audiobook_import_aaxc')).toBeDefined()
 	expect(tools.get('audiobook_import_aaxc')?.inputSchema).toMatchObject({
 		properties: {
@@ -129,6 +135,9 @@ test('maps adapter path errors to structured MCP errors', async () => {
 					'outputFilename must be a flat file in the audiobook library root. Subdirectories and ".." are rejected.',
 				filename: '../escape.m4b',
 			})
+		},
+		libraryFilename() {
+			throw new Error('should not name')
 		},
 		async importAaxc() {
 			throw new Error('should not import')

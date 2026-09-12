@@ -62,6 +62,21 @@ export function sanitizeAudiobookFilename(rawFilename: string) {
 	return filename
 }
 
+/**
+ * Existing library files are flat `{Title}.m4b` (or historical `.mp3`) in the
+ * audiobooks root — title only, no `Author -` prefix. Examples: `Blightfall.m4b`,
+ * `A Gentleman in Moscow A Novel.mp3`, `All These Worlds - Bobiverse, Book 3.mp3`.
+ */
+export function buildLibraryFilename(title: string) {
+	const cleaned = title
+		.trim()
+		.replace(/[<>:"|?*]/g, '')
+		.replace(/[/\\]/g, '-')
+		.replace(/\s+/g, ' ')
+		.replace(/[. ]+$/g, '')
+	return sanitizeAudiobookFilename(cleaned)
+}
+
 export function resolvePathInsideLibrary(
 	libraryRoot: string,
 	filename: string,

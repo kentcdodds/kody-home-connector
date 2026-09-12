@@ -4,12 +4,13 @@ import path from 'node:path'
 import { expect, test } from 'vitest'
 import { createTestHomeConnectorConfig } from '../../test-home-connector-config.ts'
 import {
+	buildLibraryFilename,
 	createAudiobookAdapter,
 	parseAudiobookCredentials,
 	sanitizeAudiobookFilename,
 } from './index.ts'
 import { resolvePathInsideLibrary, resolveSafeLibraryFile } from './paths.ts'
-import { buildFfmpegConvertArgs } from './ffmpeg.ts'
+import { buildFfmetadata, buildFfmpegConvertArgs } from './ffmpeg.ts'
 import { AudiobookError } from './types.ts'
 
 const sampleKey = '0123456789abcdef0123456789abcdef'
@@ -93,6 +94,18 @@ test('sanitizeAudiobookFilename rejects traversal and subdirectories', () => {
 	expect(() => sanitizeAudiobookFilename('')).toThrowError(AudiobookError)
 })
 
+test('buildLibraryFilename matches the existing flat Title.m4b library', () => {
+	expect(buildLibraryFilename('Blightfall')).toBe('Blightfall.m4b')
+	expect(buildLibraryFilename('A Gentleman in Moscow A Novel')).toBe(
+		'A Gentleman in Moscow A Novel.m4b',
+	)
+	expect(buildLibraryFilename('All These Worlds - Bobiverse, Book 3')).toBe(
+		'All These Worlds - Bobiverse, Book 3.m4b',
+	)
+	expect(buildLibraryFilename('Title: Forbidden')).toBe('Title Forbidden.m4b')
+	expect(() => buildLibraryFilename('../escape')).toThrowError(AudiobookError)
+})
+
 test('resolvePathInsideLibrary refuses paths that escape the library root', () => {
 	const libraryRoot = '/media/audiobooks'
 	expect(resolveSafeLibraryFile(libraryRoot, 'Title.m4b')).toEqual({
@@ -162,6 +175,35 @@ test('buildFfmpegConvertArgs uses audible_key/iv or activation_bytes', () => {
 			outputPath: '/tmp/book.m4b',
 		}),
 	).toContain('-activation_bytes')
+	expect(
+		buildFfmpegConvertArgs({
+			credentials: { kind: 'aaxc', key: sampleKey, iv: sampleIv },
+			sourcePath: '/tmp/book.aaxc',
+			outputPath: '/tmp/book.m4b',
+			metadataPath: '/tmp/book.ffmetadata',
+			coverPath: '/tmp/cover.jpg',
+		}),
+	).toEqual(
+		expect.arrayContaining([
+			'-map',
+			'0:a?',
+			'-map_metadata',
+			'1',
+			'-map',
+			'2',
+			'-disposition:v:0',
+			'attached_pic',
+		]),
+	)
+	expect(
+		buildFfmetadata({
+			title: 'Blightfall',
+			chapters: [
+				{ title: 'Opening', startMs: 0, lengthMs: 1000 },
+				{ title: 'Chapter 1', start_offset_ms: 1000, endMs: 5000 },
+			],
+		}),
+	).toContain('START=0')
 })
 
 test('import writes a flat Title.m4b and reports library status', async () => {
@@ -186,7 +228,7 @@ test('import writes a flat Title.m4b and reports library status', async () => {
 			aaxcPath: sourcePath,
 			key: sampleKey,
 			iv: sampleIv,
-			outputFilename: 'Project Hail Mary',
+			title: 'Project Hail Mary',
 		})
 		expect(imported.filename).toBe('Project Hail Mary.m4b')
 		expect(imported.path).toBe(path.join(libraryPath, 'Project Hail Mary.m4b'))
@@ -245,6 +287,29 @@ test('import refuses overwrite unless requested and rejects traversal filenames'
 		await expect(adapter.exists('../escape.m4b')).rejects.toMatchObject({
 			code: 'audiobook_path_invalid',
 		})
+	})
+})
+
+test('import accepts aaxcBase64 bytes and optional chapters/cover', async () => {
+	await withLibrary(async (libraryPath) => {
+		const { adapter, ffmpegCalls } = createAdapter(libraryPath)
+		const imported = await adapter.importAaxc({
+			aaxcBase64: Buffer.from('fake-aaxc').toString('base64'),
+			key: sampleKey,
+			iv: sampleIv,
+			title: 'Blightfall',
+			chapters: [{ title: 'Opening', startMs: 0, lengthMs: 1500 }],
+			coverBase64: Buffer.from('fake-cover').toString('base64'),
+		})
+		expect(imported).toMatchObject({
+			filename: 'Blightfall.m4b',
+			source: 'bytes',
+			chapters: 1,
+			coverAttached: true,
+		})
+		expect(ffmpegCalls[0]).toEqual(
+			expect.arrayContaining(['-map_metadata', '1', '-disposition:v:0']),
+		)
 	})
 })
 
