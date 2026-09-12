@@ -107,7 +107,7 @@ export function parsePjlinkHandshake(line: string): PjlinkHandshake {
 	if (withAuth) {
 		return {
 			authRequired: true,
-			random: (withAuth[1] ?? '').toLowerCase(),
+			random: withAuth[1] ?? '',
 			raw,
 		}
 	}

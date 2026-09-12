@@ -22,12 +22,22 @@ test('parses a no-auth PJLink handshake', () => {
 	})
 })
 
-test('parses an authenticated PJLink handshake', () => {
+test('parses an authenticated PJLink handshake without rewriting seed case', () => {
 	expect(parsePjlinkHandshake('PJLINK 1 A1B2C3D4')).toEqual({
 		authRequired: true,
-		random: 'a1b2c3d4',
+		random: 'A1B2C3D4',
 		raw: 'PJLINK 1 A1B2C3D4',
 	})
+	expect(parsePjlinkHandshake('PJLINK 1 a1b2c3d4')).toEqual({
+		authRequired: true,
+		random: 'a1b2c3d4',
+		raw: 'PJLINK 1 a1b2c3d4',
+	})
+	expect(
+		computePjlinkAuthDigest({ random: 'A1B2C3D4', password: 'secret' }),
+	).not.toBe(
+		computePjlinkAuthDigest({ random: 'a1b2c3d4', password: 'secret' }),
+	)
 })
 
 test('rejects an unexpected handshake', () => {

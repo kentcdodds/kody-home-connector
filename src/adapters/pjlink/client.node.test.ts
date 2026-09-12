@@ -63,7 +63,7 @@ test('no-auth handshake then %1POWR query', async () => {
 test('authenticated handshake prefixes the command with the session digest', async () => {
 	const seen: Array<string> = []
 	const listener = await listenPjlink((socket) => {
-		socket.write('PJLINK 1 a1b2c3d4\r')
+		socket.write('PJLINK 1 A1B2C3D4\r')
 		socket.on('data', (chunk) => {
 			seen.push(chunk.toString('utf8'))
 			socket.write('%1POWR=OK\r')
@@ -79,7 +79,7 @@ test('authenticated handshake prefixes the command with the session digest', asy
 			parameter: '0',
 		})
 		expect(seen).toEqual([
-			`${computePjlinkAuthDigest({ random: 'a1b2c3d4', password: 'secret' })}%1POWR 0\r`,
+			`${computePjlinkAuthDigest({ random: 'A1B2C3D4', password: 'secret' })}%1POWR 0\r`,
 		])
 		expect(result.value).toBe('OK')
 	} finally {

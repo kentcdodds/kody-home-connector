@@ -104,6 +104,38 @@ test('setPower forwards an explicit timeout to the command client', async () => 
 	}
 })
 
+test('selection errors keep Error.name as the class name', async () => {
+	const { storage, pjlink } = await createFixture()
+	try {
+		await expect(pjlink.getPower({ name: 'Nope' })).rejects.toMatchObject({
+			name: 'PjlinkProjectorSelectionError',
+			projectorName: 'Nope',
+			code: 'pjlink_projector_name_not_found',
+		})
+	} finally {
+		await storage.close()
+	}
+})
+
+test('resolveCourtProjector returns null when a pinned id is missing', async () => {
+	resetMockPjlinkState()
+	const config = createTestHomeConnectorConfig({
+		courtPjlinkProjectorId: 'pjlink-missing',
+	})
+	const state = createAppState()
+	const storage = await createHomeConnectorStorage(config)
+	const pjlink = createPjlinkAdapter({ config, state, storage })
+	try {
+		await pjlink.adoptProjector({
+			host: courtOptomaDefaults.host,
+			macAddress: courtOptomaDefaults.macAddress,
+		})
+		expect(await pjlink.resolveCourtProjector()).toBeNull()
+	} finally {
+		await storage.close()
+	}
+})
+
 test('control fails closed when the mock projector is unreachable', async () => {
 	const { storage, pjlink } = await createFixture()
 	try {

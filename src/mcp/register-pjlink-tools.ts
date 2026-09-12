@@ -62,7 +62,7 @@ function pjlinkSelectionErrorResult(error: unknown): CallToolResult | null {
 				code: error.code,
 				message: error.message,
 				projectorId: error.projectorId ?? null,
-				name: error.name ?? null,
+				projectorName: error.projectorName ?? null,
 			},
 		},
 	}

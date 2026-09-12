@@ -60,20 +60,20 @@ type PjlinkSelectionErrorCode =
 export class PjlinkProjectorSelectionError extends Error {
 	readonly code: PjlinkSelectionErrorCode
 	readonly projectorId: string | undefined
-	readonly name: string | undefined
+	readonly projectorName: string | undefined
 	homeConnectorCaptureContext?: HomeConnectorErrorCaptureContext
 
 	constructor(input: {
 		code: PjlinkSelectionErrorCode
 		message: string
 		projectorId?: string
-		name?: string
+		projectorName?: string
 	}) {
 		super(input.message)
 		this.name = 'PjlinkProjectorSelectionError'
 		this.code = input.code
 		this.projectorId = input.projectorId
-		this.name = input.name
+		this.projectorName = input.projectorName
 		this.homeConnectorCaptureContext = {
 			shouldCapture: false,
 			tags: {
@@ -135,7 +135,7 @@ export function createPjlinkAdapter(input: {
 				code: 'pjlink_projector_selector_invalid',
 				message: 'Provide exactly one of projectorId, name, or host.',
 				projectorId,
-				name,
+				projectorName: name,
 			})
 		}
 
@@ -161,14 +161,14 @@ export function createPjlinkAdapter(input: {
 				throw new PjlinkProjectorSelectionError({
 					code: 'pjlink_projector_name_not_found',
 					message: `PJLink projector named "${name}" was not found.`,
-					name,
+					projectorName: name,
 				})
 			}
 			if (matches.length > 1) {
 				throw new PjlinkProjectorSelectionError({
 					code: 'pjlink_projector_name_ambiguous',
 					message: `Multiple PJLink projectors match "${name}". Pass projectorId.`,
-					name,
+					projectorName: name,
 				})
 			}
 			match = matches[0]
@@ -205,7 +205,7 @@ export function createPjlinkAdapter(input: {
 				code: 'pjlink_projector_not_adopted',
 				message: `PJLink projector "${match.name}" must be adopted before control.`,
 				projectorId: match.projectorId,
-				name: match.name,
+				projectorName: match.name,
 			})
 		}
 		return match
@@ -548,12 +548,7 @@ export function createPjlinkAdapter(input: {
 				const match = projectors.find(
 					(projector) => projector.projectorId === configuredId,
 				)
-				if (!match) {
-					throw new Error(
-						`Court PJLink projector "${configuredId}" was not found or is not adopted.`,
-					)
-				}
-				return match
+				return match ?? null
 			}
 			const courtMac = normalizePjlinkMacAddress(courtOptomaDefaults.macAddress)
 			const byMac = projectors.filter(
