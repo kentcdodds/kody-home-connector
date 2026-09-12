@@ -54,7 +54,7 @@ export function registerCourtHomeConnectorTools(input: {
 			name: 'court_get_status',
 			title: 'Court AV Status',
 			description:
-				'Summarize court AV wiring: iTach port map, HDMI input reliability, court Roku/Sonos ids, PJLink projector preference, LAN-dark-after-full-off caveat, Roku hard-off limitation, and the Rotosphere IR caveat.',
+				'Summarize court AV wiring: iTach port map, HDMI input reliability, court Roku/Sonos ids, PJLink projector preference, LAN-dark-after-full-off caveat, Roku hard-off limitation, court Blu-ray IRCC offline status (HDMI IN 2; 192.168.0.115 is the Sony camera), and the Rotosphere IR caveat.',
 			inputSchema: {},
 			annotations: {
 				readOnlyHint: true,
@@ -99,6 +99,30 @@ export function registerCourtHomeConnectorTools(input: {
 			const appLabel = result.appId ? `app ${result.appId}` : 'Home'
 			return structuredTextResult(
 				`Court Roku started (${appLabel}) on ${result.rokuName}. ${result.notes}`,
+				result,
+			)
+		},
+	)
+
+	registerTool(
+		{
+			name: 'court_start_bluray',
+			title: 'Start Court Blu-ray',
+			description:
+				'Start the sport court on Blu-ray: projector ON via PJLink with a short timeout (iTach IR2 fallback), HDMI switch input 2, Sport Court Sonos HDMI/TV input, then bluray_power_on (WOL + IRCC). The Sony player is often unplugged — this still switches AV and returns `{ connected: false, reason }` for the player instead of throwing. 192.168.0.115 is the Sony camera, not the Blu-ray.',
+			...buildToolInputSchema({
+				sonosPlayerId: z.string().min(1).optional(),
+			}),
+		},
+		async (args) => {
+			const result = await court.startBluray({
+				sonosPlayerId:
+					args['sonosPlayerId'] == null
+						? undefined
+						: String(args['sonosPlayerId']),
+			})
+			return structuredTextResult(
+				`Court Blu-ray path selected on HDMI 2. ${result.notes}`,
 				result,
 			)
 		},

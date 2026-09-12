@@ -310,4 +310,47 @@ test('getStatus documents Roku hard-off and LAN-dark caveats', async () => {
 	expect(status.projector.lanDarkAfterFullOff).toBe(true)
 	expect(status.projector.courtPjlinkTimeoutMs).toBe(1_500)
 	expect(status.projector.preferredTransport).toBe('pjlink')
+	expect(status.bluray.connected).toBe(false)
+	expect(status.bluray.host).toBeNull()
+})
+
+test('startBluray selects HDMI 2 and still returns when the player is offline', async () => {
+	const state = createAppState()
+	const globalCache = createFakeGlobalCache()
+	const sonos = createFakeSonos()
+	const pjlink = createFakePjlink()
+	const blurayCalls: Array<string> = []
+	const court = createCourtAdapter({
+		config: createTestHomeConnectorConfig(),
+		state,
+		globalCache: globalCache.adapter,
+		pjlink: pjlink.adapter,
+		roku: createFakeRoku().adapter,
+		sonos: sonos.adapter,
+		bluray: {
+			async getStatus() {
+				return {
+					connected: false,
+					reason: 'not configured',
+					host: null,
+				}
+			},
+			async powerOn() {
+				blurayCalls.push('powerOn')
+				return {
+					connected: false,
+					reason: 'Sony IRCC endpoints did not respond',
+					command: 'powerOn',
+				}
+			},
+		} as never,
+	})
+
+	const result = await court.startBluray()
+	expect(pjlink.commands).toEqual(['on'])
+	expect(globalCache.sent).toEqual(['hdmi-input-2'])
+	expect(sonos.selectedTv).toEqual(['sonos-rincon-804af2a8db1f01400'])
+	expect(blurayCalls).toEqual(['powerOn'])
+	expect(result.bluray).toMatchObject({ connected: false })
+	expect(result.notes).toMatch(/HDMI 2/)
 })

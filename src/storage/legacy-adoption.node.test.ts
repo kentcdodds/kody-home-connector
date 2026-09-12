@@ -146,6 +146,7 @@ test('baseline migration adopts a database created by the previous release', asy
 			expect(status.map((entry) => [entry.name, entry.status])).toEqual([
 				['baseline_schema', 'applied'],
 				['pjlink_projectors', 'applied'],
+				['sony_ircc_players', 'applied'],
 			])
 
 			expect(await listVenstarThermostats(storage, 'default')).toEqual([
@@ -183,6 +184,7 @@ test('baseline migration adopts a database created by the previous release', asy
 				...legacyObjects,
 				{ type: 'table', name: 'data_table_migrations' },
 				{ type: 'table', name: 'pjlink_projectors' },
+				{ type: 'table', name: 'sony_ircc_players' },
 			].sort(
 				(a, b) => a.type.localeCompare(b.type) || a.name.localeCompare(b.name),
 			),
@@ -194,6 +196,7 @@ test('baseline migration adopts a database created by the previous release', asy
 				await loadHomeConnectorMigrations(),
 			)
 			expect(status.map((entry) => entry.status)).toEqual([
+				'applied',
 				'applied',
 				'applied',
 			])
@@ -236,6 +239,7 @@ test('an empty database receives the full schema and a journaled baseline', asyn
 				[
 					...listSchemaObjects(legacyDbPath),
 					{ type: 'table', name: 'pjlink_projectors' },
+					{ type: 'table', name: 'sony_ircc_players' },
 				].sort(
 					(a, b) =>
 						a.type.localeCompare(b.type) || a.name.localeCompare(b.name),
