@@ -18,7 +18,11 @@ Kody clients can still connect). Authorization is CIMD only:
 - `/authorize` fetches the client's HTTPS Client ID Metadata Document, enforces
   PKCE S256, and requires RFC 8707 `resource` to be this server's MCP URL.
   Public `/authorize` is gated by Cloudflare Access. The LAN origin is trusted,
-  so there is no operator password.
+  so there is no operator password. The consent page
+  (`src/oauth/authorize-page.ts`) shows the requesting client, its metadata URL,
+  and the return host, with **Approve** and **Deny** actions; Deny redirects
+  back with `error=access_denied`. It shares design tokens with the admin UI via
+  `src/ui/design-tokens.ts`.
 - `/token` and `/revoke` issue and revoke hashed bearer tokens
 - `/mcp` requires `Authorization: Bearer` and answers 401 with
   `WWW-Authenticate` `resource_metadata`

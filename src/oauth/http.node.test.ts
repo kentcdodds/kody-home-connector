@@ -88,6 +88,175 @@ test('/mcp without a bearer token returns 401 with resource_metadata', async () 
 	}
 })
 
+function mockClientMetadataFetch(clientName = 'Kody') {
+	const originalFetch = globalThis.fetch
+	globalThis.fetch = (async (input: RequestInfo | URL) => {
+		const url = String(input)
+		if (url !== clientId) {
+			throw new Error(`unexpected fetch ${url}`)
+		}
+		return Response.json({
+			client_id: clientId,
+			client_name: clientName,
+			redirect_uris: [redirectUri],
+		})
+	}) as typeof fetch
+	return () => {
+		globalThis.fetch = originalFetch
+	}
+}
+
+function createAuthorizeQuery(mcpUrl: string) {
+	return new URLSearchParams({
+		response_type: 'code',
+		client_id: clientId,
+		redirect_uri: redirectUri,
+		code_challenge: createCodeChallenge('a'.repeat(43)),
+		code_challenge_method: 'S256',
+		resource: mcpUrl,
+		scope: 'mcp',
+		state: 'abc',
+	})
+}
+
+test('GET /authorize renders a consent page with approve and deny actions', async () => {
+	const { storage, oauth, config } = await createOAuthApp()
+	const restoreFetch = mockClientMetadataFetch('Kody <script>')
+	try {
+		const query = createAuthorizeQuery(config.mcpUrl)
+		const response = await dispatch(
+			oauth,
+			new Request(`https://kody-home.doddsfamily.us/authorize?${query}`),
+		)
+		expect(response?.status).toBe(200)
+		expect(response?.headers.get('Content-Type')).toContain('text/html')
+		expect(response?.headers.get('Cache-Control')).toBe('no-store')
+		const body = (await response?.text()) ?? ''
+		expect(body).toContain('<meta name="viewport"')
+		expect(body).toContain('Kody &lt;script&gt;')
+		expect(body).not.toContain('Kody <script>')
+		expect(body).toContain('kody-home.doddsfamily.us')
+		expect(body).toContain('https://kody.codes/oauth/client-metadata.json')
+		expect(body).toContain('name="intent"')
+		expect(body).toContain('value="approve"')
+		expect(body).toContain('value="deny"')
+		expect(body).toContain(
+			`value="?${query.toString().replaceAll('&', '&amp;')}"`,
+		)
+		expect(body).toContain("[data-tone='neutral']")
+		expect(body).not.toContain('&#39;')
+	} finally {
+		restoreFetch()
+		await storage.close()
+	}
+})
+
+test('GET /authorize without a redirect_uri renders a styled error page', async () => {
+	const { storage, oauth } = await createOAuthApp()
+	try {
+		const response = await dispatch(
+			oauth,
+			new Request(
+				'https://kody-home.doddsfamily.us/authorize?client_id=not-a-url',
+			),
+		)
+		expect(response?.status).toBe(400)
+		expect(response?.headers.get('Content-Type')).toContain('text/html')
+		const body = (await response?.text()) ?? ''
+		expect(body).toContain('role="alert"')
+		expect(body).toContain(
+			'client_id must be an HTTPS Client ID Metadata Document URL.',
+		)
+		expect(body).not.toContain('value="approve"')
+	} finally {
+		await storage.close()
+	}
+})
+
+test('invalid authorize requests redirect back with invalid_request and iss', async () => {
+	const { storage, oauth, config } = await createOAuthApp()
+	const restoreFetch = mockClientMetadataFetch()
+	try {
+		const query = createAuthorizeQuery(config.mcpUrl)
+		query.set('response_type', 'token')
+		const response = await dispatch(
+			oauth,
+			new Request('https://kody-home.doddsfamily.us/authorize', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+				body: new URLSearchParams({
+					intent: 'approve',
+					query: `?${query.toString()}`,
+				}),
+			}),
+		)
+		expect(response?.status).toBe(302)
+		const redirected = new URL(response?.headers.get('Location') ?? '')
+		expect(redirected.origin + redirected.pathname).toBe(redirectUri)
+		expect(redirected.searchParams.get('error')).toBe('invalid_request')
+		expect(redirected.searchParams.get('state')).toBe('abc')
+		expect(redirected.searchParams.get('iss')).toBe(config.publicBaseUrl)
+		expect(redirected.searchParams.get('code')).toBeNull()
+	} finally {
+		restoreFetch()
+		await storage.close()
+	}
+})
+
+test('denying the consent page redirects with access_denied and no code', async () => {
+	const { storage, oauth, config } = await createOAuthApp()
+	const restoreFetch = mockClientMetadataFetch()
+	try {
+		const query = createAuthorizeQuery(config.mcpUrl)
+		const response = await dispatch(
+			oauth,
+			new Request('https://kody-home.doddsfamily.us/authorize', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+				body: new URLSearchParams({
+					intent: 'deny',
+					query: `?${query.toString()}`,
+				}),
+			}),
+		)
+		expect(response?.status).toBe(302)
+		const redirected = new URL(response?.headers.get('Location') ?? '')
+		expect(redirected.origin + redirected.pathname).toBe(redirectUri)
+		expect(redirected.searchParams.get('error')).toBe('access_denied')
+		expect(redirected.searchParams.get('state')).toBe('abc')
+		expect(redirected.searchParams.get('iss')).toBe(config.publicBaseUrl)
+		expect(redirected.searchParams.get('code')).toBeNull()
+	} finally {
+		restoreFetch()
+		await storage.close()
+	}
+})
+
+test('an unknown intent re-renders the consent page as a 400', async () => {
+	const { storage, oauth, config } = await createOAuthApp()
+	try {
+		const query = createAuthorizeQuery(config.mcpUrl)
+		const response = await dispatch(
+			oauth,
+			new Request('https://kody-home.doddsfamily.us/authorize', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+				body: new URLSearchParams({
+					intent: 'maybe',
+					query: `?${query.toString()}`,
+				}),
+			}),
+		)
+		expect(response?.status).toBe(400)
+		const body = (await response?.text()) ?? ''
+		expect(body).toContain('role="alert"')
+		expect(body).toContain('Allow kody.codes to control your home?')
+		expect(body).toContain('value="approve"')
+	} finally {
+		await storage.close()
+	}
+})
+
 test('CIMD authorize + PKCE issues a bearer token for the MCP resource', async () => {
 	const { storage, oauth, config } = await createOAuthApp()
 	const verifier = 'a'.repeat(43)
