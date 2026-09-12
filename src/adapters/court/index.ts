@@ -207,16 +207,11 @@ export function createCourtAdapter(input: {
 					ir,
 				}
 			}
-			const pjlink =
-				command === 'on'
-					? await input.pjlink.setPower(
-							{ projectorId: projector.projectorId },
-							'on',
-						)
-					: await input.pjlink.setPower(
-							{ projectorId: projector.projectorId },
-							'off',
-						)
+			const pjlink = await input.pjlink.setPower(
+				{ projectorId: projector.projectorId },
+				command === 'on' ? 'on' : 'off',
+				{ timeoutMs: input.config.courtPjlinkTimeoutMs },
+			)
 			return {
 				transport: 'pjlink',
 				irFallback: false,
@@ -283,8 +278,9 @@ export function createCourtAdapter(input: {
 								adopted: false,
 							},
 					lanDarkAfterFullOff: true,
+					courtPjlinkTimeoutMs: input.config.courtPjlinkTimeoutMs,
 					notes:
-						'Prefer PJLink %1POWR for court power. After a full Optoma off the LAN goes dark (ping/PJLink fail); court_projector_on then falls back to iTach IR2. Enable network standby on the projector if power-on should stay on PJLink.',
+						'Prefer PJLink %1POWR for court power. After a full Optoma off the LAN goes dark (ping/4352/80 fail); court power uses a short PJLink timeout then falls back to iTach IR2. Physical power or IR is required until network standby is enabled.',
 				},
 				rokuPower: {
 					reliableHardOff: false,

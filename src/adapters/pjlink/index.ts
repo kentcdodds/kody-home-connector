@@ -215,6 +215,7 @@ export function createPjlinkAdapter(input: {
 		projector: PjlinkPersistedProjector
 		command: string
 		parameter: string
+		timeoutMs?: number
 	}) {
 		const password = await getPjlinkProjectorPassword({
 			storage,
@@ -225,7 +226,7 @@ export function createPjlinkAdapter(input: {
 			host: inputCommand.projector.host,
 			port: inputCommand.projector.port,
 			password,
-			timeoutMs: config.pjlinkRequestTimeoutMs,
+			timeoutMs: inputCommand.timeoutMs ?? config.pjlinkRequestTimeoutMs,
 			command: inputCommand.command,
 			parameter: inputCommand.parameter,
 		})
@@ -423,12 +424,14 @@ export function createPjlinkAdapter(input: {
 		async setPower(
 			selector: PjlinkProjectorSelector,
 			command: PjlinkPowerCommand,
+			options: { timeoutMs?: number } = {},
 		) {
 			return await withProjector(selector, async (projector) => {
 				const result = await sendCommand({
 					projector,
 					command: 'POWR',
 					parameter: encodePjlinkPowerCommand(command),
+					timeoutMs: options.timeoutMs,
 				})
 				return {
 					projector: toPublicProjector(projector),

@@ -145,9 +145,11 @@ switch IN 2.
 Court projector power (`court_projector_on`, `court_projector_standby`,
 `court_start_roku`, `court_shutdown`) prefers PJLink on the adopted court
 Optoma. If PJLink is unreachable — typical after a **full** projector off, when
-LAN/ping/PJLink all go dark — those tools fall back to iTach IR2. Enable
-“network standby” on the projector if power-on should stay on PJLink. IR standby
-was the unreliable path; use PJLink standby when the LAN is up.
+LAN/ping/4352/80 all go dark — those tools fail fast (`COURT_PJLINK_TIMEOUT_MS`,
+default 1500ms) and fall back to iTach IR2. First power-on after a full off is
+IR (or physical power) unless “network standby” is enabled on the unit. Do not
+assume live PJLink during connector work while the Optoma is off. IR standby was
+the unreliable path; use PJLink standby when the LAN is up.
 
 Register the court Optoma once after deploy:
 
@@ -162,7 +164,9 @@ kody.mcp["home"].pjlink_adopt_projector({
 Or scan (`pjlink_scan_projectors`) and adopt the discovered `projectorId`.
 `PJLINK_SCAN_EXTRA_HOSTS` defaults to `192.168.0.128` because that subnet may
 not be on the NAS NIC. Optional `COURT_PJLINK_PROJECTOR_ID` pins the court
-projector when more than one PJLink device is adopted.
+projector when more than one PJLink device is adopted. Court power tools use
+`COURT_PJLINK_TIMEOUT_MS` (default 1500) so a dark LAN fails into IR quickly;
+direct `pjlink_*` tools keep `PJLINK_REQUEST_TIMEOUT_MS` (default 5000).
 
 Court Roku Ultra ECP `PowerOff` / `Power` leave `power-mode=PowerOn`. There is
 no court Kasa plug. There is **no reliable Roku hard-off path**.

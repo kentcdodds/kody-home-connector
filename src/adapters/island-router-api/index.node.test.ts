@@ -52,6 +52,7 @@ function createConfig(
 		pjlinkScanCidrs: ['192.168.0.128/32'],
 		pjlinkScanExtraHosts: ['192.168.0.128'],
 		pjlinkRequestTimeoutMs: 5_000,
+		courtPjlinkTimeoutMs: 1_500,
 		dataPath: path.dirname(dbPath),
 		dbPath,
 		port: 4040,

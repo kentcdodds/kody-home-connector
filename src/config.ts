@@ -60,6 +60,12 @@ export type HomeConnectorConfig = {
 	pjlinkScanExtraHosts: Array<string>
 	pjlinkRequestTimeoutMs: number
 	/**
+	 * Court power tools use this shorter PJLink timeout so a dark LAN
+	 * (typical after full Optoma off) fails fast into iTach IR2. Direct
+	 * `pjlink_*` tools keep `pjlinkRequestTimeoutMs`.
+	 */
+	courtPjlinkTimeoutMs: number
+	/**
 	 * Optional env fallback for the Android companion token on `/phone/ws`.
 	 * Prefer the encrypted token stored from `/phone/setup`. Never log the raw
 	 * value.
@@ -336,6 +342,10 @@ export function loadHomeConnectorConfig(): HomeConnectorConfig {
 		process.env.PJLINK_REQUEST_TIMEOUT_MS ?? '5000',
 		10,
 	)
+	const courtPjlinkTimeoutMs = Number.parseInt(
+		process.env.COURT_PJLINK_TIMEOUT_MS ?? '1500',
+		10,
+	)
 	const islandRouterApiRequestTimeoutMs = Number.parseInt(
 		process.env.ISLAND_ROUTER_API_REQUEST_TIMEOUT_MS ?? '8000',
 		10,
@@ -419,6 +429,10 @@ export function loadHomeConnectorConfig(): HomeConnectorConfig {
 			Number.isFinite(pjlinkRequestTimeoutMs) && pjlinkRequestTimeoutMs >= 1000
 				? pjlinkRequestTimeoutMs
 				: 5000,
+		courtPjlinkTimeoutMs:
+			Number.isFinite(courtPjlinkTimeoutMs) && courtPjlinkTimeoutMs >= 250
+				? courtPjlinkTimeoutMs
+				: 1500,
 		phoneDeviceToken: process.env.PHONE_DEVICE_TOKEN?.trim() || null,
 		islandRouterHost: process.env.ISLAND_ROUTER_HOST?.trim() || null,
 		islandRouterPort:

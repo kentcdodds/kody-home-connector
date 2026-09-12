@@ -163,6 +163,25 @@ test('scan CIDR env vars override derived autoscan CIDRs', () => {
 	expect(config.pjlinkScanCidrs).toEqual(['192.168.0.0/24', '10.0.0.8/32'])
 	expect(config.pjlinkScanExtraHosts).toEqual(['192.168.0.128'])
 	expect(config.courtPjlinkProjectorId).toBe('pjlink-005041b2fd09')
+	expect(config.courtPjlinkTimeoutMs).toBe(1500)
+})
+
+test('court PJLink timeout env override and invalid fallback', () => {
+	{
+		using _env = createTemporaryEnv({
+			...requiredConfigEnv,
+			COURT_PJLINK_TIMEOUT_MS: '800',
+		})
+		expect(loadHomeConnectorConfig().courtPjlinkTimeoutMs).toBe(800)
+	}
+
+	{
+		using _env = createTemporaryEnv({
+			...requiredConfigEnv,
+			COURT_PJLINK_TIMEOUT_MS: '100',
+		})
+		expect(loadHomeConnectorConfig().courtPjlinkTimeoutMs).toBe(1500)
+	}
 })
 
 test('derived Access Networks Unleashed autoscan CIDRs split a /23 into /24 scan blocks', () => {

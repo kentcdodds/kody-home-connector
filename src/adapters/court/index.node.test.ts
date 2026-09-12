@@ -58,6 +58,7 @@ function createFakePjlink(
 	} = {},
 ) {
 	const commands: Array<string> = []
+	const timeouts: Array<number | undefined> = []
 	const projector =
 		input.projector === undefined
 			? {
@@ -69,6 +70,7 @@ function createFakePjlink(
 			: input.projector
 	return {
 		commands,
+		timeouts,
 		adapter: {
 			async resolveCourtProjector() {
 				return projector
@@ -76,7 +78,9 @@ function createFakePjlink(
 			async setPower(
 				_selector: { projectorId?: string },
 				command: 'on' | 'off',
+				options: { timeoutMs?: number } = {},
 			) {
+				timeouts.push(options.timeoutMs)
 				if (input.unreachable) {
 					throw new PjlinkUnreachableError({
 						host: '192.168.0.128',
@@ -232,6 +236,7 @@ test('projectorOn falls back to iTach IR when PJLink is unreachable', async () =
 	expect(result.transport).toBe('itach-ir')
 	expect(result.irFallback).toBe(true)
 	expect(result.fallbackReason).toBe('pjlink-unreachable')
+	expect(pjlink.timeouts).toEqual([1_500])
 	expect(globalCache.sent).toEqual(['projector-on'])
 })
 
@@ -251,7 +256,29 @@ test('projectorStandby uses PJLink when the court projector is adopted', async (
 	const result = await court.projectorStandby()
 	expect(result.transport).toBe('pjlink')
 	expect(pjlink.commands).toEqual(['off'])
+	expect(pjlink.timeouts).toEqual([1_500])
 	expect(globalCache.sent).toEqual([])
+})
+
+test('projectorOn uses iTach IR immediately when no court projector is adopted', async () => {
+	const state = createAppState()
+	const globalCache = createFakeGlobalCache()
+	const pjlink = createFakePjlink({ projector: null })
+	const court = createCourtAdapter({
+		config: createTestHomeConnectorConfig(),
+		state,
+		globalCache: globalCache.adapter,
+		pjlink: pjlink.adapter,
+		roku: createFakeRoku().adapter,
+		sonos: createFakeSonos().adapter,
+	})
+
+	const result = await court.projectorOn()
+	expect(result.transport).toBe('itach-ir')
+	expect(result.irFallback).toBe(true)
+	expect(result.fallbackReason).toBe('pjlink-not-configured')
+	expect(pjlink.commands).toEqual([])
+	expect(globalCache.sent).toEqual(['projector-on'])
 })
 
 test('getStatus documents Roku hard-off and LAN-dark caveats', async () => {
@@ -267,5 +294,6 @@ test('getStatus documents Roku hard-off and LAN-dark caveats', async () => {
 	const status = await court.getStatus()
 	expect(status.rokuPower.reliableHardOff).toBe(false)
 	expect(status.projector.lanDarkAfterFullOff).toBe(true)
+	expect(status.projector.courtPjlinkTimeoutMs).toBe(1_500)
 	expect(status.projector.preferredTransport).toBe('pjlink')
 })

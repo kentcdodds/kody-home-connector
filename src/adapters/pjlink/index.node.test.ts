@@ -71,6 +71,39 @@ test('adopt by explicit court IP/MAC without a prior scan', async () => {
 	}
 })
 
+test('setPower forwards an explicit timeout to the command client', async () => {
+	resetMockPjlinkState()
+	const config = createTestHomeConnectorConfig()
+	const state = createAppState()
+	const storage = await createHomeConnectorStorage(config)
+	const timeouts: Array<number | undefined> = []
+	const pjlink = createPjlinkAdapter({
+		config,
+		state,
+		storage,
+		commandClient: async (input) => {
+			timeouts.push(input.timeoutMs)
+			return {
+				handshake: { authRequired: false, random: null, raw: 'PJLINK 0' },
+				value: 'OK',
+				raw: '%1POWR=OK',
+			}
+		},
+	})
+	try {
+		await pjlink.adoptProjector({
+			host: courtOptomaDefaults.host,
+			macAddress: courtOptomaDefaults.macAddress,
+		})
+		await pjlink.setPower({ host: courtOptomaDefaults.host }, 'on', {
+			timeoutMs: 1_500,
+		})
+		expect(timeouts).toEqual([1_500])
+	} finally {
+		await storage.close()
+	}
+})
+
 test('control fails closed when the mock projector is unreachable', async () => {
 	const { storage, pjlink } = await createFixture()
 	try {

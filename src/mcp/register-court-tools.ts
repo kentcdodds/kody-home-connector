@@ -75,7 +75,7 @@ export function registerCourtHomeConnectorTools(input: {
 			name: 'court_start_roku',
 			title: 'Start Court Roku',
 			description:
-				'Start the sport court on Roku: projector ON via PJLink (iTach IR2 fallback if LAN-dark), HDMI switch input 1, Sport Court Sonos HDMI/TV input, then Roku Home or a named/id app (YouTube, etc.). Lamp warmup can take 15-30s. Requires an adopted court Roku.',
+				'Start the sport court on Roku: projector ON via PJLink with a short timeout (iTach IR2 fallback if LAN-dark after full off), HDMI switch input 1, Sport Court Sonos HDMI/TV input, then Roku Home or a named/id app (YouTube, etc.). First power-on after full off is IR unless network standby is enabled. Lamp warmup can take 15-30s. Requires an adopted court Roku.',
 			...buildToolInputSchema({
 				appName: z.string().min(1).optional(),
 				appId: z.string().min(1).optional(),
@@ -135,7 +135,7 @@ export function registerCourtHomeConnectorTools(input: {
 			name: 'court_projector_on',
 			title: 'Court Projector On',
 			description:
-				'Power on the court Optoma. Prefers PJLink %1POWR 1 on the adopted court projector; falls back to iTach IR2 when PJLink is unreachable (typical after a full power-off when LAN goes dark). Lamp warmup can take 15-30s.',
+				'Power on the court Optoma. Prefers PJLink %1POWR 1 on the adopted court projector with a short timeout; falls back to iTach IR2 when PJLink is unreachable (typical after a full power-off when LAN/ping/4352/80 are dark). First power-on after full off is IR unless network standby is enabled. Lamp warmup can take 15-30s.',
 			inputSchema: {},
 		},
 		async () => {

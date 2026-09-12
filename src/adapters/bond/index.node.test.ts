@@ -45,6 +45,7 @@ function createConfig(): HomeConnectorConfig {
 		pjlinkScanCidrs: ['192.168.0.128/32'],
 		pjlinkScanExtraHosts: ['192.168.0.128'],
 		pjlinkRequestTimeoutMs: 5_000,
+		courtPjlinkTimeoutMs: 1_500,
 		dataPath: '/tmp',
 		dbPath: ':memory:',
 		port: 4040,
