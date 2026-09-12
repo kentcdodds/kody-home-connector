@@ -99,8 +99,8 @@ The connector exposes these local-device families:
   schedules over the controller's local WebSocket API
 - PJLink Class 1 projectors over TCP 4352 (scan/adopt, power, INPT, AVMT, LAMP)
 - Court AV through PJLink (preferred) plus the cage Global Cache iTach IP2IR
-  (HDMI switch, Optoma IR fallback, Chauvet Rotosphere) and composed Roku/Sonos
-  scene tools
+  (HDMI switch, Optoma IR fallback, Chauvet Rotosphere), composed Roku/Sonos
+  scene tools, and court Sony UHD Blu-ray control over LAN IRCC
 - Personal Audible archive import: ffmpeg convert of an already-downloaded AAXC
   (voucher or key+iv) or AAX (activation_bytes) to a flat `Title.m4b` in the
   mounted audiobook library. No Audible API lives here.
@@ -144,10 +144,13 @@ The sport-court cage stack is driven from this connector, not from Elan:
 - IR2 stick-on emitter → Optoma projector (fallback when PJLink is unreachable)
 - IR3 hanging blaster → Chauvet Rotosphere (must be `IR_BLASTER`)
 - Court Roku Ultra ECP at `192.168.1.98` + Sport Court Sonos HDMI/TV input
+- Court Sony UHD Blu-ray over LAN IRCC (host often unset — player is frequently
+  unplugged / network standby off)
 
 Do not bypass the HDMI switch: Roku is on switch IN 1, the switch feeds an HDMI
 audio extractor, and that extractor is the Sport Court Sonos path. Blu-ray is
-switch IN 2.
+switch IN 2 (Blu-ray → Blustream HEX150CS-TX → Cat6 → HDMI switch input 2 →
+projector).
 
 Court projector power (`court_projector_on`, `court_projector_standby`,
 `court_start_roku`, `court_shutdown`) prefers PJLink on the adopted court
@@ -184,6 +187,57 @@ package, not this repo. It should keep calling `court_start_roku` /
 connector ships. No package change is required for the PJLink preference because
 those court tools now own the transport choice.
 
+### Court Sony UHD Blu-ray (LAN IRCC)
+
+The cage Blu-ray is **offline-first**. It is often unplugged, and even when
+plugged in it may have network standby off so IRCC ports never answer.
+
+Pattern (same catalog-always-present idea as `phone_*`, but unplugged is not a
+tool failure):
+
+- `bluray_status` always exists and returns
+  `{ connected: false, reason: string, ... }` when the player is unconfigured
+  or unreachable. It never throws just because the unit is off.
+- Transport/nav tools (`bluray_play`, d-pad, `bluray_press`, power, …) stay in
+  the catalog and return that same disconnected status shape. Patch's
+  `@kentcdodds/court-projector` mini-remote tab should call `bluray_status`
+  first, disable buttons while `connected` is false, and call `bluray_press` /
+  named tools when the player is on.
+
+Config (all optional; empty is the normal state):
+
+- `COURT_BLURAY_HOST` / `COURT_BLURAY_MAC`
+- `COURT_BLURAY_AUTH_COOKIE` / `COURT_BLURAY_PSK` after on-screen pairing
+- `COURT_BLURAY_TIMEOUT_MS` (default 1500)
+- `COURT_BLURAY_SCAN_EXTRA_HOSTS` / `COURT_BLURAY_SCAN_CIDRS` (default empty)
+
+A successful IRCC probe persists host/MAC (and later auth) in SQLite
+(`sony_ircc_players`). Probe GETs `Ircc.xml:50001`, `actionList:50002`, and
+`dmr.xml:52323`. Control is SOAP `X_SendIRCC` to `/upnp/control/IRCC` (or
+`/sony/ircc`). Power-on sends Wake-on-LAN when a MAC is stored.
+
+**192.168.0.115 / f8:4e:17:21:ed:b2 is the Sony camera (bisyamon), not the
+Blu-ray.** Ircc/actionList/dmr fail there. The connector never defaults to
+`.115`, never auto-picks it during scan, and `bluray_set_host` / status reject
+it with `reasonCode: "blocked_sony_camera"`.
+
+Live pairing needs the player powered with **network standby on**. After the
+on-screen confirm, persist the auth cookie or PSK with `bluray_set_host`. Do
+not send live IRCC POSTs from CI; unit tests use fixtures.
+
+IRCC codes are the public Sony BD1 category table (sonyapilib `IrccCategory.BD1`
+= 7258) plus the published TV/Bravia fallbacks. They are not yet live-verified
+against Kent's court unit.
+
+For a later mini remote in `@kentcdodds/court-projector`:
+
+```
+kody.mcp["home"].bluray_status()
+kody.mcp["home"].court_start_bluray()
+kody.mcp["home"].bluray_press({ command: "play" })
+kody.mcp["home"].bluray_up()
+```
+
 Named IR commands live in `src/adapters/global-cache/codes.ts`. Reliability:
 
 - HDMI inputs 1 and 2, projector ON / standby / HDMI: proven on the court
@@ -208,6 +262,13 @@ MCP surface:
 - `sonos_select_audio_input` (analog line-in only; not the court Amp TV path)
 - `court_start_roku` (PJLink projector ON + IR fallback, HDMI 1, Sport Court
   Sonos TV/HDMI via `sonos_select_tv_input`, Roku Home or app)
+- `court_start_bluray` (same AV path on HDMI 2, then Blu-ray WOL/IRCC power-on;
+  player offline returns `{ connected: false, reason }` instead of throwing)
+- `bluray_status` / `bluray_scan` / `bluray_set_host` / `bluray_forget`
+- `bluray_play` / `bluray_pause` / `bluray_stop` / `bluray_eject`
+- `bluray_up` / `bluray_down` / `bluray_left` / `bluray_right` / `bluray_enter`
+- `bluray_home` / `bluray_back` / `bluray_options`
+- `bluray_press` / `bluray_power_on` / `bluray_power_off`
 - `court_set_hdmi_input`
 - `court_projector_on` / `court_projector_standby`
 - `court_set_rotosphere`
@@ -236,7 +297,8 @@ This connector is not deployed by merging the PR. After merge to `main`:
    to `/volume1/docker/` (see `scripts/nas/README.md` and `docker/README.md`).
    Mount `/volume1/media/audio/audiobooks` RW at `/media/audiobooks`. Cloudflare
    already tunnels `kody-home.doddsfamily.us` → `http://192.168.1.234:4040`.
-3. Startup applies the `pjlink_projectors` SQLite migration automatically.
+3. Startup applies pending SQLite migrations automatically (`pjlink_projectors`,
+   `sony_ircc_players`, …).
 4. Adopt the court Optoma with `pjlink_adopt_projector` (no password).
 
 There is no Kody workflow package in this repo. These tools are the connector
@@ -728,6 +790,7 @@ The connector stores a local SQLite database containing:
 - discovered Sonos players
 - managed Venstar thermostats
 - discovered and adopted PJLink projectors (optional encrypted password)
+- court Sony IRCC Blu-ray host/MAC and optional encrypted auth cookie/PSK
 
 By default the database is stored at
 `~/.kody/home-connector/home-connector.sqlite`. Operators can override the base

@@ -1,0 +1,67 @@
+import { expect, test } from 'vitest'
+import { getSonyIrccCode } from './commands.ts'
+import { probeSonyIrccHost, sendSonyIrccCommand } from './client.ts'
+import {
+	mockSonyBlurayHost,
+	mockSonyIrccSoapOk,
+	mockSonyIrccXml,
+} from './fixtures.ts'
+import { type SonyIrccHttpClient } from './types.ts'
+
+test('probe matches Ircc.xml and extracts the control URL', async () => {
+	const http: SonyIrccHttpClient = async (request) => {
+		if (request.url.endsWith('/Ircc.xml')) {
+			return { status: 200, headers: {}, body: mockSonyIrccXml }
+		}
+		throw new Error(`timeout ${request.url}`)
+	}
+	const probe = await probeSonyIrccHost({
+		host: mockSonyBlurayHost,
+		http,
+		timeoutMs: 250,
+	})
+	expect(probe.connected).toBe(true)
+	expect(probe.model).toBe('UBP-X800M2')
+	expect(probe.irccControlUrl).toBe(
+		`http://${mockSonyBlurayHost}:50001/upnp/control/IRCC`,
+	)
+	expect(probe.probedEndpoints.some((endpoint) => endpoint.matched)).toBe(true)
+})
+
+test('probe-fail returns matched false without throwing', async () => {
+	const http: SonyIrccHttpClient = async (request) => {
+		throw new Error(`connect EHOSTUNREACH ${request.url}`)
+	}
+	const probe = await probeSonyIrccHost({
+		host: mockSonyBlurayHost,
+		http,
+		timeoutMs: 250,
+	})
+	expect(probe.connected).toBe(false)
+	expect(probe.matched).toBe(false)
+	expect(probe.probedEndpoints).toHaveLength(3)
+	expect(probe.probedEndpoints.every((endpoint) => !endpoint.ok)).toBe(true)
+})
+
+test('IRCC send posts the SOAP envelope to the discovered control URL', async () => {
+	const urls: Array<string> = []
+	const http: SonyIrccHttpClient = async (request) => {
+		urls.push(request.url)
+		expect(request.method).toBe('POST')
+		expect(request.body).toContain(getSonyIrccCode('play'))
+		expect(request.headers?.['SOAPACTION']).toBe(
+			'"urn:schemas-sony-com:service:IRCC:1#X_SendIRCC"',
+		)
+		return { status: 200, headers: {}, body: mockSonyIrccSoapOk }
+	}
+	const sent = await sendSonyIrccCommand({
+		host: mockSonyBlurayHost,
+		http,
+		irccCode: getSonyIrccCode('play'),
+		controlUrl: `http://${mockSonyBlurayHost}:50001/upnp/control/IRCC`,
+		timeoutMs: 250,
+	})
+	expect(sent.ok).toBe(true)
+	expect(sent.httpStatus).toBe(200)
+	expect(urls[0]).toBe(`http://${mockSonyBlurayHost}:50001/upnp/control/IRCC`)
+})

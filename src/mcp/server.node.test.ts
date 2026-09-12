@@ -11,6 +11,7 @@ import { createJellyfishAdapter } from '../adapters/jellyfish/index.ts'
 import { createKasaAdapter } from '../adapters/kasa/index.ts'
 import { createPhoneAdapter } from '../adapters/phone/index.ts'
 import { createPjlinkAdapter } from '../adapters/pjlink/index.ts'
+import { createSonyBlurayAdapter } from '../adapters/sony-bluray/index.ts'
 import { resetMockPjlinkState } from '../adapters/pjlink/mock-driver.ts'
 import { createLutronAdapter } from '../adapters/lutron/index.ts'
 import { createSonosAdapter } from '../adapters/sonos/index.ts'
@@ -510,6 +511,7 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 		kasa,
 		phone: createPhoneAdapter({ config }),
 		pjlink: createPjlinkAdapter({ config, state, storage }),
+		bluray: createSonyBlurayAdapter({ config, storage }),
 	})
 
 	try {
@@ -586,6 +588,17 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 		expect(tools.some((tool) => tool.name === 'pjlink_adopt_projector')).toBe(
 			true,
 		)
+		expect(tools.some((tool) => tool.name === 'bluray_status')).toBe(true)
+		expect(tools.some((tool) => tool.name === 'bluray_play')).toBe(true)
+		expect(tools.some((tool) => tool.name === 'court_start_bluray')).toBe(true)
+		const blurayStatus = await mcp.callTool('bluray_status')
+		expect(blurayStatus).not.toMatchObject({ isError: true })
+		expect(blurayStatus.structuredContent).toMatchObject({
+			connected: false,
+			reasonCode: 'not_configured',
+			avPath: { hdmiSwitchInput: 2 },
+			rejectedSonyCamera: { host: '192.168.0.115' },
+		})
 		const courtStatus = await mcp.callTool('court_get_status')
 		expect(courtStatus.content[0]?.type).toBe('text')
 		expect(courtStatus.structuredContent).toMatchObject({
@@ -1296,6 +1309,7 @@ test('mcp server exposes island router write tools when host verification is con
 		kasa,
 		phone: createPhoneAdapter({ config }),
 		pjlink: createPjlinkAdapter({ config, state, storage }),
+		bluray: createSonyBlurayAdapter({ config, storage }),
 	})
 
 	try {

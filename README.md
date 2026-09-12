@@ -59,6 +59,16 @@ present.
 PHONE_DEVICE_TOKEN=...
 ```
 
+Court Sony UHD Blu-ray (LAN IRCC) is offline-first. Leave these unset until the
+player is powered with network standby on. **Do not use `192.168.0.115`** — that
+is the Sony camera (bisyamon), not the Blu-ray.
+
+```bash
+# COURT_BLURAY_HOST=192.168.0.x
+# COURT_BLURAY_MAC=aa:bb:cc:dd:ee:ff
+# COURT_BLURAY_TIMEOUT_MS=1500
+```
+
 Personal audiobook archive (AAXC/AAX → flat `Title.m4b`). Defaults match
 mediarss. On Kent's Synology the host path is `/volume1/media/audio/audiobooks`;
 on Mac it is `/Volumes/media/audio/audiobooks`. Mount that share RW at

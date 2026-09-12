@@ -8,6 +8,7 @@ import {
 } from '../pjlink/index.ts'
 import { courtOptomaDefaults } from '../pjlink/types.ts'
 import { type createRokuAdapter } from '../roku/index.ts'
+import { type createSonyBlurayAdapter } from '../sony-bluray/index.ts'
 import { type createSonosAdapter } from '../sonos/index.ts'
 import { type RokuDeviceRecord } from '../roku/types.ts'
 import { type GlobalCacheSendIrResult } from '../global-cache/types.ts'
@@ -168,6 +169,7 @@ export function createCourtAdapter(input: {
 	pjlink: ReturnType<typeof createPjlinkAdapter>
 	roku: ReturnType<typeof createRokuAdapter>
 	sonos: ReturnType<typeof createSonosAdapter>
+	bluray?: ReturnType<typeof createSonyBlurayAdapter>
 }) {
 	async function resolveSonosPlayerId(sonosPlayerId?: string) {
 		const requested =
@@ -289,6 +291,15 @@ export function createCourtAdapter(input: {
 					notes:
 						'Court Roku Ultra ECP PowerOff/Power leave power-mode=PowerOn. There is no court Kasa plug and no reliable hard-off path.',
 				},
+				bluray: input.bluray
+					? await input.bluray.getStatus()
+					: {
+							connected: false,
+							reason:
+								'Court Blu-ray adapter is not wired. HDMI IN 2 is still the Blu-ray path.',
+							host: input.config.courtBlurayHost ?? null,
+							macAddress: input.config.courtBlurayMacAddress ?? null,
+						},
 			}
 		},
 		async startRoku(startInput: CourtStartRokuInput = {}) {
@@ -351,6 +362,29 @@ export function createCourtAdapter(input: {
 				...result,
 				reliability: command.reliability,
 				notes: command.notes,
+			}
+		},
+		async startBluray(startInput: { sonosPlayerId?: string } = {}) {
+			const projector = await sendProjectorCommand('on')
+			const hdmi = await input.globalCache.sendIr('hdmi-input-2')
+			const sonosPlayerId = await resolveSonosPlayerId(startInput.sonosPlayerId)
+			const sonosInput = await input.sonos.selectTvInput(sonosPlayerId)
+			const bluray = input.bluray
+				? await input.bluray.powerOn()
+				: {
+						connected: false,
+						reason:
+							'Court Blu-ray adapter is not wired. HDMI 2 is selected anyway.',
+					}
+			return {
+				sonosPlayerId: sonosPlayerId ?? null,
+				sonosInput: 'tv' as const,
+				sonosInputUri: sonosInput.uri,
+				projector,
+				hdmi,
+				bluray,
+				notes:
+					'Projector uses PJLink when reachable, otherwise iTach IR2. HDMI 2 is the Blu-ray (Blustream HEX150CS-TX). Sport Court Sonos stays on HDMI/TV. The Sony player is often unplugged — bluray_status / power tools return connected:false instead of throwing. 192.168.0.115 is the Sony camera, not this player.',
 			}
 		},
 		async shutdown(inputArgs: { rotosphereBlackOut?: boolean } = {}) {

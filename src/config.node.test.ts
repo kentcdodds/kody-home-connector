@@ -166,6 +166,39 @@ test('scan CIDR env vars override derived autoscan CIDRs', () => {
 	expect(config.courtPjlinkTimeoutMs).toBe(1500)
 })
 
+test('court Blu-ray host env is optional and never defaults to the Sony camera', () => {
+	{
+		using _env = createTemporaryEnv({
+			...requiredConfigEnv,
+			COURT_BLURAY_HOST: undefined,
+			COURT_BLURAY_MAC: undefined,
+			COURT_BLURAY_SCAN_EXTRA_HOSTS: undefined,
+		})
+		const config = loadHomeConnectorConfig()
+		expect(config.courtBlurayHost).toBeNull()
+		expect(config.courtBlurayMacAddress).toBeNull()
+		expect(config.courtBlurayScanExtraHosts).toEqual([])
+		expect(config.courtBlurayScanCidrs).toEqual([])
+		expect(config.courtBlurayTimeoutMs).toBe(1500)
+	}
+
+	{
+		using _env = createTemporaryEnv({
+			...requiredConfigEnv,
+			COURT_BLURAY_HOST: '192.168.0.200',
+			COURT_BLURAY_MAC: 'a0:b1:c2:d3:e4:f5',
+			COURT_BLURAY_TIMEOUT_MS: '800',
+			COURT_BLURAY_SCAN_EXTRA_HOSTS: '192.168.0.200',
+		})
+		const config = loadHomeConnectorConfig()
+		expect(config.courtBlurayHost).toBe('192.168.0.200')
+		expect(config.courtBlurayMacAddress).toBe('a0:b1:c2:d3:e4:f5')
+		expect(config.courtBlurayTimeoutMs).toBe(800)
+		expect(config.courtBlurayScanExtraHosts).toEqual(['192.168.0.200'])
+		expect(config.courtBlurayHost).not.toBe('192.168.0.115')
+	}
+})
+
 test('court PJLink timeout env override and invalid fallback', () => {
 	{
 		using _env = createTemporaryEnv({

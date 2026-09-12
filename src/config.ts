@@ -53,6 +53,29 @@ export type HomeConnectorConfig = {
 	courtSonosPlayerId?: string | null
 	courtPjlinkProjectorId?: string | null
 	/**
+	 * Court Sony UHD Blu-ray IRCC host. Empty/unset is expected — the player is
+	 * often unplugged. Never default this to 192.168.0.115 (Sony camera).
+	 */
+	courtBlurayHost: string | null
+	courtBlurayMacAddress: string | null
+	courtBlurayAuthCookie: string | null
+	courtBlurayPsk: string | null
+	/**
+	 * Short IRCC probe/send timeout so a dark/unplugged player fails into
+	 * `{ connected: false }` quickly. Default 1500ms.
+	 */
+	courtBlurayTimeoutMs: number
+	/**
+	 * Optional extra hosts to probe from `bluray_scan`. Default empty — do not
+	 * auto-pick the Sony camera at 192.168.0.115.
+	 */
+	courtBlurayScanExtraHosts: Array<string>
+	/**
+	 * Optional `/32` (or explicit CIDR) list for `bluray_scan`. Default empty
+	 * so status never sweeps 192.168.0.0/23.
+	 */
+	courtBlurayScanCidrs: Array<string>
+	/**
 	 * PJLink Class 1 discovery probes TCP 4352 across these CIDRs. When unset,
 	 * the connector derives private `/24` networks from local IPv4 interfaces.
 	 * `PJLINK_SCAN_CIDRS` can override the derived list.
@@ -359,6 +382,10 @@ export function loadHomeConnectorConfig(): HomeConnectorConfig {
 		process.env.COURT_PJLINK_TIMEOUT_MS ?? '1500',
 		10,
 	)
+	const courtBlurayTimeoutMs = Number.parseInt(
+		process.env.COURT_BLURAY_TIMEOUT_MS ?? '1500',
+		10,
+	)
 	const islandRouterApiRequestTimeoutMs = Number.parseInt(
 		process.env.ISLAND_ROUTER_API_REQUEST_TIMEOUT_MS ?? '8000',
 		10,
@@ -441,6 +468,18 @@ export function loadHomeConnectorConfig(): HomeConnectorConfig {
 		courtSonosPlayerId: process.env.COURT_SONOS_PLAYER_ID?.trim() || null,
 		courtPjlinkProjectorId:
 			process.env.COURT_PJLINK_PROJECTOR_ID?.trim() || null,
+		courtBlurayHost: process.env.COURT_BLURAY_HOST?.trim() || null,
+		courtBlurayMacAddress: process.env.COURT_BLURAY_MAC?.trim() || null,
+		courtBlurayAuthCookie: process.env.COURT_BLURAY_AUTH_COOKIE?.trim() || null,
+		courtBlurayPsk: process.env.COURT_BLURAY_PSK?.trim() || null,
+		courtBlurayTimeoutMs:
+			Number.isFinite(courtBlurayTimeoutMs) && courtBlurayTimeoutMs >= 250
+				? courtBlurayTimeoutMs
+				: 1500,
+		courtBlurayScanExtraHosts: resolveScanCidrsFromEnv(
+			'COURT_BLURAY_SCAN_EXTRA_HOSTS',
+		),
+		courtBlurayScanCidrs: resolveScanCidrsFromEnv('COURT_BLURAY_SCAN_CIDRS'),
 		pjlinkScanCidrs,
 		pjlinkScanExtraHosts,
 		pjlinkRequestTimeoutMs:
