@@ -173,13 +173,19 @@ export function createSonyBlurayAdapter(input: {
 		player: SonyIrccPersistedPlayer | null
 	}> {
 		const persisted = await getCourtSonyIrccPlayer(storage, connectorId)
-		const host = envHost() ?? persisted?.host ?? null
-		const macAddress = envMac() ?? persisted?.macAddress ?? null
+		const configured = envHost()
+		const known = await listSonyIrccPlayers(storage, connectorId)
+		const hostMatched = configured
+			? (known.find((player) => player.host === configured) ?? null)
+			: persisted
+		const host = configured ?? persisted?.host ?? null
+		const player = hostMatched && hostMatched.host === host ? hostMatched : null
+		const macAddress = envMac() ?? player?.macAddress ?? null
 		return {
 			host,
 			macAddress,
-			name: persisted?.name ?? sonyIrccDefaultName,
-			player: persisted,
+			name: player?.name ?? sonyIrccDefaultName,
+			player,
 		}
 	}
 
@@ -194,6 +200,8 @@ export function createSonyBlurayAdapter(input: {
 		playerId?: string
 	}) {
 		const playerId = inputProbe.playerId ?? courtBlurayPlayerId
+		const existing = await getSonyIrccPlayer(storage, connectorId, playerId)
+		const hostChanged = Boolean(existing && existing.host !== inputProbe.host)
 		return await upsertSonyIrccPlayer({
 			storage,
 			connectorId,
@@ -211,6 +219,7 @@ export function createSonyBlurayAdapter(input: {
 				},
 			},
 			adopted: playerId === courtBlurayPlayerId,
+			...(hostChanged ? { authCookie: null, psk: null } : {}),
 		})
 	}
 

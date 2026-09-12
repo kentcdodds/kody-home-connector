@@ -2,6 +2,7 @@ import { buildSonyIrccSoapEnvelope, sonyIrccSoapAction } from './commands.ts'
 import {
 	extractIrccControlUrl,
 	extractXmlTag,
+	isTrustedSonyIrccControlUrl,
 	looksLikeSonyIrccDocument,
 	normalizeSonyIrccHost,
 } from './identity.ts'
@@ -36,6 +37,7 @@ export function createSonyIrccHttpClient(
 				method: input.method,
 				headers: input.headers,
 				body: input.body,
+				redirect: 'error',
 				signal: controller.signal,
 			})
 			const body = await response.text()
@@ -80,7 +82,12 @@ export function buildSonyIrccControlUrlCandidates(input: {
 	const host = normalizeSonyIrccHost(input.host)
 	if (!host) return []
 	const urls = new Set<string>()
-	if (input.discoveredControlUrl) urls.add(input.discoveredControlUrl)
+	if (
+		input.discoveredControlUrl &&
+		isTrustedSonyIrccControlUrl({ host, url: input.discoveredControlUrl })
+	) {
+		urls.add(input.discoveredControlUrl)
+	}
 	for (const entry of sonyIrccControlPathCandidates) {
 		urls.add(`http://${host}:${String(entry.port)}${entry.path}`)
 	}

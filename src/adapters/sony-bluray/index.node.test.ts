@@ -34,6 +34,7 @@ function fixtureHttp(input: {
 	hosts?: Array<string>
 	failControl?: boolean
 	postedBodies?: Array<string>
+	postedHeaders?: Array<Record<string, string> | undefined>
 }): SonyIrccHttpClient {
 	const hosts = input.hosts ?? [input.host ?? mockSonyBlurayHost]
 	return async (request) => {
@@ -42,6 +43,7 @@ function fixtureHttp(input: {
 		}
 		if (request.method === 'POST' && request.url.includes('IRCC')) {
 			input.postedBodies?.push(request.body ?? '')
+			input.postedHeaders?.push(request.headers)
 			if (input.failControl) {
 				throw new Error(`connect EHOSTUNREACH ${request.url}`)
 			}
@@ -349,6 +351,73 @@ test('scan adopts only the first unmatched host as court-bluray', async () => {
 			again.players.find((player) => player.host === mockSonyBlurayHostB)
 				?.playerId,
 		).toBe(`sony-ircc-${mockSonyBlurayHostB.replaceAll('.', '-')}`)
+	} finally {
+		await storage.close()
+	}
+})
+
+test('forget does not fall back to an unadopted scanned player', async () => {
+	const { storage, bluray } = await createFixture(
+		{},
+		fixtureHttp({ hosts: [mockSonyBlurayHost, mockSonyBlurayHostB] }),
+	)
+	try {
+		await bluray.scan({
+			hosts: [mockSonyBlurayHost, mockSonyBlurayHostB],
+		})
+		const forgotten = await bluray.forget()
+		expect(forgotten.reasonCode).toBe('not_configured')
+		expect(forgotten.host).toBeNull()
+		const listed = await bluray.listPlayers()
+		expect(
+			listed.some((player) => player.playerId === courtBlurayPlayerId),
+		).toBe(false)
+		expect(
+			listed.some(
+				(player) => player.host === mockSonyBlurayHostB && !player.adopted,
+			),
+		).toBe(true)
+		const status = await bluray.getStatus()
+		expect(status.reasonCode).toBe('not_configured')
+		expect(status.host).toBeNull()
+		expect(status.player).toBeNull()
+	} finally {
+		await storage.close()
+	}
+})
+
+test('changing COURT_BLURAY_HOST does not reuse the previous player credentials', async () => {
+	const postedHeaders: Array<Record<string, string> | undefined> = []
+	const { storage } = await createFixture({}, fixtureHttp({}))
+	try {
+		const first = createSonyBlurayAdapter({
+			config: createTestHomeConnectorConfig({}),
+			storage,
+			http: fixtureHttp({}),
+		})
+		await first.setHost({
+			host: mockSonyBlurayHost,
+			authCookie: 'auth=old-court-cookie',
+			psk: 'old-psk',
+		})
+		const second = createSonyBlurayAdapter({
+			config: createTestHomeConnectorConfig({
+				courtBlurayHost: mockSonyBlurayHostB,
+			}),
+			storage,
+			http: fixtureHttp({
+				host: mockSonyBlurayHostB,
+				postedHeaders,
+			}),
+		})
+		const result = await second.press('play')
+		expect(result.connected).toBe(true)
+		expect(result.host).toBe(mockSonyBlurayHostB)
+		expect(postedHeaders.length).toBeGreaterThan(0)
+		for (const headers of postedHeaders) {
+			expect(headers?.Cookie ?? '').not.toMatch(/old-court-cookie/)
+			expect(headers?.['X-Auth-PSK'] ?? '').not.toBe('old-psk')
+		}
 	} finally {
 		await storage.close()
 	}

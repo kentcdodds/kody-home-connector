@@ -1,6 +1,11 @@
 import { expect, test } from 'vitest'
 import { getSonyIrccCode } from './commands.ts'
-import { probeSonyIrccHost, sendSonyIrccCommand } from './client.ts'
+import {
+	buildSonyIrccControlUrlCandidates,
+	createSonyIrccHttpClient,
+	probeSonyIrccHost,
+	sendSonyIrccCommand,
+} from './client.ts'
 import {
 	mockSonyBlurayHost,
 	mockSonyDmrXmlAvTransportFirst,
@@ -84,4 +89,49 @@ test('IRCC send posts the SOAP envelope to the discovered control URL', async ()
 	expect(sent.ok).toBe(true)
 	expect(sent.httpStatus).toBe(200)
 	expect(urls[0]).toBe(`http://${mockSonyBlurayHost}:50001/upnp/control/IRCC`)
+})
+
+test('discovered control URLs on another host are ignored', async () => {
+	const crossHost = 'http://169.254.169.254:80/sony/ircc'
+	expect(
+		buildSonyIrccControlUrlCandidates({
+			host: mockSonyBlurayHost,
+			discoveredControlUrl: crossHost,
+		}),
+	).not.toContain(crossHost)
+
+	const urls: Array<string> = []
+	const http: SonyIrccHttpClient = async (request) => {
+		urls.push(request.url)
+		expect(request.headers?.Cookie ?? '').toBe('auth=secret')
+		return { status: 200, headers: {}, body: mockSonyIrccSoapOk }
+	}
+	const sent = await sendSonyIrccCommand({
+		host: mockSonyBlurayHost,
+		http,
+		irccCode: getSonyIrccCode('play'),
+		controlUrl: crossHost,
+		authCookie: 'secret',
+		timeoutMs: 250,
+	})
+	expect(sent.ok).toBe(true)
+	expect(urls).not.toContain(crossHost)
+	expect(urls.every((url) => url.includes(mockSonyBlurayHost))).toBe(true)
+})
+
+test('Sony IRCC fetch rejects redirects', async () => {
+	const calls: Array<{ url: string; redirect?: RequestRedirect }> = []
+	const http = createSonyIrccHttpClient(async (url, init) => {
+		calls.push({
+			url: String(url),
+			redirect: init?.redirect,
+		})
+		return new Response('ok', { status: 200 })
+	})
+	await http({
+		url: `http://${mockSonyBlurayHost}:50001/Ircc.xml`,
+		method: 'GET',
+		timeoutMs: 250,
+	})
+	expect(calls[0]?.redirect).toBe('error')
 })

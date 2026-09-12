@@ -172,7 +172,9 @@ test('court Blu-ray host env is optional and never defaults to the Sony camera',
 			...requiredConfigEnv,
 			COURT_BLURAY_HOST: undefined,
 			COURT_BLURAY_MAC: undefined,
+			COURT_BLURAY_TIMEOUT_MS: undefined,
 			COURT_BLURAY_SCAN_EXTRA_HOSTS: undefined,
+			COURT_BLURAY_SCAN_CIDRS: undefined,
 		})
 		const config = loadHomeConnectorConfig()
 		expect(config.courtBlurayHost).toBeNull()

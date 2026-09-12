@@ -85,7 +85,7 @@ export async function getCourtSonyIrccPlayer(
 	)
 	if (court) return court
 	const players = await listSonyIrccPlayers(storage, connectorId)
-	return players.find((player) => player.adopted) ?? players[0] ?? null
+	return players.find((player) => player.adopted) ?? null
 }
 
 export async function getSonyIrccAuth(input: {

@@ -1,6 +1,8 @@
 import {
 	courtBlurayPlayerId,
 	courtSonyCameraNotThePlayer,
+	sonyIrccControlPathCandidates,
+	sonyIrccProbePaths,
 	type SonyIrccDisconnectReason,
 } from './types.ts'
 
@@ -92,16 +94,54 @@ export function extractIrccControlUrl(input: {
 		if (controlPath) break
 	}
 	if (!controlPath) return null
-	if (/^https?:\/\//i.test(controlPath)) return controlPath
+	if (/^https?:\/\//i.test(controlPath)) {
+		return isTrustedSonyIrccControlUrl({ host: input.host, url: controlPath })
+			? controlPath
+			: null
+	}
 	const path = controlPath.startsWith('/') ? controlPath : `/${controlPath}`
 	if (input.baseUrl) {
 		try {
-			return new URL(path, input.baseUrl).toString()
+			const resolved = new URL(path, input.baseUrl).toString()
+			return isTrustedSonyIrccControlUrl({ host: input.host, url: resolved })
+				? resolved
+				: null
 		} catch {
 			// fall through to host + default IRCC port
 		}
 	}
-	return `http://${input.host}:50001${path}`
+	const fallback = `http://${input.host}:50001${path}`
+	return isTrustedSonyIrccControlUrl({ host: input.host, url: fallback })
+		? fallback
+		: null
+}
+
+export function isTrustedSonyIrccControlUrl(input: {
+	host: string
+	url: string
+}) {
+	const host = normalizeSonyIrccHost(input.host)
+	if (!host) return false
+	try {
+		const parsed = new URL(input.url)
+		const urlHost = normalizeSonyIrccHost(parsed.hostname)
+		if (urlHost !== host) return false
+		if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')
+			return false
+		if (parsed.username || parsed.password) return false
+		const port = parsed.port
+			? Number(parsed.port)
+			: parsed.protocol === 'https:'
+				? 443
+				: 80
+		const allowedPorts = new Set<number>([
+			...sonyIrccProbePaths.map((entry) => entry.port),
+			...sonyIrccControlPathCandidates.map((entry) => entry.port),
+		])
+		return allowedPorts.has(port)
+	} catch {
+		return false
+	}
 }
 
 export function resolveScanSonyIrccPlayerId(input: {

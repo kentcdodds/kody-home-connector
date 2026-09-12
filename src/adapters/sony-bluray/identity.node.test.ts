@@ -8,6 +8,7 @@ import {
 import {
 	buildSonyIrccPlayerId,
 	extractIrccControlUrl,
+	isTrustedSonyIrccControlUrl,
 	resolveScanSonyIrccPlayerId,
 } from './identity.ts'
 import { courtBlurayPlayerId } from './types.ts'
@@ -27,6 +28,34 @@ test('extractIrccControlUrl uses the IRCC service, not the first controlURL', ()
 			baseUrl: `http://${mockSonyBlurayHost}:50001/Ircc.xml`,
 		}),
 	).toBe(`http://${mockSonyBlurayHost}:50001/upnp/control/IRCC`)
+	expect(
+		extractIrccControlUrl({
+			host: mockSonyBlurayHost,
+			body: `<?xml version="1.0"?>
+<root>
+  <device>
+    <serviceList>
+      <service>
+        <serviceType>urn:schemas-sony-com:service:IRCC:1</serviceType>
+        <controlURL>http://169.254.169.254/latest/meta-data</controlURL>
+      </service>
+    </serviceList>
+  </device>
+</root>`,
+		}),
+	).toBeNull()
+	expect(
+		isTrustedSonyIrccControlUrl({
+			host: mockSonyBlurayHost,
+			url: `http://${mockSonyBlurayHost}:50001/upnp/control/IRCC`,
+		}),
+	).toBe(true)
+	expect(
+		isTrustedSonyIrccControlUrl({
+			host: mockSonyBlurayHost,
+			url: 'http://169.254.169.254:80/sony/ircc',
+		}),
+	).toBe(false)
 })
 
 test('scan assigns court-bluray only to the env host or the first unmatched adopt', () => {
