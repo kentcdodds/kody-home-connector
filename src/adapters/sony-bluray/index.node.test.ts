@@ -55,7 +55,10 @@ function fixtureHttp(input: {
 
 function cameraHttp(): SonyIrccHttpClient {
 	return async (request) => {
-		if (request.url.includes('/Ircc.xml') || request.url.includes('actionList')) {
+		if (
+			request.url.includes('/Ircc.xml') ||
+			request.url.includes('actionList')
+		) {
 			throw new Error(`connect ECONNREFUSED ${request.url}`)
 		}
 		return { status: 200, headers: {}, body: mockSonyCameraXml }
@@ -260,7 +263,9 @@ test('scan with no hosts does not invent the Sony camera', async () => {
 	try {
 		const result = await bluray.scan()
 		expect(result.players).toEqual([])
-		expect(result.rejected[0]?.reason).not.toMatch(/192\.168\.0\.115 is the player/)
+		expect(result.rejected[0]?.reason).not.toMatch(
+			/192\.168\.0\.115 is the player/,
+		)
 		expect(JSON.stringify(result)).not.toMatch(/"host":"192\.168\.0\.115"/)
 	} finally {
 		await storage.close()

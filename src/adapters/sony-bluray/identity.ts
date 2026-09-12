@@ -6,12 +6,13 @@ import {
 export function normalizeSonyIrccHost(value: string | null | undefined) {
 	const trimmed = value?.trim() ?? ''
 	if (!trimmed) return null
-	return trimmed.replace(/^https?:\/\//i, '').replace(/\/.*$/, '').toLowerCase()
+	return trimmed
+		.replace(/^https?:\/\//i, '')
+		.replace(/\/.*$/, '')
+		.toLowerCase()
 }
 
-export function normalizeSonyIrccMacAddress(
-	value: string | null | undefined,
-) {
+export function normalizeSonyIrccMacAddress(value: string | null | undefined) {
 	if (!value) return null
 	const hex = value.replaceAll(/[^0-9A-Fa-f]/g, '').toUpperCase()
 	if (hex.length !== 12) return null
@@ -65,10 +66,9 @@ export function looksLikeSonyIrccDocument(body: string) {
 
 export function extractXmlTag(body: string, tagNames: Array<string>) {
 	for (const tagName of tagNames) {
-		const match = new RegExp(
-			`<${tagName}[^>]*>([^<]+)</${tagName}>`,
-			'i',
-		).exec(body)
+		const match = new RegExp(`<${tagName}[^>]*>([^<]+)</${tagName}>`, 'i').exec(
+			body,
+		)
 		const value = match?.[1]?.trim()
 		if (value) return value
 	}

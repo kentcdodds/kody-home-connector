@@ -196,8 +196,8 @@ Pattern (same catalog-always-present idea as `phone_*`, but unplugged is not a
 tool failure):
 
 - `bluray_status` always exists and returns
-  `{ connected: false, reason: string, ... }` when the player is unconfigured
-  or unreachable. It never throws just because the unit is off.
+  `{ connected: false, reason: string, ... }` when the player is unconfigured or
+  unreachable. It never throws just because the unit is off.
 - Transport/nav tools (`bluray_play`, d-pad, `bluray_press`, power, …) stay in
   the catalog and return that same disconnected status shape. Patch's
   `@kentcdodds/court-projector` mini-remote tab should call `bluray_status`
@@ -222,8 +222,8 @@ Blu-ray.** Ircc/actionList/dmr fail there. The connector never defaults to
 it with `reasonCode: "blocked_sony_camera"`.
 
 Live pairing needs the player powered with **network standby on**. After the
-on-screen confirm, persist the auth cookie or PSK with `bluray_set_host`. Do
-not send live IRCC POSTs from CI; unit tests use fixtures.
+on-screen confirm, persist the auth cookie or PSK with `bluray_set_host`. Do not
+send live IRCC POSTs from CI; unit tests use fixtures.
 
 IRCC codes are the public Sony BD1 category table (sonyapilib `IrccCategory.BD1`
 = 7258) plus the published TV/Bravia fallbacks. They are not yet live-verified

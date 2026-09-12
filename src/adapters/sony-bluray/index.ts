@@ -1,9 +1,6 @@
 import { type HomeConnectorConfig } from '../../config.ts'
 import { type HomeConnectorStorage } from '../../storage/index.ts'
-import {
-	getSonyIrccCode,
-	type SonyIrccCommandName,
-} from './commands.ts'
+import { getSonyIrccCode, type SonyIrccCommandName } from './commands.ts'
 import {
 	createSonyIrccHttpClient,
 	probeSonyIrccHost,
@@ -29,7 +26,6 @@ import {
 	courtBlurayPlayerId,
 	courtSonyCameraNotThePlayer,
 	sonyIrccDefaultName,
-	sonyIrccDefaultTimeoutMs,
 	type SonyIrccCommandResult,
 	type SonyIrccHttpClient,
 	type SonyIrccPersistedPlayer,
@@ -251,9 +247,9 @@ export function createSonyBlurayAdapter(input: {
 			: { authCookie: config.courtBlurayAuthCookie, psk: config.courtBlurayPsk }
 		const hasAuth = Boolean(
 			persistedAuth.authCookie ||
-				persistedAuth.psk ||
-				config.courtBlurayAuthCookie ||
-				config.courtBlurayPsk,
+			persistedAuth.psk ||
+			config.courtBlurayAuthCookie ||
+			config.courtBlurayPsk,
 		)
 
 		if (!probe.matched) {

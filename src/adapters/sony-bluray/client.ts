@@ -1,7 +1,4 @@
-import {
-	buildSonyIrccSoapEnvelope,
-	sonyIrccSoapAction,
-} from './commands.ts'
+import { buildSonyIrccSoapEnvelope, sonyIrccSoapAction } from './commands.ts'
 import {
 	extractIrccControlUrl,
 	extractXmlTag,

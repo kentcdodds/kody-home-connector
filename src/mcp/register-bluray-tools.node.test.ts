@@ -114,14 +114,7 @@ test('transport tools stay in the catalog and return the same disconnected shape
 			},
 		})
 	}
-	expect(calls).toEqual([
-		'play',
-		'pause',
-		'stop',
-		'eject',
-		'up',
-		'home',
-	])
+	expect(calls).toEqual(['play', 'pause', 'stop', 'eject', 'up', 'home'])
 })
 
 test('bluray tool descriptions mention offline status and the Sony camera', async () => {

@@ -193,19 +193,16 @@ export function registerBlurayHomeConnectorTools(input: {
 			const command = String(args['command'] ?? '')
 			if (!isSonyIrccCommandName(command)) {
 				const status = await bluray.getStatus()
-				return structuredTextResult(
-					`Unknown Blu-ray command "${command}".`,
-					{
-						...status,
-						connected: false,
-						reason: `Unknown Blu-ray command "${command}".`,
-						command,
-						irccCode: null,
-						transport: null,
-						wakeOnLan: null,
-						httpStatus: null,
-					},
-				)
+				return structuredTextResult(`Unknown Blu-ray command "${command}".`, {
+					...status,
+					connected: false,
+					reason: `Unknown Blu-ray command "${command}".`,
+					command,
+					irccCode: null,
+					transport: null,
+					wakeOnLan: null,
+					httpStatus: null,
+				})
 			}
 			const result = await bluray.press(command)
 			return structuredTextResult(statusText(result), result)
