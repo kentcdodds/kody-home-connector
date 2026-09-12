@@ -11,6 +11,10 @@ import {
 import { type HomeConnectorConfig } from '../config.ts'
 import { type HomeConnectorStorage } from '../storage/index.ts'
 import {
+	renderAuthorizeErrorPage,
+	renderAuthorizePage,
+} from './authorize-page.ts'
+import {
 	assertClientIdIsMetadataUrl,
 	assertRedirectUriIsAllowed,
 	fetchClientIdMetadataDocument,
@@ -91,23 +95,50 @@ function jsonError(status: number, error: string, description: string) {
 	return Response.json({ error, error_description: description }, { status })
 }
 
-function renderAuthorizePage(input: {
-	clientName: string
-	query: string
-	error?: string
-}) {
-	const error = input.error
-		? `<p role="alert">${escapeHtml(input.error)}</p>`
-		: ''
-	return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Authorize Kody Home</title></head><body><main><h1>Allow ${escapeHtml(input.clientName)}?</h1><p>This client will be able to call home-automation tools on this MCP server. Public <code>/authorize</code> is gated by Cloudflare Access. The LAN origin is trusted.</p>${error}<form method="post" action="/authorize"><input type="hidden" name="intent" value="approve"><input type="hidden" name="query" value="${escapeHtml(input.query)}"><button type="submit">Approve</button></form></main></body></html>`
+function homeHost(config: HomeConnectorConfig) {
+	return new URL(config.publicBaseUrl).host
 }
 
-function escapeHtml(value: string) {
-	return value
-		.replaceAll('&', '&amp;')
-		.replaceAll('<', '&lt;')
-		.replaceAll('>', '&gt;')
-		.replaceAll('"', '&quot;')
+function fallbackClientName(clientId: string) {
+	try {
+		return new URL(clientId).host || clientId
+	} catch {
+		return clientId
+	}
+}
+
+function errorPageResponse(config: HomeConnectorConfig, message: string) {
+	return htmlResponse(
+		renderAuthorizeErrorPage({ homeHost: homeHost(config), message }),
+		400,
+	)
+}
+
+/**
+ * Validates the CIMD client and its redirect URI exactly as the authorize
+ * endpoints always have; shared so GET, approve, and deny agree.
+ */
+async function resolveAuthorizedClient(input: {
+	config: HomeConnectorConfig
+	clientId: string
+	redirectUri: string
+}) {
+	assertClientIdIsMetadataUrl({
+		clientId: input.clientId,
+		allowInsecureLoopback: !input.config.publicBaseUrl.startsWith('https://'),
+	})
+	const metadata = await fetchClientIdMetadataDocument({
+		clientId: input.clientId,
+	})
+	assertRedirectUriIsAllowed({
+		redirectUri: input.redirectUri,
+		redirectUris: metadata.redirect_uris,
+	})
+	return {
+		name: metadata.client_name ?? fallbackClientName(input.clientId),
+		clientId: input.clientId,
+		redirectUri: input.redirectUri,
+	}
 }
 
 function createTokenVerifier(input: {
@@ -153,18 +184,15 @@ async function handleAuthorizeGet(input: {
 	const redirectUri = url.searchParams.get('redirect_uri') ?? ''
 	const state = url.searchParams.get('state')
 	try {
-		assertClientIdIsMetadataUrl({
+		const client = await resolveAuthorizedClient({
+			config: input.config,
 			clientId,
-			allowInsecureLoopback: !input.config.publicBaseUrl.startsWith('https://'),
-		})
-		const metadata = await fetchClientIdMetadataDocument({ clientId })
-		assertRedirectUriIsAllowed({
 			redirectUri,
-			redirectUris: metadata.redirect_uris,
 		})
 		return htmlResponse(
 			renderAuthorizePage({
-				clientName: metadata.client_name ?? clientId,
+				client,
+				homeHost: homeHost(input.config),
 				query: url.search,
 			}),
 		)
@@ -178,7 +206,7 @@ async function handleAuthorizeGet(input: {
 				state,
 			})
 		}
-		return htmlResponse(`<p>${escapeHtml(message)}</p>`, 400)
+		return errorPageResponse(input.config, message)
 	}
 }
 
@@ -201,18 +229,32 @@ async function handleAuthorizePost(input: {
 	const resource = params.get('resource') ?? input.config.mcpUrl
 	const scope = params.get('scope') ?? mcpOAuthScope
 
-	if (intent !== 'approve') {
+	if (intent !== 'approve' && intent !== 'deny') {
 		return htmlResponse(
 			renderAuthorizePage({
-				clientName: clientId,
+				client: { name: fallbackClientName(clientId), clientId, redirectUri },
+				homeHost: homeHost(input.config),
 				query,
-				error: 'Approve this client to continue.',
+				error: 'Choose Approve or Deny to continue.',
 			}),
 			400,
 		)
 	}
 
 	try {
+		if (intent === 'deny') {
+			await resolveAuthorizedClient({
+				config: input.config,
+				clientId,
+				redirectUri,
+			})
+			return oauthErrorRedirect({
+				redirectUri,
+				error: 'access_denied',
+				description: 'The resource owner denied the request.',
+				state,
+			})
+		}
 		if (params.get('response_type') !== 'code') {
 			throw new Error('response_type must be code.')
 		}
@@ -222,14 +264,10 @@ async function handleAuthorizePost(input: {
 		if (resource !== input.config.mcpUrl) {
 			throw new Error('resource must be this server MCP URL.')
 		}
-		assertClientIdIsMetadataUrl({
+		await resolveAuthorizedClient({
+			config: input.config,
 			clientId,
-			allowInsecureLoopback: !input.config.publicBaseUrl.startsWith('https://'),
-		})
-		const metadata = await fetchClientIdMetadataDocument({ clientId })
-		assertRedirectUriIsAllowed({
 			redirectUri,
-			redirectUris: metadata.redirect_uris,
 		})
 		const code = createOAuthSecret()
 		await insertAuthorizationCode(input.storage.db, {
@@ -258,7 +296,7 @@ async function handleAuthorizePost(input: {
 				state,
 			})
 		}
-		return htmlResponse(`<p>${escapeHtml(message)}</p>`, 400)
+		return errorPageResponse(input.config, message)
 	}
 }
 
