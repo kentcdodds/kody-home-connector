@@ -757,11 +757,47 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 			}
 		).players[0]!.playerId
 		expect(tools.some((tool) => tool.name === 'sonos_enqueue_uri')).toBe(true)
+		expect(tools.some((tool) => tool.name === 'sonos_select_audio_input')).toBe(
+			true,
+		)
+		expect(tools.some((tool) => tool.name === 'sonos_select_tv_input')).toBe(
+			true,
+		)
 		expect(tools.some((tool) => tool.name === 'sonos_create_favorite')).toBe(
 			true,
 		)
 		expect(tools.some((tool) => tool.name === 'sonos_delete_favorite')).toBe(
 			true,
+		)
+		const sonosLineIn = await mcp.callTool('sonos_select_audio_input', {
+			playerId: sonosPlayerId,
+		})
+		expect(sonosLineIn.structuredContent).toMatchObject({
+			playerId: sonosPlayerId,
+		})
+		const sonosAfterLineIn = await mcp.callTool('sonos_get_player_status', {
+			playerId: sonosPlayerId,
+		})
+		expect(sonosAfterLineIn.structuredContent).toMatchObject({
+			currentUri: expect.stringContaining('x-rincon-stream:'),
+		})
+		const sonosTv = await mcp.callTool('sonos_select_tv_input', {
+			playerId: sonosPlayerId,
+		})
+		expect(sonosTv.structuredContent).toMatchObject({
+			playerId: sonosPlayerId,
+			uri: expect.stringMatching(/x-sonos-htastream:.*:spdif/),
+		})
+		const sonosAfterTv = await mcp.callTool('sonos_get_player_status', {
+			playerId: sonosPlayerId,
+		})
+		expect(sonosAfterTv.structuredContent).toMatchObject({
+			currentUri: expect.stringMatching(/x-sonos-htastream:.*:spdif/),
+		})
+		expect(
+			(sonosAfterTv.structuredContent as { currentUri: string }).currentUri,
+		).not.toBe(
+			(sonosAfterLineIn.structuredContent as { currentUri: string }).currentUri,
 		)
 		const sonosEnqueueUri = await mcp.callTool('sonos_enqueue_uri', {
 			playerId: sonosPlayerId,

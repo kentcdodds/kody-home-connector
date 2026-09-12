@@ -152,6 +152,7 @@ export type SonosAudioInputStatus = {
 	leftLevel: number | null
 	rightLevel: number | null
 	lineInUri: string | null
+	tvInputUri: string | null
 }
 
 export type SonosLibraryCategory = 'artists' | 'albums' | 'tracks'

@@ -10,6 +10,7 @@ import {
 	type SonosQueueEnqueueResult,
 	type SonosQueueTrack,
 } from './types.ts'
+import { buildSonosLineInUri, buildSonosTvInputUri } from './input-uris.ts'
 
 const sonosSoapTimeoutMs = 10_000
 const sonosSoapRetryDelayMs = 250
@@ -874,6 +875,7 @@ export async function getSonosAudioInputLive(input: {
 			leftLevel: null,
 			rightLevel: null,
 			lineInUri: null,
+			tvInputUri: buildSonosTvInputUri(input.player.udn),
 		} satisfies SonosAudioInputStatus
 	}
 	const attributesXml = await audioIn(
@@ -896,7 +898,8 @@ export async function getSonosAudioInputLive(input: {
 		rightLevel: Number(
 			extractTag(lineLevelXml, 'CurrentRightLineInLevel') ?? '0',
 		),
-		lineInUri: `x-rincon-stream:${stripSonosUuidPrefix(input.player.udn)}`,
+		lineInUri: buildSonosLineInUri(input.player.udn),
+		tvInputUri: buildSonosTvInputUri(input.player.udn),
 	} satisfies SonosAudioInputStatus
 }
 
@@ -906,9 +909,63 @@ export async function selectSonosAudioInputLive(input: {
 }) {
 	await setSonosTransportUriLive({
 		host: input.host,
-		uri: `x-rincon-stream:${stripSonosUuidPrefix(input.player.udn)}`,
+		uri: buildSonosLineInUri(input.player.udn),
 	})
 	await playSonosLive(input.host)
+}
+
+function getSonosSoapUpnpErrorCode(error: unknown) {
+	if (!(error instanceof Error) || error.name !== 'SonosSoapError') {
+		return null
+	}
+	const tags = (
+		error as Error & {
+			homeConnectorCaptureContext?: HomeConnectorErrorCaptureContext
+		}
+	).homeConnectorCaptureContext?.tags
+	return tags?.sonos_upnp_error ?? null
+}
+
+export function createSonosTvInputUnavailableError(input: {
+	roomName: string
+	uri: string
+}) {
+	const error = new Error(
+		`Sonos "${input.roomName}" rejected TV/HDMI input (${input.uri}). UPnP 714 means this Amp is not in Home Theater / TV Speakers mode or HDMI ARC is unavailable. Analog line-in was not selected. In the Sonos app, set the room up for TV (HDMI ARC), then retry sonos_select_tv_input. Do not use sonos_select_audio_input for court TV.`,
+	) as Error & {
+		homeConnectorCaptureContext: HomeConnectorErrorCaptureContext
+	}
+	error.name = 'SonosTvInputUnavailableError'
+	error.homeConnectorCaptureContext = {
+		shouldCapture: false,
+		tags: {
+			connector_vendor: 'sonos',
+			sonos_caller_error: 'tv_input_unavailable',
+		},
+	}
+	return error
+}
+
+export async function selectSonosTvInputLive(input: {
+	host: string
+	player: SonosPersistedPlayer
+}) {
+	const uri = buildSonosTvInputUri(input.player.udn)
+	try {
+		await setSonosTransportUriLive({
+			host: input.host,
+			uri,
+		})
+		await playSonosLive(input.host)
+	} catch (error) {
+		if (getSonosSoapUpnpErrorCode(error) === '714') {
+			throw createSonosTvInputUnavailableError({
+				roomName: input.player.roomName,
+				uri,
+			})
+		}
+		throw error
+	}
 }
 
 export async function setSonosLineInLevelLive(input: {
