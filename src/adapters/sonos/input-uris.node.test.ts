@@ -14,7 +14,5 @@ test('Amp HT TV/HDMI URI is htastream SPDIF, not analog line-in', () => {
 test('input URI helpers accept a bare RINCON id', () => {
 	const rincon = 'RINCON_804AF2A8DB1F01400'
 	expect(buildSonosLineInUri(rincon)).toBe(`x-rincon-stream:${rincon}`)
-	expect(buildSonosTvInputUri(rincon)).toBe(
-		`x-sonos-htastream:${rincon}:spdif`,
-	)
+	expect(buildSonosTvInputUri(rincon)).toBe(`x-sonos-htastream:${rincon}:spdif`)
 })

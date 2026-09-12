@@ -1241,7 +1241,7 @@ export function createSonosAdapter(input: {
 		},
 		async selectTvInput(playerId?: string) {
 			return await selectTvInput(playerId)
-		},,
+		},
 		async setLineInLevel(
 			playerId: string | undefined,
 			leftLevel: number,

@@ -209,8 +209,8 @@ MCP surface:
 `court_start_roku` resolves the Court Projector Roku by name (`/court/i`) or
 `COURT_ROKU_DEVICE_ID`, and Sport Court Sonos by room name or
 `COURT_SONOS_PLAYER_ID`. Adopt those devices first. Sport Court Amp
-(`sonos-rincon-804af2a8db1f01400` @ `192.168.1.111`) must use HDMI/TV (ARC),
-not analog line-in. `court_start_roku` calls the TV/SPDIF URI
+(`sonos-rincon-804af2a8db1f01400` @ `192.168.1.111`) must use HDMI/TV (ARC), not
+analog line-in. `court_start_roku` calls the TV/SPDIF URI
 (`x-sonos-htastream:RINCON_…:spdif`) via `sonos_select_tv_input`.
 
 ### Deploy onto kody-home.doddsfamily.us
