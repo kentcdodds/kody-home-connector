@@ -107,15 +107,18 @@ export async function upsertDiscoveredRokuDevices(
 			})
 		}
 	}
-	await storage.db.deleteMany(rokuDevices, {
-		where: and(
-			{ connector_id: connectorId, adopted: 0 },
-			notInList(
-				'device_id',
-				devices.map((device) => device.deviceId),
+	// Empty scans (failed SSDP) must not prune persisted unadopted devices.
+	if (devices.length > 0) {
+		await storage.db.deleteMany(rokuDevices, {
+			where: and(
+				{ connector_id: connectorId, adopted: 0 },
+				notInList(
+					'device_id',
+					devices.map((device) => device.deviceId),
+				),
 			),
-		),
-	})
+		})
+	}
 	return listRokuDevices(storage, connectorId)
 }
 

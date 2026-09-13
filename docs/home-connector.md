@@ -158,14 +158,17 @@ Optoma. If a power **command** returns PJLink unavailable-time (`ERR3`) — comm
 on Optoma while the lamp is already on or warming — the court tools query
 `%1POWR` and continue when the observed state already matches the request
 (`on`/`warming` for power-on, `standby`/`cooling` for standby) without sending
-IR. IR fallback is used when PJLink is unreachable (typical after a **full**
-projector off, when LAN/ping/4352/80 all go dark), or when power is still off
-after unavailable-time. Court power fails fast into IR via
+IR. Conflicting transitional states hard-fail with no IR/HDMI/Sonos/Roku side
+effects: power-on while `cooling`, or standby while `warming` (retry after the
+lamp finishes). IR fallback is used when PJLink is unreachable (typical after a
+**full** projector off, when LAN/ping/4352/80 all go dark), or when power is
+still off after unavailable-time. Court power fails fast into IR via
 `COURT_PJLINK_TIMEOUT_MS` (default 1500ms). Hard-fail only when power is still
-off/unreachable **and** IR fallback also fails. First power-on after a full off
-is IR (or physical power) unless “network standby” is enabled on the unit. Do
-not assume live PJLink during connector work while the Optoma is off. IR standby
-was the unreliable path; use PJLink standby when the LAN is up.
+off/unreachable **and** IR fallback also fails, or when cooling/warming blocks
+the requested transition. First power-on after a full off is IR (or physical
+power) unless “network standby” is enabled on the unit. Do not assume live
+PJLink during connector work while the Optoma is off. IR standby was the
+unreliable path; use PJLink standby when the LAN is up.
 
 Register the court Optoma once after deploy:
 
@@ -190,7 +193,9 @@ devices (including Court Projector) are persisted in SQLite like Sonos/PJLink
 and rehydrated on connector startup so `court_get_status.rokuDeviceId` survives
 process restart. Discovery `isAdopted` from SSDP/JSON mocks is **not** connector
 adoption; connector `adopted` / `isAdopted` stay in sync and remain false until
-`roku_adopt_device`.
+`roku_adopt_device`. An empty discovery result (failed SSDP) does **not** prune
+persisted unadopted Rokus — prune only runs when the scan returns at least one
+device (same guard as Kasa).
 
 `@kentcdodds/court-projector` (`start-court` / `shutdown`) lives in that
 package, not this repo. It should keep calling `court_start_roku` /

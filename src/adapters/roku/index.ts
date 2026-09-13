@@ -93,23 +93,36 @@ export async function adoptRoku(
 	storage?: HomeConnectorStorage,
 	connectorId?: string,
 ) {
+	const existing =
+		state.devices.find((device) => device.deviceId === deviceId) ?? null
+	if (!existing) {
+		throw new Error(`Roku device "${deviceId}" was not found.`)
+	}
+	const toPersist = syncRokuAdoptionFlags([
+		{ ...existing, adopted: true, isAdopted: true },
+	])[0]!
+	if (storage && connectorId) {
+		const persisted = await persistRokuAdoption(storage, connectorId, toPersist)
+		if (!persisted) {
+			throw new Error(`Failed to persist Roku device "${deviceId}".`)
+		}
+		const adopted = adoptRokuDevice(state, deviceId)
+		if (!adopted) {
+			throw new Error(`Roku device "${deviceId}" was not found.`)
+		}
+		setRokuDevices(
+			state,
+			syncRokuAdoptionFlags(
+				state.devices.map((device) =>
+					device.deviceId === deviceId ? persisted : device,
+				),
+			),
+		)
+		return persisted
+	}
 	const adopted = adoptRokuDevice(state, deviceId)
 	if (!adopted) {
 		throw new Error(`Roku device "${deviceId}" was not found.`)
-	}
-	if (storage && connectorId) {
-		const persisted = await persistRokuAdoption(storage, connectorId, adopted)
-		if (persisted) {
-			setRokuDevices(
-				state,
-				syncRokuAdoptionFlags(
-					state.devices.map((device) =>
-						device.deviceId === deviceId ? persisted : device,
-					),
-				),
-			)
-			return persisted
-		}
 	}
 	return adopted
 }
@@ -120,10 +133,10 @@ export async function ignoreRoku(
 	storage?: HomeConnectorStorage,
 	connectorId?: string,
 ) {
-	ignoreRokuDevice(state, deviceId)
 	if (storage && connectorId) {
 		await deleteRokuDevice(storage, connectorId, deviceId)
 	}
+	ignoreRokuDevice(state, deviceId)
 }
 
 function getDeviceOrThrow(state: HomeConnectorState, deviceId: string) {

@@ -260,6 +260,16 @@ export function createCourtAdapter(input: {
 							{ projectorId: projector.projectorId },
 							{ timeoutMs },
 						)
+						if (command === 'on' && status.power === 'cooling') {
+							throw new Error(
+								'Court projector is cooling and cannot accept power-on yet. Retry after cooldown.',
+							)
+						}
+						if (command === 'standby' && status.power === 'warming') {
+							throw new Error(
+								'Court projector is warming and cannot accept standby yet. Retry after warm-up.',
+							)
+						}
 						if (powerMatchesDesired(status.power)) {
 							return {
 								transport: 'pjlink',

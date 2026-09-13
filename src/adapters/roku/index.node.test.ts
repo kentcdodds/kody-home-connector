@@ -14,6 +14,11 @@ import {
 	getRokuStatus,
 	scanRokuDevices,
 } from './index.ts'
+import {
+	listRokuDevices,
+	persistRokuAdoption,
+	upsertDiscoveredRokuDevices,
+} from './devices/repository.ts'
 
 function createConfig() {
 	process.env.MOCKS = 'true'
@@ -223,6 +228,46 @@ test('adopted Court Projector Roku survives restart via sqlite hydrate', async (
 		const courtStatus = await courtAdapter.getStatus()
 		expect(courtStatus.rokuDeviceId).toBe(court!.deviceId)
 		await reopened.close()
+	} finally {
+		rmSync(directory, { force: true, recursive: true })
+	}
+})
+
+test('empty upsertDiscoveredRokuDevices does not prune unadopted devices', async () => {
+	const directory = mkdtempSync(path.join(tmpdir(), 'kody-roku-empty-scan-'))
+	const dbPath = path.join(directory, 'home-connector.sqlite')
+	const config = createTestHomeConnectorConfig({
+		dataPath: directory,
+		dbPath,
+	})
+
+	try {
+		const storage = await createHomeConnectorStorage(config)
+		await persistRokuAdoption(storage, config.homeConnectorId, {
+			deviceId: 'roku-s0vs348p8ac2',
+			id: 'court',
+			name: 'Court Projector',
+			location: 'http://192.168.1.98:8060/',
+			serialNumber: 'S0VS348P8AC2',
+			modelName: 'Roku Ultra',
+			isAdopted: false,
+			lastSeenAt: '2026-09-13T00:00:00.000Z',
+			controlEnabled: true,
+			adopted: false,
+		})
+		expect(await listRokuDevices(storage, config.homeConnectorId)).toHaveLength(
+			1,
+		)
+
+		await upsertDiscoveredRokuDevices(storage, config.homeConnectorId, [])
+		const remaining = await listRokuDevices(storage, config.homeConnectorId)
+		expect(remaining).toHaveLength(1)
+		expect(remaining[0]).toMatchObject({
+			deviceId: 'roku-s0vs348p8ac2',
+			name: 'Court Projector',
+			adopted: false,
+		})
+		await storage.close()
 	} finally {
 		rmSync(directory, { force: true, recursive: true })
 	}

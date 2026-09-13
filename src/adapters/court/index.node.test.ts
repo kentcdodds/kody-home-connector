@@ -256,6 +256,34 @@ test('startRoku continues when POWR returns unavailable-time but lamp is already
 	})
 })
 
+test('startRoku hard-fails when POWR unavailable and projector is cooling', async () => {
+	const state = createAppState()
+	state.devices = [courtRoku]
+	const globalCache = createFakeGlobalCache()
+	const roku = createFakeRoku()
+	const sonos = createFakeSonos()
+	const pjlink = createFakePjlink({
+		unavailableTime: true,
+		getPowerState: 'cooling',
+	})
+	const court = createCourtAdapter({
+		config: createTestHomeConnectorConfig(),
+		state,
+		globalCache: globalCache.adapter,
+		pjlink: pjlink.adapter,
+		roku: roku.adapter,
+		sonos: sonos.adapter,
+	})
+
+	await expect(court.startRoku()).rejects.toThrow(
+		/cooling and cannot accept power-on/,
+	)
+	expect(pjlink.powerQueries).toEqual(['query'])
+	expect(globalCache.sent).toEqual([])
+	expect(sonos.selectedTv).toEqual([])
+	expect(roku.keys).toEqual([])
+})
+
 test('startRoku can launch a Roku app by name', async () => {
 	const state = createAppState()
 	state.devices = [courtRoku]
