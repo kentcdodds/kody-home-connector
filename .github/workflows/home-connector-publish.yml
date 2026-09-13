@@ -140,3 +140,11 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: 📋 Published tags
+        run: |
+          echo "Published Docker tags:" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ steps.meta.outputs.tags }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "Pull on the NAS with \`IMAGE=<tag> ./start-kody-home-connector.sh\`." >> "$GITHUB_STEP_SUMMARY"
