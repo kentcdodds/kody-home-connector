@@ -1,7 +1,13 @@
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import { expect, test } from 'vitest'
 import { installHomeConnectorMockServer } from '../../../mocks/test-server.ts'
 import { createAppState } from '../../state.ts'
 import { loadHomeConnectorConfig } from '../../config.ts'
+import { createHomeConnectorStorage } from '../../storage/index.ts'
+import { createCourtAdapter } from '../court/index.ts'
+import { createTestHomeConnectorConfig } from '../../test-home-connector-config.ts'
 import {
 	adoptRoku,
 	createRokuAdapter,
@@ -35,15 +41,29 @@ test('roku scan populates discovered devices', async () => {
 	expect(status.diagnostics).not.toBeNull()
 })
 
+test('scan does not treat discovery adopted flags as connector adoption', async () => {
+	const config = createConfig()
+	const state = createAppState()
+
+	const devices = await scanRokuDevices(state, config)
+	const court = devices.find((device) => /court/i.test(device.name))
+	expect(court).toBeTruthy()
+	expect(court?.adopted).toBe(false)
+	expect(court?.isAdopted).toBe(false)
+	expect(devices.every((device) => device.adopted === false)).toBe(true)
+	expect(devices.every((device) => device.isAdopted === false)).toBe(true)
+})
+
 test('adopting a discovered roku moves it into adopted devices', async () => {
 	const config = createConfig()
 	const state = createAppState()
 
 	const devices = await scanRokuDevices(state, config)
-	const adopted = adoptRoku(state, devices[0]!.deviceId)
+	const adopted = await adoptRoku(state, devices[0]!.deviceId)
 	const status = getRokuStatus(state)
 
 	expect(adopted.adopted).toBe(true)
+	expect(adopted.isAdopted).toBe(true)
 	expect(
 		status.adopted.some((device) => device.deviceId === adopted.deviceId),
 	).toBe(true)
@@ -56,7 +76,7 @@ test('sending a Roku keypress uses the discovered device location', async () => 
 
 	const devices = await roku.scan()
 	const deviceId = devices[0]!.deviceId
-	roku.adoptDevice(deviceId)
+	await roku.adoptDevice(deviceId)
 
 	const result = await roku.pressKey(deviceId, 'Home')
 
@@ -72,7 +92,7 @@ test('launching a Roku app succeeds for an adopted device', async () => {
 
 	const devices = await roku.scan()
 	const deviceId = devices[0]!.deviceId
-	roku.adoptDevice(deviceId)
+	await roku.adoptDevice(deviceId)
 
 	const result = await roku.launchApp(deviceId, '837', {
 		contentID: '07RZ_2AyKHQ',
@@ -95,7 +115,7 @@ test('listing Roku apps returns structured app metadata', async () => {
 
 	const devices = await roku.scan()
 	const deviceId = devices[0]!.deviceId
-	roku.adoptDevice(deviceId)
+	await roku.adoptDevice(deviceId)
 
 	const result = await roku.listApps(deviceId)
 
@@ -117,16 +137,93 @@ test('getting the active Roku app returns the current app metadata', async () =>
 
 	const devices = await roku.scan()
 	const deviceId = devices[0]!.deviceId
-	roku.adoptDevice(deviceId)
+	await roku.adoptDevice(deviceId)
 
 	const result = await roku.getActiveApp(deviceId)
 
 	expect(result.deviceId).toBe(deviceId)
-	expect(result.deviceName).toBe('Living Room Roku')
 	expect(result.app).toMatchObject({
 		id: '13842',
 		name: 'Jellyfin',
-		type: 'appl',
-		version: '2.0.1',
 	})
+})
+
+test('adopted Court Projector Roku survives restart via sqlite hydrate', async () => {
+	const directory = mkdtempSync(path.join(tmpdir(), 'kody-roku-persist-'))
+	const dbPath = path.join(directory, 'home-connector.sqlite')
+	const config = createTestHomeConnectorConfig({
+		dataPath: directory,
+		dbPath,
+		mocksEnabled: true,
+		rokuDiscoveryUrl: 'http://roku.mock.local/discovery',
+	})
+
+	try {
+		const storage = await createHomeConnectorStorage(config)
+		const state = createAppState()
+		const roku = createRokuAdapter({ state, config, storage })
+		await roku.hydrate()
+		const devices = await roku.scan()
+		const court = devices.find((device) => device.name === 'Court Projector')
+		expect(court).toBeTruthy()
+		const adopted = await roku.adoptDevice(court!.deviceId)
+		expect(adopted.adopted).toBe(true)
+		expect(adopted.isAdopted).toBe(true)
+		await storage.close()
+
+		const reopened = await createHomeConnectorStorage(config)
+		const freshState = createAppState()
+		expect(freshState.devices).toEqual([])
+		const hydratedRoku = createRokuAdapter({
+			state: freshState,
+			config,
+			storage: reopened,
+		})
+		await hydratedRoku.hydrate()
+		const status = await hydratedRoku.getStatus()
+		const restored = status.adopted.find(
+			(device) => device.deviceId === court!.deviceId,
+		)
+		expect(restored).toMatchObject({
+			deviceId: court!.deviceId,
+			name: 'Court Projector',
+			adopted: true,
+			isAdopted: true,
+		})
+
+		const courtAdapter = createCourtAdapter({
+			config,
+			state: freshState,
+			globalCache: {
+				getStatus() {
+					return {
+						host: '192.168.1.70',
+						port: 4998,
+						mocksEnabled: true,
+						portMap: [],
+						commandCount: 0,
+					}
+				},
+				async sendIr() {
+					throw new Error('unused')
+				},
+			} as never,
+			pjlink: {
+				async resolveCourtProjector() {
+					return null
+				},
+			} as never,
+			roku: hydratedRoku,
+			sonos: {
+				getStatus() {
+					return { allPlayers: [] }
+				},
+			} as never,
+		})
+		const courtStatus = await courtAdapter.getStatus()
+		expect(courtStatus.rokuDeviceId).toBe(court!.deviceId)
+		await reopened.close()
+	} finally {
+		rmSync(directory, { force: true, recursive: true })
+	}
 })

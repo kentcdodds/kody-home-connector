@@ -154,12 +154,18 @@ projector).
 
 Court projector power (`court_projector_on`, `court_projector_standby`,
 `court_start_roku`, `court_shutdown`) prefers PJLink on the adopted court
-Optoma. If PJLink is unreachable — typical after a **full** projector off, when
-LAN/ping/4352/80 all go dark — those tools fail fast (`COURT_PJLINK_TIMEOUT_MS`,
-default 1500ms) and fall back to iTach IR2. First power-on after a full off is
-IR (or physical power) unless “network standby” is enabled on the unit. Do not
-assume live PJLink during connector work while the Optoma is off. IR standby was
-the unreliable path; use PJLink standby when the LAN is up.
+Optoma. If a power **command** returns PJLink unavailable-time (`ERR3`) — common
+on Optoma while the lamp is already on or warming — the court tools query
+`%1POWR` and continue when the observed state already matches the request
+(`on`/`warming` for power-on, `standby`/`cooling` for standby) without sending
+IR. IR fallback is used when PJLink is unreachable (typical after a **full**
+projector off, when LAN/ping/4352/80 all go dark), or when power is still off
+after unavailable-time. Court power fails fast into IR via
+`COURT_PJLINK_TIMEOUT_MS` (default 1500ms). Hard-fail only when power is still
+off/unreachable **and** IR fallback also fails. First power-on after a full off
+is IR (or physical power) unless “network standby” is enabled on the unit. Do
+not assume live PJLink during connector work while the Optoma is off. IR standby
+was the unreliable path; use PJLink standby when the LAN is up.
 
 Register the court Optoma once after deploy:
 
@@ -179,7 +185,12 @@ projector when more than one PJLink device is adopted. Court power tools use
 direct `pjlink_*` tools keep `PJLINK_REQUEST_TIMEOUT_MS` (default 5000).
 
 Court Roku Ultra ECP `PowerOff` / `Power` leave `power-mode=PowerOn`. There is
-no court Kasa plug. There is **no reliable Roku hard-off path**.
+no court Kasa plug. There is **no reliable Roku hard-off path**. Adopted Roku
+devices (including Court Projector) are persisted in SQLite like Sonos/PJLink
+and rehydrated on connector startup so `court_get_status.rokuDeviceId` survives
+process restart. Discovery `isAdopted` from SSDP/JSON mocks is **not** connector
+adoption; connector `adopted` / `isAdopted` stay in sync and remain false until
+`roku_adopt_device`.
 
 `@kentcdodds/court-projector` (`start-court` / `shutdown`) lives in that
 package, not this repo. It should keep calling `court_start_roku` /
@@ -296,10 +307,10 @@ app and retry.
 ### Deploy onto kody-home.doddsfamily.us
 
 This connector is not deployed by merging the PR. **Publish Home Connector**
-runs tests on every pull request. Image push happens on `main` (moves
-`latest` plus `sha-<short>`) or via **workflow_dispatch** on a branch
-(`sha-<short>` only — does not move prod `latest`). Prod today is
-`sha-f7134d6`. After merge to `main`:
+runs tests on every pull request. Image push happens on `main` (moves `latest`
+plus `sha-<short>`) or via **workflow_dispatch** on a branch (`sha-<short>` only
+— does not move prod `latest`). Prod today is `sha-f7134d6`. After merge to
+`main`:
 
 1. GitHub Actions workflow **Publish Home Connector** tests, then pushes
    `kentcdodds/kody-home-connector:latest` (and a `sha-` tag) to Docker Hub.
@@ -801,6 +812,7 @@ The connector stores a local SQLite database containing:
 - discovered Sonos players
 - managed Venstar thermostats
 - discovered and adopted PJLink projectors (optional encrypted password)
+- discovered and adopted Roku devices (connector adoption, not discovery flags)
 - court Sony IRCC Blu-ray host/MAC and optional encrypted auth cookie/PSK
 
 By default the database is stored at

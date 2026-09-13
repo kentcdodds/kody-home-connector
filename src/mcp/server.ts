@@ -128,12 +128,15 @@ export function createHomeConnectorMcpServer(input: {
 	phone: ReturnType<typeof createPhoneAdapter>
 	pjlink: ReturnType<typeof createPjlinkAdapter>
 	bluray: ReturnType<typeof createSonyBlurayAdapter>
+	roku?: ReturnType<typeof createRokuAdapter>
 	globalCache?: ReturnType<typeof createGlobalCacheAdapter>
 }): HomeConnectorMcpServer {
-	const roku = createRokuAdapter({
-		config: input.config,
-		state: input.state,
-	})
+	const roku =
+		input.roku ??
+		createRokuAdapter({
+			config: input.config,
+			state: input.state,
+		})
 	const samsungTv = input.samsungTv
 	const lutron = input.lutron
 	const sonos = input.sonos
@@ -1455,7 +1458,7 @@ export function createHomeConnectorMcpServer(input: {
 			inputSchema: {},
 		},
 		async () => {
-			const devices = roku.getStatus().allDevices
+			const devices = (await roku.getStatus()).allDevices
 			return {
 				content: [
 					{
@@ -1516,7 +1519,7 @@ export function createHomeConnectorMcpServer(input: {
 			}),
 		},
 		async (args) => {
-			const device = roku.adoptDevice(String(args['deviceId'] ?? ''))
+			const device = await roku.adoptDevice(String(args['deviceId'] ?? ''))
 			return {
 				content: [
 					{
@@ -1540,7 +1543,7 @@ export function createHomeConnectorMcpServer(input: {
 			}),
 		},
 		async (args) => {
-			const device = roku.ignoreDevice(String(args['deviceId'] ?? ''))
+			const device = await roku.ignoreDevice(String(args['deviceId'] ?? ''))
 			return {
 				content: [
 					{
