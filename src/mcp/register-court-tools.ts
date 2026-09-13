@@ -109,7 +109,7 @@ export function registerCourtHomeConnectorTools(input: {
 			name: 'court_start_bluray',
 			title: 'Start Court Blu-ray',
 			description:
-				'Start the sport court on Blu-ray: projector ON via PJLink with a short timeout (iTach IR2 fallback), HDMI switch input 2, Sport Court Sonos HDMI/TV input, then bluray_power_on (WOL + IRCC). The Sony player is often unplugged — this still switches AV and returns `{ connected: false, reason }` for the player instead of throwing. 192.168.0.115 is the Sony camera, not the Blu-ray.',
+				'Start the sport court on Blu-ray: projector ON via PJLink with a short timeout (iTach IR2 fallback), HDMI switch input 2, Sport Court Sonos HDMI/TV input, then bluray_power_on (WOL + one BD1 Power toggle). A single toggle wakes standby without confirming the UBP/BDP power-off dialog. The Sony player is often unplugged — this still switches AV and returns `{ connected: false, reason }` for the player instead of throwing. 192.168.0.115 is the Sony camera, not the Blu-ray.',
 			...buildToolInputSchema({
 				sonosPlayerId: z.string().min(1).optional(),
 			}),

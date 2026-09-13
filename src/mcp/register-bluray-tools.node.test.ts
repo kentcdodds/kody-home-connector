@@ -123,4 +123,15 @@ test('bluray tool descriptions mention offline status and the Sony camera', asyn
 	expect(tools.get('bluray_status')?.description).toMatch(/connected: false/)
 	expect(tools.get('bluray_play')?.description).toMatch(/192\.168\.0\.115/)
 	expect(tools.get('bluray_scan')?.description).toMatch(/camera/)
+	expect(tools.get('bluray_power_off')?.description).toMatch(
+		/AAAAAwAAHFoAAAAVAw==/,
+	)
+	expect(tools.get('bluray_power_off')?.description).toMatch(/twice/)
+	expect(tools.get('bluray_power_off')?.description).toMatch(
+		/AAAAAQAAAAEAAAAvAw==/,
+	)
+	expect(tools.get('bluray_power_on')?.description).toMatch(
+		/AAAAAwAAHFoAAAAVAw==/,
+	)
+	expect(tools.get('bluray_power_on')?.description).toMatch(/one BD1 Power/)
 })
