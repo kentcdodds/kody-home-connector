@@ -89,6 +89,24 @@ export function isPjlinkProtocolError(
 	return error instanceof PjlinkProtocolError
 }
 
+export function isPjlinkUnavailableTimeError(error: unknown): boolean {
+	if (isPjlinkProtocolError(error) && error.code === 'ERR3') {
+		return true
+	}
+	const message =
+		error instanceof Error
+			? error.message
+			: typeof error === 'string'
+				? error
+				: ''
+	const normalized = message.toLowerCase()
+	return (
+		normalized.includes('unavailable time') ||
+		/%1powr=err3/i.test(message) ||
+		/\berr3\b/i.test(message)
+	)
+}
+
 export function normalizePjlinkLine(value: string) {
 	return value.replaceAll('\n', '').replaceAll('\r', '').trim()
 }

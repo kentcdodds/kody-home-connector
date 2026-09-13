@@ -42,7 +42,11 @@ import {
 } from './types.ts'
 
 export { isPjlinkUnreachableError, PjlinkUnreachableError } from './client.ts'
-export { isPjlinkProtocolError, PjlinkProtocolError } from './protocol.ts'
+export {
+	isPjlinkProtocolError,
+	isPjlinkUnavailableTimeError,
+	PjlinkProtocolError,
+} from './protocol.ts'
 export { courtOptomaDefaults } from './types.ts'
 export {
 	buildPjlinkProjectorId,
@@ -406,12 +410,16 @@ export function createPjlinkAdapter(input: {
 			})
 			return toPublicProjector(projector)
 		},
-		async getPower(selector: PjlinkProjectorSelector = {}) {
+		async getPower(
+			selector: PjlinkProjectorSelector = {},
+			options: { timeoutMs?: number } = {},
+		) {
 			return await withProjector(selector, async (projector) => {
 				const result = await sendCommand({
 					projector,
 					command: 'POWR',
 					parameter: '?',
+					timeoutMs: options.timeoutMs,
 				})
 				return {
 					projector: toPublicProjector(projector),

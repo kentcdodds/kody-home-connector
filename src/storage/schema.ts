@@ -335,6 +335,25 @@ export const pjlinkProjectors = table({
 	timestamps,
 })
 
+export const rokuDevices = table({
+	name: 'roku_devices',
+	columns: {
+		connector_id: c.text(),
+		device_id: c.text(),
+		roku_id: c.text(),
+		name: c.text(),
+		location: c.text(),
+		serial_number: c.text().nullable(),
+		model_name: c.text().nullable(),
+		adopted: c.integer(),
+		control_enabled: c.integer(),
+		last_seen_at: c.text().nullable(),
+		updated_at: c.text(),
+	},
+	primaryKey: ['connector_id', 'device_id'],
+	timestamps,
+})
+
 export const venstarThermostats = table({
 	name: 'venstar_thermostats',
 	columns: {

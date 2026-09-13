@@ -3,9 +3,11 @@ import { type HomeConnectorState } from '../../state.ts'
 import { type createGlobalCacheAdapter } from '../global-cache/index.ts'
 import { getGlobalCacheIrCommand } from '../global-cache/codes.ts'
 import {
+	isPjlinkUnavailableTimeError,
 	isPjlinkUnreachableError,
 	type createPjlinkAdapter,
 } from '../pjlink/index.ts'
+import { type PjlinkPowerState } from '../pjlink/protocol.ts'
 import { courtOptomaDefaults } from '../pjlink/types.ts'
 import { type createRokuAdapter } from '../roku/index.ts'
 import { type createSonyBlurayAdapter } from '../sony-bluray/index.ts'
@@ -158,6 +160,8 @@ export type CourtProjectorCommandResult = {
 	transport: CourtProjectorTransport
 	irFallback: boolean
 	fallbackReason: 'pjlink-unreachable' | 'pjlink-not-configured' | null
+	alreadyPowered: boolean
+	observedPower: PjlinkPowerState | null
 	pjlink: unknown
 	ir: GlobalCacheSendIrResult | null
 }
@@ -197,46 +201,156 @@ export function createCourtAdapter(input: {
 		command: 'on' | 'standby',
 	): Promise<CourtProjectorCommandResult> {
 		const irCommandId = command === 'on' ? 'projector-on' : 'projector-standby'
+		const powerCommand = command === 'on' ? ('on' as const) : ('off' as const)
+		const timeoutMs = input.config.courtPjlinkTimeoutMs
+
+		function powerMatchesDesired(power: PjlinkPowerState) {
+			if (command === 'on') {
+				return power === 'on' || power === 'warming'
+			}
+			return power === 'standby' || power === 'cooling'
+		}
+
+		async function sendIrFallback(inputFallback: {
+			fallbackReason: 'pjlink-unreachable' | 'pjlink-not-configured'
+			pjlink: unknown
+			observedPower: PjlinkPowerState | null
+		}): Promise<CourtProjectorCommandResult> {
+			const ir = await input.globalCache.sendIr(irCommandId)
+			return {
+				transport: 'itach-ir',
+				irFallback: true,
+				fallbackReason: inputFallback.fallbackReason,
+				alreadyPowered: false,
+				observedPower: inputFallback.observedPower,
+				pjlink: inputFallback.pjlink,
+				ir,
+			}
+		}
+
 		try {
 			const projector = await input.pjlink.resolveCourtProjector()
 			if (!projector) {
-				const ir = await input.globalCache.sendIr(irCommandId)
-				return {
-					transport: 'itach-ir',
-					irFallback: true,
+				return await sendIrFallback({
 					fallbackReason: 'pjlink-not-configured',
 					pjlink: null,
-					ir,
-				}
+					observedPower: null,
+				})
 			}
-			const pjlink = await input.pjlink.setPower(
-				{ projectorId: projector.projectorId },
-				command === 'on' ? 'on' : 'off',
-				{ timeoutMs: input.config.courtPjlinkTimeoutMs },
-			)
-			return {
-				transport: 'pjlink',
-				irFallback: false,
-				fallbackReason: null,
-				pjlink,
-				ir: null,
+
+			try {
+				const pjlink = await input.pjlink.setPower(
+					{ projectorId: projector.projectorId },
+					powerCommand,
+					{ timeoutMs },
+				)
+				return {
+					transport: 'pjlink',
+					irFallback: false,
+					fallbackReason: null,
+					alreadyPowered: false,
+					observedPower: pjlink.power,
+					pjlink,
+					ir: null,
+				}
+			} catch (error) {
+				if (isPjlinkUnavailableTimeError(error)) {
+					try {
+						const status = await input.pjlink.getPower(
+							{ projectorId: projector.projectorId },
+							{ timeoutMs },
+						)
+						if (command === 'on' && status.power === 'cooling') {
+							throw new Error(
+								'Court projector is cooling and cannot accept power-on yet. Retry after cooldown.',
+							)
+						}
+						if (command === 'standby' && status.power === 'warming') {
+							throw new Error(
+								'Court projector is warming and cannot accept standby yet. Retry after warm-up.',
+							)
+						}
+						if (powerMatchesDesired(status.power)) {
+							return {
+								transport: 'pjlink',
+								irFallback: false,
+								fallbackReason: null,
+								alreadyPowered: true,
+								observedPower: status.power,
+								pjlink: {
+									projector,
+									power: status.power,
+									command: 'query' as const,
+									raw: status.raw,
+									unavailableTime: true,
+									error: error instanceof Error ? error.message : String(error),
+								},
+								ir: null,
+							}
+						}
+						return await sendIrFallback({
+							fallbackReason: 'pjlink-unreachable',
+							pjlink: {
+								error: error instanceof Error ? error.message : String(error),
+								observedPower: status.power,
+								raw: status.raw,
+							},
+							observedPower: status.power,
+						})
+					} catch (queryError) {
+						if (
+							isPjlinkUnreachableError(queryError) ||
+							isPjlinkUnavailableTimeError(queryError)
+						) {
+							return await sendIrFallback({
+								fallbackReason: 'pjlink-unreachable',
+								pjlink: {
+									error: error instanceof Error ? error.message : String(error),
+									queryError:
+										queryError instanceof Error
+											? queryError.message
+											: String(queryError),
+									host: isPjlinkUnreachableError(queryError)
+										? queryError.host
+										: undefined,
+									port: isPjlinkUnreachableError(queryError)
+										? queryError.port
+										: undefined,
+								},
+								observedPower: null,
+							})
+						}
+						throw queryError
+					}
+				}
+
+				if (!isPjlinkUnreachableError(error)) {
+					throw error
+				}
+
+				return await sendIrFallback({
+					fallbackReason: 'pjlink-unreachable',
+					pjlink: {
+						error: error.message,
+						host: error.host,
+						port: error.port,
+					},
+					observedPower: null,
+				})
 			}
 		} catch (error) {
 			if (!isPjlinkUnreachableError(error)) {
 				throw error
 			}
-			const ir = await input.globalCache.sendIr(irCommandId)
-			return {
-				transport: 'itach-ir',
-				irFallback: true,
+			return await sendIrFallback({
 				fallbackReason: 'pjlink-unreachable',
 				pjlink: {
 					error: error.message,
 					host: error.host,
 					port: error.port,
 				},
-				ir,
-			}
+				observedPower: null,
+			})
 		}
 	}
 

@@ -4,6 +4,7 @@ import { createAppState } from '../../state.ts'
 import { createCourtAdapter } from './index.ts'
 import { type createGlobalCacheAdapter } from '../global-cache/index.ts'
 import {
+	PjlinkProtocolError,
 	PjlinkUnreachableError,
 	type createPjlinkAdapter,
 } from '../pjlink/index.ts'
@@ -54,10 +55,13 @@ function createFakeGlobalCache() {
 function createFakePjlink(
 	input: {
 		unreachable?: boolean
+		unavailableTime?: boolean
+		getPowerState?: 'standby' | 'on' | 'cooling' | 'warming'
 		projector?: { projectorId: string; name: string; host: string } | null
 	} = {},
 ) {
 	const commands: Array<string> = []
+	const powerQueries: Array<string> = []
 	const timeouts: Array<number | undefined> = []
 	const projector =
 		input.projector === undefined
@@ -70,6 +74,7 @@ function createFakePjlink(
 			: input.projector
 	return {
 		commands,
+		powerQueries,
 		timeouts,
 		adapter: {
 			async resolveCourtProjector() {
@@ -88,12 +93,34 @@ function createFakePjlink(
 						message: 'connect EHOSTUNREACH 192.168.0.128:4352',
 					})
 				}
+				if (input.unavailableTime) {
+					throw new PjlinkProtocolError({
+						code: 'ERR3',
+						message:
+							'PJLink unavailable time for POWR (projector is busy or cooling).',
+						raw: '%1POWR=ERR3',
+					})
+				}
 				commands.push(command)
 				return {
 					projector,
 					power: command === 'on' ? 'on' : 'standby',
 					command,
 					raw: `%1POWR=OK`,
+				}
+			},
+			async getPower(
+				_selector: { projectorId?: string } = {},
+				options: { timeoutMs?: number } = {},
+			) {
+				timeouts.push(options.timeoutMs)
+				powerQueries.push('query')
+				const power = input.getPowerState ?? 'on'
+				return {
+					projector,
+					power,
+					command: 'query' as const,
+					raw: `%1POWR=${power === 'on' ? '1' : power === 'standby' ? '0' : power === 'cooling' ? '2' : '3'}`,
 				}
 			},
 		} as unknown as ReturnType<typeof createPjlinkAdapter>,
@@ -194,6 +221,67 @@ test('startRoku powers the projector, selects HDMI 1, routes Sonos, and opens Ho
 	)
 	expect(roku.keys).toEqual(['Home'])
 	expect(result.appId).toBeNull()
+})
+
+test('startRoku continues when POWR returns unavailable-time but lamp is already on', async () => {
+	const state = createAppState()
+	state.devices = [courtRoku]
+	const globalCache = createFakeGlobalCache()
+	const roku = createFakeRoku()
+	const sonos = createFakeSonos()
+	const pjlink = createFakePjlink({
+		unavailableTime: true,
+		getPowerState: 'on',
+	})
+	const court = createCourtAdapter({
+		config: createTestHomeConnectorConfig(),
+		state,
+		globalCache: globalCache.adapter,
+		pjlink: pjlink.adapter,
+		roku: roku.adapter,
+		sonos: sonos.adapter,
+	})
+
+	const result = await court.startRoku()
+	expect(pjlink.commands).toEqual([])
+	expect(pjlink.powerQueries).toEqual(['query'])
+	expect(globalCache.sent).toEqual(['hdmi-input-1'])
+	expect(sonos.selectedTv).toEqual(['sonos-rincon-804af2a8db1f01400'])
+	expect(roku.keys).toEqual(['Home'])
+	expect(result.projector).toMatchObject({
+		transport: 'pjlink',
+		irFallback: false,
+		alreadyPowered: true,
+		observedPower: 'on',
+	})
+})
+
+test('startRoku hard-fails when POWR unavailable and projector is cooling', async () => {
+	const state = createAppState()
+	state.devices = [courtRoku]
+	const globalCache = createFakeGlobalCache()
+	const roku = createFakeRoku()
+	const sonos = createFakeSonos()
+	const pjlink = createFakePjlink({
+		unavailableTime: true,
+		getPowerState: 'cooling',
+	})
+	const court = createCourtAdapter({
+		config: createTestHomeConnectorConfig(),
+		state,
+		globalCache: globalCache.adapter,
+		pjlink: pjlink.adapter,
+		roku: roku.adapter,
+		sonos: sonos.adapter,
+	})
+
+	await expect(court.startRoku()).rejects.toThrow(
+		/cooling and cannot accept power-on/,
+	)
+	expect(pjlink.powerQueries).toEqual(['query'])
+	expect(globalCache.sent).toEqual([])
+	expect(sonos.selectedTv).toEqual([])
+	expect(roku.keys).toEqual([])
 })
 
 test('startRoku can launch a Roku app by name', async () => {

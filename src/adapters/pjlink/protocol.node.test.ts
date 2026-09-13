@@ -5,6 +5,7 @@ import {
 	encodePjlinkCommand,
 	encodePjlinkInput,
 	encodePjlinkPowerCommand,
+	isPjlinkUnavailableTimeError,
 	parsePjlinkAvMute,
 	parsePjlinkHandshake,
 	parsePjlinkInput,
@@ -81,6 +82,26 @@ test('maps PJLink error codes to protocol errors', () => {
 	expect(() => parsePjlinkResponse('%1POWR=ERR3')).toThrow(/unavailable time/)
 	expect(() => parsePjlinkResponse('PJLINK ERRA')).toThrow(
 		/authentication failed/,
+	)
+})
+
+test('detects PJLink unavailable-time errors', () => {
+	try {
+		parsePjlinkResponse('%1POWR=ERR3')
+		expect.unreachable('expected ERR3')
+	} catch (error) {
+		expect(isPjlinkUnavailableTimeError(error)).toBe(true)
+	}
+	expect(
+		isPjlinkUnavailableTimeError(
+			new Error(
+				'PJLink unavailable time for POWR (projector is busy or cooling).',
+			),
+		),
+	).toBe(true)
+	expect(isPjlinkUnavailableTimeError(new Error('%1POWR=ERR3'))).toBe(true)
+	expect(isPjlinkUnavailableTimeError(new Error('ERR2 out of parameter'))).toBe(
+		false,
 	)
 })
 

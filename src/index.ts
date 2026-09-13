@@ -6,6 +6,7 @@ import { createJellyfishAdapter } from './adapters/jellyfish/index.ts'
 import { createKasaAdapter } from './adapters/kasa/index.ts'
 import { createPhoneAdapter } from './adapters/phone/index.ts'
 import { createPjlinkAdapter } from './adapters/pjlink/index.ts'
+import { createRokuAdapter } from './adapters/roku/index.ts'
 import { createSonyBlurayAdapter } from './adapters/sony-bluray/index.ts'
 import { createLutronAdapter } from './adapters/lutron/index.ts'
 import { createSamsungTvAdapter } from './adapters/samsung-tv/index.ts'
@@ -78,6 +79,12 @@ export async function createHomeConnectorApp() {
 		state,
 		storage,
 	})
+	const roku = createRokuAdapter({
+		config,
+		state,
+		storage,
+	})
+	await roku.hydrate()
 	const bluray = createSonyBlurayAdapter({
 		config,
 		storage,
@@ -98,6 +105,7 @@ export async function createHomeConnectorApp() {
 		kasa,
 		phone,
 		pjlink,
+		roku,
 		bluray,
 	})
 	const toolRegistry = mcp.createToolRegistry()
@@ -126,6 +134,7 @@ export async function createHomeConnectorApp() {
 		kasa,
 		phone,
 		pjlink,
+		roku,
 		bluray,
 		mcp,
 		toolRegistry,

@@ -1,16 +1,24 @@
 import {
 	adoptRokuDevice,
+	deleteRokuDevice,
 	getAdoptedRokuDevices,
 	getDiscoveredRokuDevices,
+	listRokuDevices,
+	mergePersistedAdoptedRokuDevices,
+	persistRokuAdoption,
+	syncRokuAdoptionFlags,
+	upsertDiscoveredRokuDevices,
 	ignoreRokuDevice,
 	updateDiscoveredRokuDevices,
 } from './devices/repository.ts'
 import { discoverRokuDevicesWithDiagnostics } from './discovery/client.ts'
 import {
+	setRokuDevices,
 	setRokuDiscoveryDiagnostics,
 	type HomeConnectorState,
 } from '../../state.ts'
 import { type HomeConnectorConfig } from '../../config.ts'
+import { type HomeConnectorStorage } from '../../storage/index.ts'
 import {
 	type RokuActiveAppResult,
 	type RokuAppInfo,
@@ -27,20 +35,48 @@ function createDeviceId(input: RokuDiscoveredDevice) {
 export async function scanRokuDevices(
 	state: HomeConnectorState,
 	config: HomeConnectorConfig,
+	storage?: HomeConnectorStorage,
 ) {
 	const result = await discoverRokuDevicesWithDiagnostics({
 		discoveryUrl: config.rokuDiscoveryUrl,
 	})
 	const now = new Date().toISOString()
+	// Discovery `isAdopted` / mock `adopted` is NOT connector adoption.
 	const normalized = result.devices.map((device) => ({
 		...device,
 		deviceId: createDeviceId(device),
 		lastSeenAt: now,
-		adopted: device.isAdopted,
+		adopted: false,
+		isAdopted: false,
 	}))
-	updateDiscoveredRokuDevices(state, normalized)
 	setRokuDiscoveryDiagnostics(state, result.diagnostics)
-	return normalized
+
+	if (!storage) {
+		updateDiscoveredRokuDevices(state, normalized)
+		return syncRokuAdoptionFlags(state.devices)
+	}
+
+	const persisted = await upsertDiscoveredRokuDevices(
+		storage,
+		config.homeConnectorId,
+		normalized,
+	)
+	const merged = mergePersistedAdoptedRokuDevices({
+		scanned: normalized.map((device) => {
+			const known = persisted.find(
+				(entry) => entry.deviceId === device.deviceId,
+			)
+			return {
+				...device,
+				adopted: Boolean(known?.adopted),
+				isAdopted: Boolean(known?.adopted),
+				controlEnabled: known?.controlEnabled ?? device.controlEnabled,
+			}
+		}),
+		persisted,
+	})
+	setRokuDevices(state, merged)
+	return merged
 }
 
 export function getRokuStatus(state: HomeConnectorState) {
@@ -51,7 +87,39 @@ export function getRokuStatus(state: HomeConnectorState) {
 	}
 }
 
-export function adoptRoku(state: HomeConnectorState, deviceId: string) {
+export async function adoptRoku(
+	state: HomeConnectorState,
+	deviceId: string,
+	storage?: HomeConnectorStorage,
+	connectorId?: string,
+) {
+	const existing =
+		state.devices.find((device) => device.deviceId === deviceId) ?? null
+	if (!existing) {
+		throw new Error(`Roku device "${deviceId}" was not found.`)
+	}
+	const toPersist = syncRokuAdoptionFlags([
+		{ ...existing, adopted: true, isAdopted: true },
+	])[0]!
+	if (storage && connectorId) {
+		const persisted = await persistRokuAdoption(storage, connectorId, toPersist)
+		if (!persisted) {
+			throw new Error(`Failed to persist Roku device "${deviceId}".`)
+		}
+		const adopted = adoptRokuDevice(state, deviceId)
+		if (!adopted) {
+			throw new Error(`Roku device "${deviceId}" was not found.`)
+		}
+		setRokuDevices(
+			state,
+			syncRokuAdoptionFlags(
+				state.devices.map((device) =>
+					device.deviceId === deviceId ? persisted : device,
+				),
+			),
+		)
+		return persisted
+	}
 	const adopted = adoptRokuDevice(state, deviceId)
 	if (!adopted) {
 		throw new Error(`Roku device "${deviceId}" was not found.`)
@@ -59,7 +127,15 @@ export function adoptRoku(state: HomeConnectorState, deviceId: string) {
 	return adopted
 }
 
-export function ignoreRoku(state: HomeConnectorState, deviceId: string) {
+export async function ignoreRoku(
+	state: HomeConnectorState,
+	deviceId: string,
+	storage?: HomeConnectorStorage,
+	connectorId?: string,
+) {
+	if (storage && connectorId) {
+		await deleteRokuDevice(storage, connectorId, deviceId)
+	}
 	ignoreRokuDevice(state, deviceId)
 }
 
@@ -206,12 +282,38 @@ async function fetchRokuActiveApp(input: {
 export function createRokuAdapter(input: {
 	state: HomeConnectorState
 	config: HomeConnectorConfig
+	storage?: HomeConnectorStorage
 }) {
+	let hydratePromise: Promise<Array<RokuDeviceRecord>> | null = null
+
+	async function hydrate() {
+		if (!input.storage) {
+			return syncRokuAdoptionFlags(input.state.devices)
+		}
+		const devices = syncRokuAdoptionFlags(
+			await listRokuDevices(input.storage, input.config.homeConnectorId),
+		)
+		setRokuDevices(input.state, devices)
+		return devices
+	}
+
+	async function ensureHydrated() {
+		if (!input.storage) return
+		if (!hydratePromise) {
+			hydratePromise = hydrate()
+		}
+		await hydratePromise
+	}
+
 	return {
+		hydrate,
+		ensureHydrated,
 		async scan() {
-			return scanRokuDevices(input.state, input.config)
+			await ensureHydrated()
+			return scanRokuDevices(input.state, input.config, input.storage)
 		},
-		getStatus() {
+		async getStatus() {
+			await ensureHydrated()
 			const status = getRokuStatus(input.state)
 			return {
 				discovered: status.discovered,
@@ -220,15 +322,28 @@ export function createRokuAdapter(input: {
 				allDevices: [...status.adopted, ...status.discovered],
 			}
 		},
-		adoptDevice(deviceId: string) {
-			return adoptRoku(input.state, deviceId)
+		async adoptDevice(deviceId: string) {
+			await ensureHydrated()
+			return adoptRoku(
+				input.state,
+				deviceId,
+				input.storage,
+				input.config.homeConnectorId,
+			)
 		},
-		ignoreDevice(deviceId: string) {
+		async ignoreDevice(deviceId: string) {
+			await ensureHydrated()
 			const device = getDeviceOrThrow(input.state, deviceId)
-			ignoreRoku(input.state, deviceId)
+			await ignoreRoku(
+				input.state,
+				deviceId,
+				input.storage,
+				input.config.homeConnectorId,
+			)
 			return device
 		},
 		async pressKey(deviceId: string, key: string) {
+			await ensureHydrated()
 			const device = getDeviceOrThrow(input.state, deviceId)
 			if (!device.adopted) {
 				throw new Error(
@@ -245,6 +360,7 @@ export function createRokuAdapter(input: {
 			appId: string,
 			params?: Record<string, string>,
 		) {
+			await ensureHydrated()
 			const device = getDeviceOrThrow(input.state, deviceId)
 			if (!device.adopted) {
 				throw new Error(
@@ -258,6 +374,7 @@ export function createRokuAdapter(input: {
 			})
 		},
 		async listApps(deviceId: string) {
+			await ensureHydrated()
 			const device = getDeviceOrThrow(input.state, deviceId)
 			if (!device.adopted) {
 				throw new Error(
@@ -267,6 +384,7 @@ export function createRokuAdapter(input: {
 			return fetchRokuAppList({ device })
 		},
 		async getActiveApp(deviceId: string) {
+			await ensureHydrated()
 			const device = getDeviceOrThrow(input.state, deviceId)
 			if (!device.adopted) {
 				throw new Error(
