@@ -1,6 +1,11 @@
 import { type HomeConnectorConfig } from '../../config.ts'
 import { type HomeConnectorStorage } from '../../storage/index.ts'
-import { getSonyIrccCode, type SonyIrccCommandName } from './commands.ts'
+import {
+	getSonyIrccCode,
+	getSonyIrccPressCount,
+	sonyIrccBd1PowerOffGapMs,
+	type SonyIrccCommandName,
+} from './commands.ts'
 import {
 	createSonyIrccHttpClient,
 	probeSonyIrccHost,
@@ -44,8 +49,11 @@ export {
 } from './types.ts'
 export {
 	getSonyIrccCode,
+	getSonyIrccPressCount,
 	isSonyIrccCommandName,
 	sonyIrccBd1Codes,
+	sonyIrccBd1PowerOffGapMs,
+	sonyIrccBd1PowerOffPresses,
 	sonyIrccCommandNames,
 	sonyIrccTvCodes,
 	type SonyIrccCommandName,
@@ -146,17 +154,25 @@ function withCommand(
 	}
 }
 
+function defaultSleep(ms: number) {
+	return new Promise<void>((resolve) => {
+		setTimeout(resolve, ms)
+	})
+}
+
 export function createSonyBlurayAdapter(input: {
 	config: HomeConnectorConfig
 	storage: HomeConnectorStorage
 	http?: SonyIrccHttpClient
 	wakeOnLan?: SonyIrccWakeOnLanSender
+	sleep?: (ms: number) => Promise<void>
 }) {
 	const { config, storage } = input
 	const connectorId = config.homeConnectorId
 	const timeoutMs = config.courtBlurayTimeoutMs
 	const http = input.http ?? createSonyIrccHttpClient()
 	const wakeOnLan = input.wakeOnLan ?? sendWakeOnLan
+	const sleep = input.sleep ?? defaultSleep
 
 	function envHost() {
 		return normalizeSonyIrccHost(config.courtBlurayHost)
@@ -311,10 +327,12 @@ export function createSonyBlurayAdapter(input: {
 	): Promise<SonyIrccCommandResult> {
 		const status = await statusFromProbe()
 		const irccCode = getSonyIrccCode(command)
+		const presses = getSonyIrccPressCount(command)
 		if (!status.connected || !status.host) {
 			return withCommand(status, {
 				command,
 				irccCode,
+				irccPresses: 0,
 				transport: null,
 				wakeOnLan: null,
 				httpStatus: null,
@@ -327,50 +345,74 @@ export function createSonyBlurayAdapter(input: {
 					playerId: status.player.playerId,
 				})
 			: { authCookie: null, psk: null }
-		const sent = await sendSonyIrccCommand({
-			host: status.host,
-			http,
-			irccCode,
-			controlUrl: status.irccControlUrl,
-			authCookie: auth.authCookie ?? config.courtBlurayAuthCookie,
-			psk: auth.psk ?? config.courtBlurayPsk,
-			timeoutMs,
-		})
-		if (!sent.ok) {
-			return withCommand(
-				disconnectedStatus({
-					reason: sent.error ?? probeFailedReason(status.host),
-					reasonCode: 'unreachable',
-					configured: true,
-					host: status.host,
-					macAddress: status.macAddress,
-					name: status.name,
-					model: status.model,
-					manufacturer: status.manufacturer,
-					playerId: status.playerId,
-					irccControlUrl: sent.controlUrl ?? status.irccControlUrl,
-					hasAuth: status.hasAuth,
-					probedEndpoints: status.probedEndpoints,
-					player: status.player,
-				}),
-				{
-					command,
-					irccCode,
-					transport: 'ircc',
-					wakeOnLan: null,
-					httpStatus: sent.httpStatus,
-				},
-			)
+		let lastSent: Awaited<ReturnType<typeof sendSonyIrccCommand>> | null = null
+		for (let press = 1; press <= presses; press++) {
+			if (press > 1) await sleep(sonyIrccBd1PowerOffGapMs)
+			lastSent = await sendSonyIrccCommand({
+				host: status.host,
+				http,
+				irccCode,
+				controlUrl: lastSent?.controlUrl ?? status.irccControlUrl,
+				authCookie: auth.authCookie ?? config.courtBlurayAuthCookie,
+				psk: auth.psk ?? config.courtBlurayPsk,
+				timeoutMs,
+			})
+			if (!lastSent.ok) {
+				const firstOk = press > 1
+				return withCommand(
+					disconnectedStatus({
+						reason: firstOk
+							? `First IRCC ${command} press succeeded; follow-up press failed: ${lastSent.error ?? probeFailedReason(status.host)}`
+							: (lastSent.error ?? probeFailedReason(status.host)),
+						reasonCode: 'unreachable',
+						configured: true,
+						host: status.host,
+						macAddress: status.macAddress,
+						name: status.name,
+						model: status.model,
+						manufacturer: status.manufacturer,
+						playerId: status.playerId,
+						irccControlUrl: lastSent.controlUrl ?? status.irccControlUrl,
+						hasAuth: status.hasAuth,
+						probedEndpoints: status.probedEndpoints,
+						player: status.player,
+					}),
+					{
+						command,
+						irccCode,
+						irccPresses: press,
+						transport: 'ircc',
+						wakeOnLan: null,
+						httpStatus: lastSent.httpStatus,
+					},
+				)
+			}
 		}
+		const sent = lastSent
+		if (!sent) {
+			return withCommand(status, {
+				command,
+				irccCode,
+				irccPresses: 0,
+				transport: null,
+				wakeOnLan: null,
+				httpStatus: null,
+			})
+		}
+		const reason =
+			presses > 1
+				? `Sent IRCC ${command} ${String(presses)} times (BD1 Power toggle) to ${status.host}. UBP/BDP players confirm power-off on the second press.`
+				: `Sent IRCC ${command} to ${status.host}.`
 		return withCommand(
 			{
 				...status,
 				irccControlUrl: sent.controlUrl ?? status.irccControlUrl,
-				reason: `Sent IRCC ${command} to ${status.host}.`,
+				reason,
 			},
 			{
 				command,
 				irccCode,
+				irccPresses: presses,
 				transport: 'ircc',
 				wakeOnLan: null,
 				httpStatus: sent.httpStatus,
@@ -563,6 +605,7 @@ export function createSonyBlurayAdapter(input: {
 					{
 						command: 'powerOn',
 						irccCode: getSonyIrccCode('powerOn'),
+						irccPresses: 0,
 						transport: null,
 						wakeOnLan: emptyWol,
 						httpStatus: null,
@@ -582,6 +625,7 @@ export function createSonyBlurayAdapter(input: {
 					{
 						command: 'powerOn',
 						irccCode: getSonyIrccCode('powerOn'),
+						irccPresses: 0,
 						transport: null,
 						wakeOnLan: emptyWol,
 						httpStatus: null,
@@ -638,12 +682,13 @@ export function createSonyBlurayAdapter(input: {
 				return withCommand(
 					{
 						...(after.connected ? after : status),
-						reason: `Sent IRCC powerOn to ${target.host}.`,
+						reason: `Sent IRCC powerOn (BD1 Power toggle, once) to ${target.host}.`,
 						irccControlUrl: sent.controlUrl ?? status.irccControlUrl,
 					},
 					{
 						command: 'powerOn',
 						irccCode,
+						irccPresses: 1,
 						transport: 'ircc',
 						wakeOnLan: wake,
 						httpStatus: sent.httpStatus,
@@ -674,6 +719,7 @@ export function createSonyBlurayAdapter(input: {
 					{
 						command: 'powerOn',
 						irccCode,
+						irccPresses: 1,
 						transport: 'wol',
 						wakeOnLan: wake,
 						httpStatus: sent.httpStatus,
@@ -683,6 +729,7 @@ export function createSonyBlurayAdapter(input: {
 			return withCommand(failed, {
 				command: 'powerOn',
 				irccCode,
+				irccPresses: 1,
 				transport: 'ircc',
 				wakeOnLan: wake,
 				httpStatus: sent.httpStatus,

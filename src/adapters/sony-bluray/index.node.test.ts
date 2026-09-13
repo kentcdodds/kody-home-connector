@@ -4,6 +4,8 @@ import { createHomeConnectorStorage } from '../../storage/index.ts'
 import {
 	encodeSonyIrccBd1Code,
 	getSonyIrccCode,
+	getSonyIrccPressCount,
+	sonyIrccBd1PowerOffGapMs,
 	sonyIrccTvCodes,
 } from './commands.ts'
 import { createSonyBlurayAdapter } from './index.ts'
@@ -97,6 +99,7 @@ async function createFixture(
 	const config = createTestHomeConnectorConfig(overrides)
 	const storage = await createHomeConnectorStorage(config)
 	const wakeCalls: Array<{ host: string; macAddress: string }> = []
+	const sleepCalls: Array<number> = []
 	const bluray = createSonyBlurayAdapter({
 		config,
 		storage,
@@ -105,8 +108,11 @@ async function createFixture(
 			wakeCalls.push(input)
 			return { targets: ['255.255.255.255'], ports: [9, 7] }
 		},
+		sleep: async (ms) => {
+			sleepCalls.push(ms)
+		},
 	})
-	return { config, storage, bluray, wakeCalls }
+	return { config, storage, bluray, wakeCalls, sleepCalls }
 }
 
 test('bluray status is not configured when host is empty', async () => {
@@ -300,17 +306,22 @@ test('scan with no hosts does not invent the Sony camera', async () => {
 test('BD1 IRCC encoding matches sonyapilib pack format', () => {
 	expect(encodeSonyIrccBd1Code(26)).toBe('AAAAAwAAHFoAAAAaAw==')
 	expect(getSonyIrccCode('play')).toBe('AAAAAwAAHFoAAAAaAw==')
+	expect(getSonyIrccCode('eject')).toBe('AAAAAwAAHFoAAAAWAw==')
+	expect(getSonyIrccCode('home')).toBe('AAAAAwAAHFoAAABCAw==')
 })
 
-test('named powerOn and powerOff use distinct TV IRCC codes, not the BD1 toggle', () => {
-	expect(getSonyIrccCode('powerOn')).toBe(sonyIrccTvCodes.powerOn)
-	expect(getSonyIrccCode('powerOff')).toBe(sonyIrccTvCodes.powerOff)
-	expect(getSonyIrccCode('powerOn')).not.toBe(getSonyIrccCode('powerOff'))
-	expect(getSonyIrccCode('powerOn')).not.toBe(encodeSonyIrccBd1Code(21))
-	expect(getSonyIrccCode('powerOff')).not.toBe(encodeSonyIrccBd1Code(21))
+test('named powerOn and powerOff use the BD1 Power toggle, not Bravia TV codes', () => {
+	const bd1Power = encodeSonyIrccBd1Code(21)
+	expect(bd1Power).toBe('AAAAAwAAHFoAAAAVAw==')
+	expect(getSonyIrccCode('power')).toBe(bd1Power)
+	expect(getSonyIrccCode('powerOn')).toBe(bd1Power)
+	expect(getSonyIrccCode('powerOff')).toBe(bd1Power)
+	expect(getSonyIrccCode('powerOn')).not.toBe(sonyIrccTvCodes.powerOn)
+	expect(getSonyIrccCode('powerOff')).not.toBe(sonyIrccTvCodes.powerOff)
+	expect(getSonyIrccCode('powerOff', 'tv')).toBe(sonyIrccTvCodes.powerOff)
 })
 
-test('powerOn sends the discrete TV PowerOn code when IRCC is reachable', async () => {
+test('powerOn sends one BD1 Power toggle when IRCC is reachable', async () => {
 	const postedBodies: Array<string> = []
 	const { storage, bluray, wakeCalls } = await createFixture(
 		{
@@ -325,14 +336,71 @@ test('powerOn sends the discrete TV PowerOn code when IRCC is reachable', async 
 		expect(result.command).toBe('powerOn')
 		expect(result.transport).toBe('ircc')
 		expect(result.httpStatus).toBe(200)
-		expect(result.irccCode).toBe(sonyIrccTvCodes.powerOn)
+		expect(result.irccCode).toBe(encodeSonyIrccBd1Code(21))
+		expect(result.irccPresses).toBe(1)
+		expect(
+			postedBodies.filter((body) => body.includes(encodeSonyIrccBd1Code(21))),
+		).toHaveLength(1)
 		expect(
 			postedBodies.some((body) => body.includes(sonyIrccTvCodes.powerOn)),
-		).toBe(true)
-		expect(
-			postedBodies.some((body) => body.includes(encodeSonyIrccBd1Code(21))),
 		).toBe(false)
 		expect(wakeCalls).toEqual([])
+	} finally {
+		await storage.close()
+	}
+})
+
+test('powerOff sends the BD1 Power toggle twice and skips Bravia PowerOff', async () => {
+	const postedBodies: Array<string> = []
+	const { storage, bluray, sleepCalls } = await createFixture(
+		{ courtBlurayHost: mockSonyBlurayHost },
+		fixtureHttp({ postedBodies }),
+	)
+	try {
+		expect(getSonyIrccPressCount('powerOff')).toBe(2)
+		expect(getSonyIrccPressCount('powerOn')).toBe(1)
+		expect(getSonyIrccPressCount('home')).toBe(1)
+		const result = await bluray.powerOff()
+		expect(result.connected).toBe(true)
+		expect(result.command).toBe('powerOff')
+		expect(result.transport).toBe('ircc')
+		expect(result.httpStatus).toBe(200)
+		expect(result.irccCode).toBe(encodeSonyIrccBd1Code(21))
+		expect(result.irccPresses).toBe(2)
+		expect(result.reason).toMatch(/2 times/)
+		expect(sleepCalls).toEqual([sonyIrccBd1PowerOffGapMs])
+		expect(
+			postedBodies.filter((body) => body.includes(encodeSonyIrccBd1Code(21))),
+		).toHaveLength(2)
+		expect(
+			postedBodies.some((body) => body.includes(sonyIrccTvCodes.powerOff)),
+		).toBe(false)
+		const nav = await bluray.press('home')
+		expect(nav.irccCode).toBe(getSonyIrccCode('home'))
+		expect(nav.irccPresses).toBe(1)
+		const ejected = await bluray.press('eject')
+		expect(ejected.irccCode).toBe(getSonyIrccCode('eject'))
+		expect(ejected.irccPresses).toBe(1)
+	} finally {
+		await storage.close()
+	}
+})
+
+test('powerOff stops after the first failed BD1 press', async () => {
+	const postedBodies: Array<string> = []
+	const { storage, bluray, sleepCalls } = await createFixture(
+		{ courtBlurayHost: mockSonyBlurayHost },
+		fixtureHttp({ postedBodies, controlStatus: 401 }),
+	)
+	try {
+		const result = await bluray.powerOff()
+		expect(result.connected).toBe(false)
+		expect(result.irccPresses).toBe(1)
+		expect(result.httpStatus).toBe(401)
+		expect(sleepCalls).toEqual([])
+		expect(
+			postedBodies.filter((body) => body.includes(encodeSonyIrccBd1Code(21))),
+		).toHaveLength(1)
 	} finally {
 		await storage.close()
 	}

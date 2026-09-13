@@ -83,6 +83,7 @@ export type SonyIrccStatus = {
 export type SonyIrccCommandResult = SonyIrccStatus & {
 	command: string | null
 	irccCode: string | null
+	irccPresses: number
 	transport: 'ircc' | 'wol' | null
 	wakeOnLan: {
 		sent: boolean

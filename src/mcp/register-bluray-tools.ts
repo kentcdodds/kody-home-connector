@@ -185,7 +185,7 @@ export function registerBlurayHomeConnectorTools(input: {
 		{
 			name: 'bluray_press',
 			title: 'Press Court Blu-ray IRCC Command',
-			description: `Send one mapped Sony IRCC command (play/pause/stop, d-pad, home/back/options, eject, power). ${offlineCatalogNote} Patch's court-projector mini remote can call this plus bluray_status.`,
+			description: `Send one mapped Sony IRCC command (play/pause/stop, d-pad, home/back/options, eject, power). powerOff uses the BD1 Power toggle twice; powerOn / power are a single toggle. ${offlineCatalogNote} Patch's court-projector mini remote can call this plus bluray_status.`,
 			inputSchema: pressSchema.inputSchema,
 			sdkInputSchema: pressSchema.sdkInputSchema,
 		},
@@ -199,6 +199,7 @@ export function registerBlurayHomeConnectorTools(input: {
 					reason: `Unknown Blu-ray command "${command}".`,
 					command,
 					irccCode: null,
+					irccPresses: 0,
 					transport: null,
 					wakeOnLan: null,
 					httpStatus: null,
@@ -228,7 +229,7 @@ export function registerBlurayHomeConnectorTools(input: {
 		{
 			name: 'bluray_power_on',
 			title: 'Court Blu-ray Power On',
-			description: `Wake-on-LAN (when a MAC is stored) plus IRCC PowerOn. ${offlineCatalogNote} Power-on usually needs the player plugged in with network standby on.`,
+			description: `Wake-on-LAN (when a MAC is stored) plus one BD1 Power toggle (AAAAAwAAHFoAAAAVAw==). UBP/BDP players have no discrete PowerOn IRCC — Bravia AAAAAQAAAAEAAAAuAw== is ignored. A single press wakes standby; if the deck is already on it may open the power-off confirm UI instead of turning it off. ${offlineCatalogNote} Power-on usually needs the player plugged in with network standby on.`,
 			inputSchema: {},
 		},
 		async () => {
@@ -241,7 +242,7 @@ export function registerBlurayHomeConnectorTools(input: {
 		{
 			name: 'bluray_power_off',
 			title: 'Court Blu-ray Power Off',
-			description: `Send IRCC PowerOff to the court Blu-ray. ${offlineCatalogNote}`,
+			description: `Send the BD1 Power toggle (AAAAAwAAHFoAAAAVAw==) twice with a short gap. UBP-X700 / BDP-CE have no discrete PowerOff — Bravia AAAAAQAAAAEAAAAvAw== returns HTTP 200 but does not turn the player off. The first press opens the confirm dialog; the second confirms, matching the laptop BDP-CE double-power pattern. bluray_press({ command: "power" }) is a single toggle. ${offlineCatalogNote}`,
 			inputSchema: {},
 			annotations: {
 				destructiveHint: true,

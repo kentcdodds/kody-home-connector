@@ -1,9 +1,16 @@
 # Home connector Docker / NAS deploy
 
 Production image: `kentcdodds/kody-home-connector` (`latest` plus
-`sha-<short>`). After **Publish Home Connector** succeeds, pull on the Synology
-NAS (`192.168.1.234`) and restart with the start script next to
-`/volume1/docker/`.
+`sha-<short>`). After **Publish Home Connector** succeeds on `main`, pull
+`latest` on the Synology NAS (`192.168.1.234`) and restart with the start
+script next to `/volume1/docker/`.
+
+To smoke a PR without moving prod `latest` (currently `sha-f7134d6`), run
+**Publish Home Connector** → **Run workflow** on that branch, then:
+
+```bash
+IMAGE=kentcdodds/kody-home-connector:sha-<short> ./start-kody-home-connector.sh
+```
 
 ## Audiobook library mount (RW)
 

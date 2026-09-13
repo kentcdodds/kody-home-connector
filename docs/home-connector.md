@@ -226,8 +226,15 @@ on-screen confirm, persist the auth cookie or PSK with `bluray_set_host`. Do not
 send live IRCC POSTs from CI; unit tests use fixtures.
 
 IRCC codes are the public Sony BD1 category table (sonyapilib `IrccCategory.BD1`
-= 7258) plus the published TV/Bravia fallbacks. They are not yet live-verified
-against Kent's court unit.
+= 7258). UBP / BDP-CE players (including UBP-X700) ignore Bravia TV power codes:
+`AAAAAQAAAAEAAAAvAw==` (TV PowerOff) returns HTTP 200 but does not turn the deck
+off. Nav, eject, and home stay on BD1. Power uses the BD1 toggle
+`AAAAAwAAHFoAAAAVAw==` (Power=21). `bluray_power_off` / `press("powerOff")`
+sends that toggle **twice** with a 500ms gap (first press opens the confirm
+dialog; BDP-CE laptop scripts needed the second). `bluray_power_on` is WOL plus
+**one** toggle so `court_start_bluray` does not confirm power-off on a live
+unit. `bluray_press({ command: "power" })` is a single toggle. TV/Bravia codes
+remain available only via `getSonyIrccCode(name, "tv")`.
 
 For a later mini remote in `@kentcdodds/court-projector`:
 
@@ -288,7 +295,11 @@ app and retry.
 
 ### Deploy onto kody-home.doddsfamily.us
 
-This connector is not deployed by merging the PR. After merge to `main`:
+This connector is not deployed by merging the PR. **Publish Home Connector**
+runs tests on every pull request. Image push happens on `main` (moves
+`latest` plus `sha-<short>`) or via **workflow_dispatch** on a branch
+(`sha-<short>` only — does not move prod `latest`). Prod today is
+`sha-f7134d6`. After merge to `main`:
 
 1. GitHub Actions workflow **Publish Home Connector** tests, then pushes
    `kentcdodds/kody-home-connector:latest` (and a `sha-` tag) to Docker Hub.

@@ -3,18 +3,28 @@
  *
  * BD1 codes are encoded the way sonyapilib builds a category command list:
  * `base64(pack(">IIIB", fmt=3, category=7258, code, 3))`. Category 7258 is
- * `IrccCategory.BD1`. Live players can replace these after pairing via
- * `getRemoteCommandList` / `getRemoteControllerInfo`.
+ * `IrccCategory.BD1` (`AAMAABxa` in Ircc.xml). Live players can replace these
+ * after pairing via `getRemoteCommandList` / `getRemoteControllerInfo`.
  *
- * TV-style codes are the widely published Sony IRCC-IP / Bravia table. Some
- * UHD players accept those as well; `bluray_press` can send either family.
+ * UBP / BDP-CE players (UBP-X700, BDP-S*, UBP-X800M2 fixtures) speak BD1, not
+ * Bravia TV IRCC. Nav / eject / home already use this family. Power is BD1
+ * Power=21 (`AAAAAwAAHFoAAAAVAw==`) — the same toggle Flipper records for
+ * UBP-X700 (SIRC20 addr 0x1C5A, cmd 0x15) and Home Remote's Sony BD plugin
+ * uses for PowerOff. There are no discrete BD1 PowerOn / PowerOff codes.
  *
- * Do not treat these as verified against Kent's court unit — the player is
- * usually unplugged. Codes are stubbed from public Sony IRCC tables.
+ * Bravia `AAAAAQAAAAEAAAAuAw==` / `AAAAAQAAAAEAAAAvAw==` return HTTP 200 on
+ * UBP-X700 but do not change power (Patch live report, 2026-09-13). Keep the
+ * TV table for `getSonyIrccCode(name, 'tv')` only.
+ *
+ * Power-off on these decks is a two-press confirm (first press opens the
+ * dialog; BDP-CE laptop scripts needed the second). Power-on is WOL plus one
+ * toggle so `court_start_bluray` does not confirm that dialog on a live unit.
  */
 
 export const sonyIrccBd1CategoryId = 7258
 export const sonyIrccBd1Format = 3
+export const sonyIrccBd1PowerOffPresses = 2
+export const sonyIrccBd1PowerOffGapMs = 500
 
 export const sonyIrccBd1CommandIds = {
 	power: 21,
@@ -125,12 +135,12 @@ export function encodeSonyIrccBd1Code(
 }
 
 function buildBd1Codes() {
+	const power = encodeSonyIrccBd1Code(sonyIrccBd1CommandIds.power)
 	return {
-		power: encodeSonyIrccBd1Code(sonyIrccBd1CommandIds.power),
-		// BD1 Power=21 is a toggle. Named powerOn/powerOff must not use it —
-		// court_start_bluray / bluray_power_on would turn an already-on player off.
-		powerOn: sonyIrccTvCodes.powerOn,
-		powerOff: sonyIrccTvCodes.powerOff,
+		power,
+		// Same BD1 toggle for named on/off. powerOff is sent twice by the adapter.
+		powerOn: power,
+		powerOff: power,
 		eject: encodeSonyIrccBd1Code(sonyIrccBd1CommandIds.eject),
 		stop: encodeSonyIrccBd1Code(sonyIrccBd1CommandIds.stop),
 		pause: encodeSonyIrccBd1Code(sonyIrccBd1CommandIds.pause),
@@ -155,13 +165,14 @@ function buildBd1Codes() {
 
 export const sonyIrccBd1Codes = buildBd1Codes()
 
+export function getSonyIrccPressCount(command: SonyIrccCommandName) {
+	return command === 'powerOff' ? sonyIrccBd1PowerOffPresses : 1
+}
+
 export function getSonyIrccCode(
 	command: SonyIrccCommandName,
 	family: 'bd1' | 'tv' = 'bd1',
 ) {
-	if (command === 'powerOn' || command === 'powerOff') {
-		return sonyIrccTvCodes[command]
-	}
 	if (family === 'tv') {
 		const tvCode = sonyIrccTvCodes[command as keyof typeof sonyIrccTvCodes]
 		if (tvCode) return tvCode
