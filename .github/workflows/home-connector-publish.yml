@@ -4,14 +4,15 @@ on:
   push:
     branches:
       - main
+  pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: publish-home-connector
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   test:
@@ -72,6 +73,7 @@ jobs:
           exit 1
 
   publish:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     name: 🐳 Publish Docker image
     timeout-minutes: 10
@@ -123,7 +125,7 @@ jobs:
         with:
           images: ${{ vars.HOME_CONNECTOR_DOCKER_IMAGE }}
           tags: |
-            type=raw,value=latest
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
             type=sha,format=short,prefix=sha-
 
       - name: 🚀 Build and push image

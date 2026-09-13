@@ -295,7 +295,11 @@ app and retry.
 
 ### Deploy onto kody-home.doddsfamily.us
 
-This connector is not deployed by merging the PR. After merge to `main`:
+This connector is not deployed by merging the PR. **Publish Home Connector**
+runs tests on every pull request. Image push happens on `main` (moves
+`latest` plus `sha-<short>`) or via **workflow_dispatch** on a branch
+(`sha-<short>` only — does not move prod `latest`). Prod today is
+`sha-f7134d6`. After merge to `main`:
 
 1. GitHub Actions workflow **Publish Home Connector** tests, then pushes
    `kentcdodds/kody-home-connector:latest` (and a `sha-` tag) to Docker Hub.
