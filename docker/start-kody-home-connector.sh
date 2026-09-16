@@ -2,6 +2,8 @@
 # Template / merge source for the NAS start script at /volume1/docker/.
 # Copy secrets and existing -e flags from the live start-kody-home-connector.sh.
 # The important new piece is the RW audiobook share at /media/audiobooks.
+# Keep HOST_DATA_PATH mounted: OAuth refresh tokens live in that SQLite file
+# and must survive image recreate or Kody has to reauth.
 set -euo pipefail
 
 IMAGE="${IMAGE:-kentcdodds/kody-home-connector:latest}"

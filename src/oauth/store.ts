@@ -5,7 +5,9 @@ import { oauthAuthorizationCodes, oauthTokens } from '../storage/schema.ts'
 
 export const mcpOAuthScope = 'mcp'
 export const authorizationCodeTtlSeconds = 10 * 60
+/** Access-token lifetime. Unchanged since CIMD OAuth shipped; keep at 1 hour. */
 export const accessTokenTtlSeconds = 60 * 60
+/** Refresh-token lifetime. Unchanged since CIMD OAuth shipped; keep at 30 days. */
 export const refreshTokenTtlSeconds = 30 * 24 * 60 * 60
 
 export type OAuthAuthorizationCodeRecord = {
