@@ -4,9 +4,15 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { expect, test } from 'vitest'
 import { createHomeConnectorStorage } from '../storage/index.ts'
+import { oauthTokens } from '../storage/schema.ts'
 import { createTestHomeConnectorConfig } from '../test-home-connector-config.ts'
 import { createHomeMcpOAuthHandler } from './http.ts'
-import { accessTokenTtlSeconds } from './store.ts'
+import {
+	accessTokenTtlSeconds,
+	hashOAuthSecret,
+	readActiveOAuthToken,
+	refreshTokenTtlSeconds,
+} from './store.ts'
 
 const clientId = 'https://kody.codes/oauth/client-metadata.json'
 const redirectUri = 'https://kody.codes/account/mcp-servers/oauth/callback'
@@ -483,6 +489,42 @@ test('refresh grant returns a new access token and reuses the same refresh token
 		const third = (await again?.json()) as IssuedTokens
 		expect(third.refresh_token).toBe(issued.refresh_token)
 		expect(third.access_token).not.toBe(next.access_token)
+	} finally {
+		restoreFetch()
+		await storage.close()
+	}
+})
+
+test('refresh grant slides the reused refresh token expiry', async () => {
+	const { storage, oauth, config } = await createOAuthApp()
+	const restoreFetch = mockClientMetadataFetch()
+	try {
+		const token = await exchangeAuthorizationCode({
+			oauth,
+			mcpUrl: config.mcpUrl,
+		})
+		const issued = (await token?.json()) as IssuedTokens
+		const tokenHash = hashOAuthSecret(issued.refresh_token)
+		const soon = Math.floor(Date.now() / 1000) + 90
+		await storage.db.updateMany(
+			oauthTokens,
+			{ expires_at: soon },
+			{ where: { token_hash: tokenHash } },
+		)
+		const refreshed = await refreshAccessToken({
+			oauth,
+			refreshToken: issued.refresh_token,
+		})
+		expect(refreshed?.status).toBe(200)
+		const after = await readActiveOAuthToken(
+			storage.db,
+			tokenHash,
+			Math.floor(Date.now() / 1000),
+		)
+		expect(after?.expiresAt).toBeGreaterThan(soon)
+		expect(after?.expiresAt).toBeGreaterThanOrEqual(
+			Math.floor(Date.now() / 1000) + refreshTokenTtlSeconds - 2,
+		)
 	} finally {
 		restoreFetch()
 		await storage.close()

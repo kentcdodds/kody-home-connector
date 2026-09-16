@@ -31,6 +31,7 @@ import {
 	mcpOAuthScope,
 	readActiveOAuthToken,
 	refreshTokenTtlSeconds,
+	renewActiveRefreshToken,
 	revokeOAuthToken,
 } from './store.ts'
 
@@ -358,10 +359,11 @@ async function handleToken(input: {
 		) {
 			return jsonError(400, 'invalid_grant', 'Refresh token is invalid.')
 		}
-		// Reuse the presented refresh token. Rotating it would revoke the only
-		// durable credential before the client can persist a replacement; a lost
-		// /token response or a client that does not merge the new RT then forces
-		// interactive reauth. RFC 6749 refresh tokens are optional to rotate.
+		// Reuse the presented refresh token and slide its expiry. Rotating it
+		// would revoke the only durable credential before the client can persist
+		// a replacement; a lost /token response or a client that does not merge
+		// the new RT then forces interactive reauth. RFC 6749 refresh tokens are
+		// optional to rotate.
 		return issueTokens({
 			storage: input.storage,
 			clientId,
@@ -383,6 +385,16 @@ async function issueTokens(input: {
 	const accessToken = createOAuthSecret()
 	const refreshToken = input.refreshToken ?? createOAuthSecret()
 	const issuedAt = nowSeconds()
+	if (input.refreshToken) {
+		const renewed = await renewActiveRefreshToken(input.storage.db, {
+			tokenHash: hashOAuthSecret(input.refreshToken),
+			clientId: input.clientId,
+			nowSeconds: issuedAt,
+		})
+		if (!renewed) {
+			return jsonError(400, 'invalid_grant', 'Refresh token is invalid.')
+		}
+	}
 	await insertOAuthToken(input.storage.db, {
 		tokenHash: hashOAuthSecret(accessToken),
 		tokenKind: 'access',

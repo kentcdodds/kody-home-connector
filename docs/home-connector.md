@@ -31,9 +31,10 @@ OAuth tokens are opaque secrets (SHA-256 hashes in SQLite), not JWTs. There is
 no signing key to rotate or persist. `/token` always returns a `refresh_token`
 on authorization-code exchange — `offline_access` is not required; the only
 advertised scope is `mcp`. Refresh grants mint a new access token and **reuse**
-the same refresh token (they do not rotate/revoke it). That keeps a client
-connected if a refresh response is dropped or the client does not merge a
-replacement RT.
+the same refresh token (they do not rotate/revoke it), and they slide that
+token's 30-day expiry so an active client does not fall off the original grant
+date. That keeps a client connected if a refresh response is dropped or the
+client does not merge a replacement RT.
 
 Those rows live in `oauth_authorization_codes` and `oauth_tokens` in the same
 SQLite file as device state (`HOME_CONNECTOR_DATA_PATH` /
@@ -47,7 +48,8 @@ reauth. CIMD clients are not stored locally; they are re-fetched from the
 client_id URL. Changing `HOME_MCP_PUBLIC_BASE_URL` invalidates existing access
 tokens because audience must match the current MCP URL.
 
-Access tokens last 1 hour; refresh tokens last 30 days. Those TTLs have not been
+Access tokens last 1 hour; refresh tokens last 30 days from the last successful
+refresh (or the original grant if never refreshed). Those TTLs have not been
 shortened. `/revoke` still invalidates a presented access or refresh token.
 
 There is no reverse-dial Worker WebSocket, no DCR, and no leftover Worker

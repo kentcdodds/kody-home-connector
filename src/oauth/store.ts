@@ -148,3 +148,23 @@ export async function revokeOAuthToken(
 	)
 	return revoked.affectedRows === 1
 }
+
+export async function renewActiveRefreshToken(
+	db: HomeConnectorDatabase,
+	input: { tokenHash: string; clientId: string; nowSeconds: number },
+): Promise<boolean> {
+	const renewed = await db.updateMany(
+		oauthTokens,
+		{ expires_at: input.nowSeconds + refreshTokenTtlSeconds },
+		{
+			where: and(
+				{ token_hash: input.tokenHash },
+				{ token_kind: 'refresh' },
+				{ client_id: input.clientId },
+				isNull('revoked_at'),
+				gt('expires_at', input.nowSeconds),
+			),
+		},
+	)
+	return renewed.affectedRows === 1
+}
