@@ -5,7 +5,9 @@ import { oauthAuthorizationCodes, oauthTokens } from '../storage/schema.ts'
 
 export const mcpOAuthScope = 'mcp'
 export const authorizationCodeTtlSeconds = 10 * 60
+/** Access-token lifetime. Unchanged since CIMD OAuth shipped; keep at 1 hour. */
 export const accessTokenTtlSeconds = 60 * 60
+/** Refresh-token lifetime. Unchanged since CIMD OAuth shipped; keep at 30 days. */
 export const refreshTokenTtlSeconds = 30 * 24 * 60 * 60
 
 export type OAuthAuthorizationCodeRecord = {
@@ -145,4 +147,24 @@ export async function revokeOAuthToken(
 		},
 	)
 	return revoked.affectedRows === 1
+}
+
+export async function renewActiveRefreshToken(
+	db: HomeConnectorDatabase,
+	input: { tokenHash: string; clientId: string; nowSeconds: number },
+): Promise<boolean> {
+	const renewed = await db.updateMany(
+		oauthTokens,
+		{ expires_at: input.nowSeconds + refreshTokenTtlSeconds },
+		{
+			where: and(
+				{ token_hash: input.tokenHash },
+				{ token_kind: 'refresh' },
+				{ client_id: input.clientId },
+				isNull('revoked_at'),
+				gt('expires_at', input.nowSeconds),
+			),
+		},
+	)
+	return renewed.affectedRows === 1
 }

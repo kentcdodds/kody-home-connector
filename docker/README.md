@@ -3,7 +3,15 @@
 Production image: `kentcdodds/kody-home-connector` (`latest` plus
 `sha-<short>`). After **Publish Home Connector** succeeds on `main`, pull
 `latest` on the Synology NAS (`192.168.1.234`) and restart with the start script
-next to `/volume1/docker/`.
+next to `/volume1/docker/`. Keep the existing host data volume
+(`HOST_DATA_PATH`, default `/volume1/docker/kody-home-connector`) mounted at
+`/data/home-connector`. OAuth authorization codes, refresh tokens, and hashed
+access tokens live in that SQLite file. Image recreate (`docker rm` +
+`docker run`) does **not** invalidate Kody's tokens when this mount is
+unchanged. Omitting the volume, or using a `HOME_CONNECTOR_DB_PATH` inside the
+container filesystem, wipes the OAuth store and forces interactive reauth.
+Tokens are opaque hashes, not JWTs, so there is no signing key to carry across
+deploys.
 
 To smoke a PR without moving prod `latest` (currently `sha-f7134d6`), run
 **Publish Home Connector** → **Run workflow** on that branch, then:
