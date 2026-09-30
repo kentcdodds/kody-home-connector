@@ -98,7 +98,9 @@ client entry, or `remix/ui` component runtime to configure. Read-only pages are
 pages that also process form submissions dispatch on `request.method` inside a
 single action. `createRequestListener` runs without `trustProxy` because the
 container is reached directly on the LAN port; only enable it if the process is
-moved exclusively behind a trusted TLS-terminating proxy.
+moved exclusively behind a trusted TLS-terminating proxy. The listener wraps
+`router.fetch` with the OAuth and `/mcp` dispatch in `server/index.ts`, so it is
+not passed `router.fetch` directly.
 
 `home_connector_get_metadata`, `/health`, and the admin dashboard report MCP
 URL, listening state, and local tool count.
