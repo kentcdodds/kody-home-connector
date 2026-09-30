@@ -437,7 +437,7 @@ test('upgrade path is /phone/ws not /phone', async () => {
 		webSocketServer: {
 			handleUpgrade(_request, _socket, _head, callback) {
 				accepted = true
-				callback(new FakePhoneSocket() as never)
+				callback(new FakePhoneSocket() as never, _request)
 			},
 		},
 	})

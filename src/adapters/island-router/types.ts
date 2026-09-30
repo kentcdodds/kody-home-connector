@@ -52,6 +52,12 @@ export type IslandRouterKeyValue = {
 	value: string
 }
 
+export type IslandRouterHostIdentity = {
+	kind: 'ipv4' | 'ipv6' | 'mac' | 'hostname'
+	value: string
+	normalizedValue: string
+}
+
 export type IslandRouterInterfaceSummary = {
 	name: string | null
 	linkState: string | null

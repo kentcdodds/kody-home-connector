@@ -4,7 +4,8 @@ import { loadHomeConnectorConfig } from '../../config.ts'
 import { createAppState } from '../../state.ts'
 import { createHomeConnectorStorage } from '../../storage/index.ts'
 import { createLutronAdapter } from './index.ts'
-import { LutronInvalidZoneIdError } from './leap-client.ts'
+import { loadLutronInventory, LutronInvalidZoneIdError } from './leap-client.ts'
+import { mockLutronProcessors } from './fixtures.ts'
 
 function createConfig() {
 	process.env.MOCKS = 'true'
@@ -63,8 +64,11 @@ test('lutron inventory and commands work in mock mode with stored credentials', 
 
 		await lutron.authenticate(processorId)
 		const inventory = await lutron.getInventory(processorId)
-		const liveButton = inventory.sceneButtons.find(
-			(button) => button.kind === 'keypad' && button.label === 'Live',
+		expect(inventory.processor.hasStoredCredentials).toBe(true)
+		expect(inventory.processor).not.toHaveProperty('username')
+		expect(inventory.processor).not.toHaveProperty('password')
+		const liveButton = inventory.buttons.find(
+			(button) => button.label === 'Live',
 		)
 		const practicalZone = inventory.zones.find(
 			(zone) => zone.name === 'Practical Outlets',
@@ -129,4 +133,41 @@ test('lutron inventory and commands work in mock mode with stored credentials', 
 	} finally {
 		await storage.close()
 	}
+})
+
+test('live Lutron inventory omits stored credentials from its public processor', async () => {
+	const processor = {
+		...mockLutronProcessors[0]!,
+		username: 'live-lutron-user',
+		password: 'live-lutron-password',
+	}
+	const inventory = await loadLutronInventory({
+		processor,
+		credentials: {
+			username: processor.username,
+			password: processor.password,
+		},
+		createClient: async () => ({
+			login: async () => {},
+			read: async (url) =>
+				url === '/area/rootarea'
+					? {
+							Header: { StatusCode: '200 OK' },
+							Body: {
+								Area: { href: '/area/1', Name: 'Home' },
+							},
+						}
+					: { Header: { StatusCode: '204 No Content' } },
+			create: async () => ({
+				Header: { StatusCode: '204 No Content' },
+			}),
+			close: async () => {},
+		}),
+	})
+
+	expect(inventory.processor.hasStoredCredentials).toBe(true)
+	expect(inventory.processor).not.toHaveProperty('username')
+	expect(inventory.processor).not.toHaveProperty('password')
+	expect(JSON.stringify(inventory)).not.toContain('live-lutron-user')
+	expect(JSON.stringify(inventory)).not.toContain('live-lutron-password')
 })

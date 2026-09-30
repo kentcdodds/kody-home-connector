@@ -55,6 +55,7 @@ import { registerPjlinkHomeConnectorTools } from './register-pjlink-tools.ts'
 import { type HomeConnectorState } from '../state.ts'
 import {
 	buildToolInputSchema,
+	type SdkToolInputSchema,
 	type ToolInputSchema,
 } from './tool-input-schema.ts'
 
@@ -68,8 +69,8 @@ export type HomeConnectorToolDescriptor = {
 }
 
 type HomeConnectorRegisteredToolDescriptor = HomeConnectorToolDescriptor & {
-	sdkInputSchema?: ToolInputSchema
-	sdkOutputSchema?: ToolInputSchema
+	sdkInputSchema?: SdkToolInputSchema
+	sdkOutputSchema?: SdkToolInputSchema
 }
 
 type HomeConnectorToolHandler = (
@@ -85,8 +86,8 @@ type HomeConnectorToolCallContext = {
 }
 
 export type HomeConnectorHttpToolDescriptor = HomeConnectorToolDescriptor & {
-	sdkInputSchema?: ToolInputSchema
-	sdkOutputSchema?: ToolInputSchema
+	sdkInputSchema?: SdkToolInputSchema
+	sdkOutputSchema?: SdkToolInputSchema
 }
 
 export type HomeConnectorToolRegistry = {
@@ -183,8 +184,8 @@ export function createHomeConnectorMcpServer(input: {
 		string,
 		{
 			descriptor: HomeConnectorToolDescriptor
-			sdkInputSchema?: ToolInputSchema
-			sdkOutputSchema?: ToolInputSchema
+			sdkInputSchema?: SdkToolInputSchema
+			sdkOutputSchema?: SdkToolInputSchema
 			handler: HomeConnectorToolHandler
 		}
 	>()
@@ -291,16 +292,23 @@ export function createHomeConnectorMcpServer(input: {
 			{
 				title: descriptor.title,
 				description: descriptor.description,
-				inputSchema: sdkInputSchema ?? descriptor.inputSchema,
-				...(descriptor.outputSchema
-					? { outputSchema: sdkOutputSchema ?? descriptor.outputSchema }
+				inputSchema: sdkInputSchema ?? z.object({}),
+				...(descriptor.outputSchema && sdkOutputSchema
+					? { outputSchema: sdkOutputSchema }
 					: {}),
 				...(descriptor.annotations
 					? { annotations: descriptor.annotations }
 					: {}),
 			},
-			async (args, context) =>
-				await instrumentedHandler(args, getSdkToolCallContext(context)),
+			async (args, context) => {
+				if (args === null || typeof args !== 'object' || Array.isArray(args)) {
+					throw new TypeError('MCP tool arguments must be an object.')
+				}
+				return await instrumentedHandler(
+					Object.fromEntries(Object.entries(args)),
+					getSdkToolCallContext(context),
+				)
+			},
 		)
 	}
 
@@ -318,7 +326,10 @@ export function createHomeConnectorMcpServer(input: {
 		return keys.some((key) => value[key] !== undefined)
 	}
 
-	function structuredTextResult(text: string, structuredContent: unknown) {
+	function structuredTextResult(
+		text: string,
+		structuredContent: Record<string, unknown>,
+	) {
 		return {
 			content: [
 				{

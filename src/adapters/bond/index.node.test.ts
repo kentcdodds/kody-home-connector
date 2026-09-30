@@ -1,6 +1,7 @@
 import { expect, test, vi } from 'vitest'
 import { createAppState } from '../../state.ts'
 import { type HomeConnectorConfig } from '../../config.ts'
+import { createTestHomeConnectorConfig } from '../../test-home-connector-config.ts'
 import { createHomeConnectorStorage } from '../../storage/index.ts'
 import { type HomeConnectorErrorCaptureContext } from '../../sentry.ts'
 import { createBondAdapter } from './index.ts'
@@ -11,56 +12,10 @@ import {
 } from './repository.ts'
 
 function createConfig(): HomeConnectorConfig {
-	return {
-		homeConnectorId: 'default',
-		publicBaseUrl: 'http://localhost:4040',
-		mcpPath: '/mcp',
-		mcpUrl: 'http://localhost:4040/mcp',
-		sharedSecret: 'secret',
-		phoneDeviceToken: null,
-		accessNetworksUnleashedScanCidrs: ['192.168.1.10/32'],
-		accessNetworksUnleashedAllowInsecureTls: false,
-		accessNetworksUnleashedRequestTimeoutMs: 8_000,
-		islandRouterHost: null,
-		islandRouterPort: 22,
-		islandRouterUsername: null,
-		islandRouterPrivateKeyPath: null,
-		islandRouterKnownHostsPath: null,
-		islandRouterHostFingerprint: null,
-		islandRouterCommandTimeoutMs: 8_000,
-		islandRouterApiBaseUrl: 'https://my.islandrouter.com',
-		islandRouterApiRequestTimeoutMs: 8_000,
-		islandRouterApiAllowInsecureTls: false,
-		rokuDiscoveryUrl: 'http://roku.mock.local/discovery',
-		lutronDiscoveryUrl: 'http://lutron.mock.local/discovery',
-		sonosDiscoveryUrl: 'http://sonos.mock.local/discovery',
-		samsungTvDiscoveryUrl: 'http://samsung-tv.mock.local/discovery',
-		bondDiscoveryUrl: 'http://bond.mock.local/discovery',
-		bondRequestPaceMs: 0,
-		bondCircuitBreakerCooldownMs: 0,
-		jellyfishDiscoveryUrl: 'http://jellyfish.mock.local/discovery',
-		venstarScanCidrs: ['192.168.10.40/32'],
-		jellyfishScanCidrs: ['192.168.10.93/32'],
-		courtPjlinkProjectorId: null,
-		courtBlurayHost: null,
-		courtBlurayMacAddress: null,
-		courtBlurayAuthCookie: null,
-		courtBlurayPsk: null,
-		courtBlurayTimeoutMs: 1_500,
-		courtBlurayScanExtraHosts: [],
-		courtBlurayScanCidrs: [],
-		pjlinkScanCidrs: ['192.168.0.128/32'],
-		pjlinkScanExtraHosts: ['192.168.0.128'],
-		pjlinkRequestTimeoutMs: 5_000,
-		courtPjlinkTimeoutMs: 1_500,
-		audiobookLibraryPath: '/media/audiobooks',
-		ffmpegPath: 'ffmpeg',
-		audiobookImportTimeoutMs: 30 * 60 * 1000,
-		dataPath: '/tmp',
-		dbPath: ':memory:',
-		port: 4040,
+	return createTestHomeConnectorConfig({
 		mocksEnabled: false,
-	}
+		accessNetworksUnleashedAllowInsecureTls: false,
+	})
 }
 
 function createDnsFetchError(
@@ -669,13 +624,13 @@ test('bond wraps request timeouts as actionable network failures', async () => {
 			bridgeId: 'BONDTEST9',
 			instanceName: 'Body Timeout Bond',
 			lastSeenAt: '2026-04-27T21:40:00.000Z',
-			fetchImpl: async () =>
-				({
-					ok: true,
-					text: async () => {
-						throw new DOMException('The operation timed out.', 'TimeoutError')
-					},
-				}) as Response,
+			fetchImpl: async () => {
+				const response = new Response()
+				response.text = async () => {
+					throw new DOMException('The operation timed out.', 'TimeoutError')
+				}
+				return response
+			},
 			expectedMessageParts: [
 				'could not be reached while trying to fetch device mockdev1 state',
 				'Bond request timed out after 5000ms',
@@ -1022,7 +977,9 @@ test('bond coalesces duplicate device state reads while one is in flight', async
 		storage,
 	})
 	const previousFetch = globalThis.fetch
-	let resolveFetch: ((response: Response) => void) | null = null
+	let resolveFetch: (response: Response) => void = () => {
+		throw new Error('Fetch response resolver was not initialized.')
+	}
 	const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
 		const url = String(input)
 		if (url !== 'http://10.0.0.22/v2/devices/mockdev1/state') {
@@ -1055,7 +1012,7 @@ test('bond coalesces duplicate device state reads while one is in flight', async
 		const first = bond.getDeviceState('BONDTEST12', 'mockdev1')
 		const second = bond.getDeviceState('BONDTEST12', 'mockdev1')
 		await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
-		resolveFetch?.(mockJsonResponse({ position: 77, _: 's' }))
+		resolveFetch(mockJsonResponse({ position: 77, _: 's' }))
 
 		await expect(first).resolves.toMatchObject({ position: 77 })
 		await expect(second).resolves.toMatchObject({ position: 77 })

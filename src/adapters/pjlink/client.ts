@@ -150,7 +150,11 @@ export function createTcpPjlinkCommandClient(input?: {
 	return async ({ host, port, password, timeoutMs, command, parameter }) => {
 		const timeout = timeoutMs ?? defaultTimeoutMs
 		try {
-			return await runPjlinkSocket({
+			return await runPjlinkSocket<{
+				handshake: PjlinkHandshake
+				value: string
+				raw: string
+			}>({
 				host,
 				port,
 				timeoutMs: timeout,

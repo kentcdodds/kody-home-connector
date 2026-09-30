@@ -388,7 +388,12 @@ function normalizeSmartDeviceInfo(info: Record<string, unknown>): KasaSysInfo {
 				? decodeMaybeBase64Alias(info.alias)
 				: undefined),
 		relay_state:
-			typeof info.device_on === 'boolean' ? info.device_on : info.relay_state,
+			typeof info.device_on === 'boolean'
+				? info.device_on
+				: typeof info.relay_state === 'number' ||
+					  typeof info.relay_state === 'boolean'
+					? info.relay_state
+					: undefined,
 	}
 }
 

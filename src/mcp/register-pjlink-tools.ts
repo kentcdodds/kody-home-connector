@@ -11,7 +11,7 @@ import {
 } from '../adapters/pjlink/protocol.ts'
 import {
 	buildToolInputSchema,
-	type ToolInputSchema,
+	type SdkToolInputSchema,
 } from './tool-input-schema.ts'
 
 type PjlinkToolDescriptor = {
@@ -23,7 +23,7 @@ type PjlinkToolDescriptor = {
 }
 
 type PjlinkRegisteredToolDescriptor = PjlinkToolDescriptor & {
-	sdkInputSchema?: ToolInputSchema
+	sdkInputSchema?: SdkToolInputSchema
 }
 
 type PjlinkToolHandler = (
@@ -32,7 +32,7 @@ type PjlinkToolHandler = (
 
 function structuredTextResult(
 	text: string,
-	structuredContent: unknown,
+	structuredContent: Record<string, unknown>,
 ): CallToolResult {
 	return {
 		content: [

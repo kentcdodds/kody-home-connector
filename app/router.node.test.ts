@@ -1141,8 +1141,12 @@ test('dashboard starts Venstar and router reads in parallel', async () => {
 		phone,
 	} = await createAdapters(config)
 	const started: Array<string> = []
-	let resolveVenstar: (() => void) | null = null
-	let resolveRouter: (() => void) | null = null
+	let resolveVenstar: () => void = () => {
+		throw new Error('Venstar resolver was not initialized.')
+	}
+	let resolveRouter: () => void = () => {
+		throw new Error('Island router resolver was not initialized.')
+	}
 	const venstarPromise = new Promise<void>((resolve) => {
 		resolveVenstar = resolve
 	})
@@ -1183,8 +1187,8 @@ test('dashboard starts Venstar and router reads in parallel', async () => {
 		const responsePromise = router.fetch('http://example.test/')
 		await Promise.resolve()
 		expect(started).toEqual(['venstar', 'router'])
-		resolveVenstar?.()
-		resolveRouter?.()
+		resolveVenstar()
+		resolveRouter()
 		const response = await responsePromise
 		expect(response.status).toBe(200)
 	} finally {
@@ -1194,7 +1198,7 @@ test('dashboard starts Venstar and router reads in parallel', async () => {
 	}
 })
 
-test('island router status route renders configuration details and host diagnosis errors', async () => {
+test('island router status route renders configuration details', async () => {
 	const config = createConfig()
 	const {
 		state,
@@ -1228,14 +1232,13 @@ test('island router status route renders configuration details and host diagnosi
 			phone,
 		)
 		const response = await router.fetch(
-			'http://example.test/island-router/status?host=192.168.1.10',
+			'http://example.test/island-router/status',
 		)
 		expect(response.status).toBe(200)
 		const pageHtml = await response.text()
 		expect(pageHtml).toContain('Island router status')
 		expect(pageHtml).toContain('SSH configuration')
-		expect(pageHtml).toContain('Host diagnosis')
-		expect(pageHtml).toContain('Host diagnosis failed')
+		expect(pageHtml).not.toContain('Host diagnosis')
 	} finally {
 		await storage.close()
 	}

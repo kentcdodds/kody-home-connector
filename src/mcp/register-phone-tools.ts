@@ -14,7 +14,7 @@ import {
 } from '../adapters/phone/index.ts'
 import {
 	buildToolInputSchema,
-	type ToolInputSchema,
+	type SdkToolInputSchema,
 } from './tool-input-schema.ts'
 
 type PhoneToolDescriptor = {
@@ -26,7 +26,7 @@ type PhoneToolDescriptor = {
 }
 
 type PhoneRegisteredToolDescriptor = PhoneToolDescriptor & {
-	sdkInputSchema?: ToolInputSchema
+	sdkInputSchema?: SdkToolInputSchema
 }
 
 type PhoneToolHandler = (
@@ -35,7 +35,7 @@ type PhoneToolHandler = (
 
 function structuredTextResult(
 	text: string,
-	structuredContent: unknown,
+	structuredContent: Record<string, unknown>,
 ): CallToolResult {
 	return {
 		content: [

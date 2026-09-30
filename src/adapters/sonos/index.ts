@@ -430,7 +430,7 @@ export function createSonosAdapter(input: {
 			const queue = await listQueue(queuePlayer.playerId)
 			queueItemId =
 				queue.find((track) => track.position === inputArgs.position)
-					?.queueItemId ?? null
+					?.queueItemId ?? undefined
 		}
 		if (!queueItemId) {
 			throw createSonosCallerError(

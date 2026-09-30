@@ -121,7 +121,7 @@ export function createLutronAdapter(input: {
 				.map((button) => ({ kind: 'virtual' as const, ...button })),
 		]
 		return {
-			processor,
+			processor: toLutronPublicProcessor(processor),
 			areas,
 			zones,
 			controlStations,

@@ -59,10 +59,7 @@ async function createSsdpRokuFixture() {
 	})
 
 	const address = socket.address()
-	const ssdpPort =
-		typeof address === 'string'
-			? Number.parseInt(address.split(':').at(-1) || '0', 10)
-			: address.port
+	const ssdpPort = address.port
 
 	return {
 		discoveryUrl: `ssdp://127.0.0.1:${ssdpPort}?timeoutMs=200`,

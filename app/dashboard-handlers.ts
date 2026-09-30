@@ -783,7 +783,7 @@ function renderDrillDownActions(snapshot: DashboardSnapshot) {
 			href: routes.islandRouterStatus.href(),
 			title: 'Island router diagnostics',
 			description:
-				'Inspect SSH configuration readiness, live status, interfaces, neighbor cache, and host-level router diagnosis.',
+				'Inspect SSH configuration readiness, live status, interfaces, and neighbor cache.',
 			badge: {
 				label: snapshot.islandRouter.statusLabel,
 				tone: snapshot.islandRouter.tone,
@@ -1342,10 +1342,6 @@ export function createDiagnosticsHandler(deps: DashboardDependencies) {
 							href: routes.islandRouterStatus.href(),
 							label: 'Router status',
 						},
-						{
-							href: `${routes.islandRouterStatus.href()}?host=192.168.1.10`,
-							label: 'Host diagnosis example',
-						},
 					],
 				},
 				{
@@ -1683,36 +1679,14 @@ function renderInterfaceTable(
 	})
 }
 
-function getRequestedHost(request: Request) {
-	const url = new URL(request.url)
-	return url.searchParams.get('host')?.trim() || ''
-}
-
 export function createIslandRouterStatusHandler(deps: DashboardDependencies) {
 	return {
 		middleware: [],
-		async handler({ request }: { request: Request }) {
-			const requestedHost = getRequestedHost(request)
+		async handler() {
 			const routerStatus = await deps.islandRouter.getStatus()
 			const snapshot = await loadDashboardSnapshot(deps, {
 				islandRouterStatus: routerStatus,
 			})
-
-			let hostDiagnosis: Awaited<
-				ReturnType<ReturnType<typeof createIslandRouterAdapter>['diagnoseHost']>
-			> | null = null
-			let hostDiagnosisError: string | null = null
-
-			if (requestedHost) {
-				try {
-					hostDiagnosis = await deps.islandRouter.diagnoseHost({
-						host: requestedHost,
-					})
-				} catch (error) {
-					hostDiagnosisError =
-						error instanceof Error ? error.message : String(error)
-				}
-			}
 
 			return render(
 				RootLayout({
@@ -1722,7 +1696,7 @@ export function createIslandRouterStatusHandler(deps: DashboardDependencies) {
 							eyebrow: 'Island router',
 							title: 'Island router status',
 							description:
-								'Router-state diagnostics surfaced directly in the local admin UI, including SSH readiness, interface summaries, neighbors, and host-level drill-downs.',
+								'Router-state diagnostics surfaced directly in the local admin UI, including SSH readiness, interface summaries, and neighbors.',
 							actions: [
 								{ href: routes.home.href(), label: 'Dashboard' },
 								{ href: routes.diagnostics.href(), label: 'Diagnostics' },
@@ -1850,105 +1824,6 @@ export function createIslandRouterStatusHandler(deps: DashboardDependencies) {
 											'No router-side errors were reported in the current snapshot.',
 										)}
 							</section>
-						</section>
-						<section class="card">
-							<div class="card-heading">
-								<h2>Host diagnosis</h2>
-								<p class="muted">
-									Pass <code>?host=192.168.1.10</code> or a hostname to run a
-									router-side diagnosis from this page.
-								</p>
-							</div>
-							${requestedHost
-								? hostDiagnosisError
-									? renderEmptyState(
-											`Host diagnosis failed: ${hostDiagnosisError}`,
-										)
-									: hostDiagnosis
-										? html`${renderInfoRows([
-												{
-													label: 'Requested host',
-													value: hostDiagnosis.host.value,
-												},
-												{
-													label: 'Parsed kind',
-													value: hostDiagnosis.host.kind,
-												},
-												{
-													label: 'Ping',
-													value: hostDiagnosis.ping
-														? hostDiagnosis.ping.reachable
-															? 'reachable'
-															: hostDiagnosis.ping.timedOut
-																? 'timed out'
-																: 'no reply'
-														: 'not run',
-												},
-												{
-													label: 'Neighbor match',
-													value:
-														hostDiagnosis.arpEntry?.ipAddress ??
-														hostDiagnosis.arpEntry?.macAddress ??
-														'none',
-												},
-												{
-													label: 'DHCP match',
-													value:
-														hostDiagnosis.dhcpLease?.ipAddress ??
-														hostDiagnosis.dhcpLease?.macAddress ??
-														'none',
-												},
-												{
-													label: 'Recent events',
-													value: String(hostDiagnosis.recentEvents.length),
-												},
-											])}
-											${hostDiagnosis.errors.length > 0
-												? html`<ul class="list">
-														${hostDiagnosis.errors.map(
-															(error) => html`<li>${error}</li>`,
-														)}
-													</ul>`
-												: ''}
-											${hostDiagnosis.ping
-												? html`<section class="card">
-														<h3>Ping raw output</h3>
-														${renderCodeBlock(hostDiagnosis.ping.rawOutput)}
-													</section>`
-												: ''}
-											${hostDiagnosis.recentEvents.length > 0
-												? html`<section class="card">
-														<h3>Recent matching events</h3>
-														${renderDataTable({
-															headers: [
-																'Timestamp',
-																'Level',
-																'Module',
-																'Message',
-															],
-															rows: hostDiagnosis.recentEvents.map((event) => [
-																event.timestamp ?? 'unknown',
-																event.level ?? 'unknown',
-																event.module ?? 'unknown',
-																event.message,
-															]),
-														})}
-													</section>`
-												: ''}
-											${hostDiagnosis.interfaceDetails
-												? html`<section class="card">
-														<h3>Interface details</h3>
-														${renderCodeBlock(
-															hostDiagnosis.interfaceDetails.rawOutput,
-														)}
-													</section>`
-												: ''}`
-										: renderEmptyState(
-												'No host diagnosis data was produced for the requested host.',
-											)
-								: renderEmptyState(
-										'Append a host query parameter to run a router-side diagnosis from this page.',
-									)}
 						</section>
 						<section class="card-grid">
 							<section class="card">

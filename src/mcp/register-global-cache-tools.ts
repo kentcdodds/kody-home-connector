@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { type createGlobalCacheAdapter } from '../adapters/global-cache/index.ts'
 import {
 	buildToolInputSchema,
-	type ToolInputSchema,
+	type SdkToolInputSchema,
 } from './tool-input-schema.ts'
 
 type GlobalCacheToolDescriptor = {
@@ -15,7 +15,7 @@ type GlobalCacheToolDescriptor = {
 }
 
 type GlobalCacheRegisteredToolDescriptor = GlobalCacheToolDescriptor & {
-	sdkInputSchema?: ToolInputSchema
+	sdkInputSchema?: SdkToolInputSchema
 }
 
 type GlobalCacheToolHandler = (
@@ -24,7 +24,7 @@ type GlobalCacheToolHandler = (
 
 function structuredTextResult(
 	text: string,
-	structuredContent: unknown,
+	structuredContent: Record<string, unknown>,
 ): CallToolResult {
 	return {
 		content: [

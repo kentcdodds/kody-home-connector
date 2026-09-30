@@ -9,7 +9,7 @@ import {
 } from '../adapters/sony-bluray/index.ts'
 import {
 	buildToolInputSchema,
-	type ToolInputSchema,
+	type SdkToolInputSchema,
 } from './tool-input-schema.ts'
 
 type BlurayToolDescriptor = {
@@ -21,7 +21,7 @@ type BlurayToolDescriptor = {
 }
 
 type BlurayRegisteredToolDescriptor = BlurayToolDescriptor & {
-	sdkInputSchema?: ToolInputSchema
+	sdkInputSchema?: SdkToolInputSchema
 }
 
 type BlurayToolHandler = (
@@ -33,7 +33,7 @@ const offlineCatalogNote =
 
 function structuredTextResult(
 	text: string,
-	structuredContent: unknown,
+	structuredContent: Record<string, unknown>,
 ): CallToolResult {
 	return {
 		content: [

@@ -4,7 +4,7 @@ import { type createBondAdapter } from '../adapters/bond/index.ts'
 import { type HomeConnectorConfig } from '../config.ts'
 import {
 	buildToolInputSchema,
-	type ToolInputSchema,
+	type SdkToolInputSchema,
 } from './tool-input-schema.ts'
 
 type BondToolDescriptor = {
@@ -16,12 +16,19 @@ type BondToolDescriptor = {
 }
 
 type BondRegisteredToolDescriptor = BondToolDescriptor & {
-	sdkInputSchema?: ToolInputSchema
+	sdkInputSchema?: SdkToolInputSchema
 }
 
 type BondToolHandler = (
 	args: Record<string, unknown>,
 ) => Promise<CallToolResult>
+
+function toBondStructuredContent(value: unknown): Record<string, unknown> {
+	if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+		return Object.fromEntries(Object.entries(value))
+	}
+	return { result: value }
+}
 
 export function registerBondHomeConnectorTools(input: {
 	registerTool: (
@@ -459,7 +466,7 @@ export function registerBondHomeConnectorTools(input: {
 						text: 'Sent Bond Open action.',
 					},
 				],
-				structuredContent: result,
+				structuredContent: toBondStructuredContent(result),
 			}
 		},
 	)
@@ -492,7 +499,7 @@ export function registerBondHomeConnectorTools(input: {
 						text: 'Sent Bond Close action.',
 					},
 				],
-				structuredContent: result,
+				structuredContent: toBondStructuredContent(result),
 			}
 		},
 	)
@@ -525,7 +532,7 @@ export function registerBondHomeConnectorTools(input: {
 						text: 'Sent Bond Stop action.',
 					},
 				],
-				structuredContent: result,
+				structuredContent: toBondStructuredContent(result),
 			}
 		},
 	)
@@ -560,7 +567,7 @@ export function registerBondHomeConnectorTools(input: {
 						text: 'Sent Bond SetPosition action.',
 					},
 				],
-				structuredContent: result,
+				structuredContent: toBondStructuredContent(result),
 			}
 		},
 	)
@@ -600,7 +607,7 @@ export function registerBondHomeConnectorTools(input: {
 						text: `Invoked Bond device action ${String(args['action'] ?? '')}.`,
 					},
 				],
-				structuredContent: result,
+				structuredContent: toBondStructuredContent(result),
 			}
 		},
 	)
@@ -724,7 +731,7 @@ export function registerBondHomeConnectorTools(input: {
 						text: `Invoked Bond group action ${String(args['action'] ?? '')}.`,
 					},
 				],
-				structuredContent: result,
+				structuredContent: toBondStructuredContent(result),
 			}
 		},
 	)

@@ -126,7 +126,7 @@ function buildInfoSummary(info: VenstarInfoResponse) {
 	}
 }
 
-function buildOfflineSummary(message: string) {
+function buildOfflineSummary(message: string): VenstarOfflineSummary {
 	return {
 		mode: null,
 		state: null,
@@ -145,9 +145,22 @@ function buildOfflineSummary(message: string) {
 }
 
 type VenstarInfoSummary = ReturnType<typeof buildInfoSummary>
-type VenstarStatusSummary =
-	| VenstarInfoSummary
-	| (ReturnType<typeof buildOfflineSummary> & { status: 'offline' })
+type VenstarOfflineSummary = {
+	mode: null
+	state: null
+	fan: null
+	spacetemp: null
+	heattemp: null
+	cooltemp: null
+	humidity: null
+	schedule: null
+	away: null
+	setpointdelta: null
+	units: null
+	status: 'offline'
+	message: string
+}
+type VenstarStatusSummary = VenstarInfoSummary | VenstarOfflineSummary
 
 export function createVenstarAdapter(input: {
 	config: HomeConnectorConfig

@@ -141,7 +141,7 @@ export function parseAudiobookCredentials(input: {
 		})
 	}
 
-	let voucher = input.voucher
+	let voucher: unknown = input.voucher
 	if (typeof voucher === 'string') {
 		try {
 			voucher = JSON.parse(voucher) as unknown

@@ -7,7 +7,7 @@ import {
 } from '../adapters/access-networks-unleashed/index.ts'
 import {
 	buildToolInputSchema,
-	type ToolInputSchema,
+	type SdkToolInputSchema,
 } from './tool-input-schema.ts'
 
 type AccessNetworksUnleashedToolDescriptor = {
@@ -20,7 +20,7 @@ type AccessNetworksUnleashedToolDescriptor = {
 
 type AccessNetworksUnleashedRegisteredToolDescriptor =
 	AccessNetworksUnleashedToolDescriptor & {
-		sdkInputSchema?: ToolInputSchema
+		sdkInputSchema?: SdkToolInputSchema
 	}
 
 type AccessNetworksUnleashedToolHandler = (
@@ -29,7 +29,7 @@ type AccessNetworksUnleashedToolHandler = (
 
 function structuredTextResult(
 	text: string,
-	structuredContent: unknown,
+	structuredContent: Record<string, unknown>,
 ): CallToolResult {
 	return {
 		content: [

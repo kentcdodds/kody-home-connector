@@ -5,6 +5,7 @@ import { expect, test, vi } from 'vitest'
 import { type HomeConnectorConfig } from '../../config.ts'
 import { createHomeConnectorStorage } from '../../storage/index.ts'
 import { islandRouterApiCredentials } from '../../storage/schema.ts'
+import { createTestHomeConnectorConfig } from '../../test-home-connector-config.ts'
 import {
 	createIslandRouterApiAdapter,
 	islandRouterApiWriteConfirmation,
@@ -18,57 +19,13 @@ function createConfig(
 	dbPath: string,
 	overrides: Partial<HomeConnectorConfig> = {},
 ): HomeConnectorConfig {
-	return {
-		homeConnectorId: 'default',
-		publicBaseUrl: 'http://localhost:4040',
-		mcpPath: '/mcp',
-		mcpUrl: 'http://localhost:4040/mcp',
-		sharedSecret: 'secret',
-		phoneDeviceToken: null,
-		accessNetworksUnleashedScanCidrs: ['192.168.1.10/32'],
-		accessNetworksUnleashedAllowInsecureTls: false,
-		accessNetworksUnleashedRequestTimeoutMs: 8_000,
-		islandRouterHost: null,
-		islandRouterPort: 22,
-		islandRouterUsername: null,
-		islandRouterPrivateKeyPath: null,
-		islandRouterKnownHostsPath: null,
-		islandRouterHostFingerprint: null,
-		islandRouterCommandTimeoutMs: 8_000,
-		islandRouterApiBaseUrl: 'https://my.islandrouter.com',
-		islandRouterApiRequestTimeoutMs: 8_000,
-		islandRouterApiAllowInsecureTls: false,
-		rokuDiscoveryUrl: 'http://roku.mock.local/discovery',
-		samsungTvDiscoveryUrl: 'http://samsung-tv.mock.local/discovery',
-		lutronDiscoveryUrl: 'http://lutron.mock.local/discovery',
-		sonosDiscoveryUrl: 'http://sonos.mock.local/discovery',
-		bondDiscoveryUrl: 'http://bond.mock.local/discovery',
-		bondRequestPaceMs: 0,
-		bondCircuitBreakerCooldownMs: 0,
-		jellyfishDiscoveryUrl: 'http://jellyfish.mock.local/discovery',
-		venstarScanCidrs: ['192.168.10.40/32'],
-		jellyfishScanCidrs: ['192.168.10.93/32'],
-		courtPjlinkProjectorId: null,
-		courtBlurayHost: null,
-		courtBlurayMacAddress: null,
-		courtBlurayAuthCookie: null,
-		courtBlurayPsk: null,
-		courtBlurayTimeoutMs: 1_500,
-		courtBlurayScanExtraHosts: [],
-		courtBlurayScanCidrs: [],
-		pjlinkScanCidrs: ['192.168.0.128/32'],
-		pjlinkScanExtraHosts: ['192.168.0.128'],
-		pjlinkRequestTimeoutMs: 5_000,
-		courtPjlinkTimeoutMs: 1_500,
-		audiobookLibraryPath: '/media/audiobooks',
-		ffmpegPath: 'ffmpeg',
-		audiobookImportTimeoutMs: 30 * 60 * 1000,
+	return createTestHomeConnectorConfig({
 		dataPath: path.dirname(dbPath),
 		dbPath,
-		port: 4040,
 		mocksEnabled: true,
+		accessNetworksUnleashedAllowInsecureTls: false,
 		...overrides,
-	}
+	})
 }
 
 function createJsonResponse(data: unknown, status = 200) {

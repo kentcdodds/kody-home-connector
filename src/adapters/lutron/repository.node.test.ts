@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { expect, test } from 'vitest'
 import { createHomeConnectorStorage } from '../../storage/index.ts'
+import { createTestHomeConnectorConfig } from '../../test-home-connector-config.ts'
 import {
 	listLutronProcessors,
 	saveLutronCredentials,
@@ -11,20 +12,11 @@ import {
 import { mockLutronProcessors } from './fixtures.ts'
 
 function createConfig(dbPath: string) {
-	return {
-		homeConnectorId: 'default',
-		publicBaseUrl: 'http://localhost:4040',
-		mcpPath: '/mcp',
-		mcpUrl: 'http://localhost:4040/mcp',
-		sharedSecret: 'secret',
-		rokuDiscoveryUrl: 'http://roku.mock.local/discovery',
-		samsungTvDiscoveryUrl: 'http://samsung-tv.mock.local/discovery',
-		lutronDiscoveryUrl: 'http://lutron.mock.local/discovery',
+	return createTestHomeConnectorConfig({
 		dataPath: path.dirname(dbPath),
 		dbPath,
-		port: 4040,
 		mocksEnabled: true,
-	}
+	})
 }
 
 test('sqlite storage persists Lutron processors and associated credentials', async () => {

@@ -7,7 +7,7 @@ import {
 } from '../adapters/kasa/index.ts'
 import {
 	buildToolInputSchema,
-	type ToolInputSchema,
+	type SdkToolInputSchema,
 } from './tool-input-schema.ts'
 
 type KasaToolDescriptor = {
@@ -19,7 +19,7 @@ type KasaToolDescriptor = {
 }
 
 type KasaRegisteredToolDescriptor = KasaToolDescriptor & {
-	sdkInputSchema?: ToolInputSchema
+	sdkInputSchema?: SdkToolInputSchema
 }
 
 type KasaToolHandler = (
@@ -28,7 +28,7 @@ type KasaToolHandler = (
 
 function structuredTextResult(
 	text: string,
-	structuredContent: unknown,
+	structuredContent: Record<string, unknown>,
 ): CallToolResult {
 	return {
 		content: [
