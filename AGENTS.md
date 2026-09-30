@@ -17,3 +17,8 @@ Persistence uses `remix/data-table` over SQLite. Tables are declared in
 `db/migrations/<timestamp>_<slug>/up.sql`, applied at startup and via
 `HOME_CONNECTOR_DB_PATH=... npx remix db <status|migrate|rollback>`. See "Data
 layer" in `docs/home-connector.md`.
+
+Remix (`remix`, pinned to an exact version) ships its docs in the package. Start
+at `node_modules/remix/INDEX.md`, which maps workflows to the installed guides
+(`node_modules/remix/guides/`) and `remix/*` imports to their READMEs; prefer
+those over hosted docs so APIs match the installed version.

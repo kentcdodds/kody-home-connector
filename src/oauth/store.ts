@@ -72,8 +72,8 @@ export async function consumeAuthorizationCode(
 		{
 			where: and(
 				{ code_hash: codeHash },
-				isNull('consumed_at'),
-				gt('expires_at', nowSeconds),
+				isNull(oauthAuthorizationCodes.consumed_at),
+				gt(oauthAuthorizationCodes.expires_at, nowSeconds),
 			),
 		},
 	)
@@ -141,8 +141,8 @@ export async function revokeOAuthToken(
 		{
 			where: and(
 				{ token_hash: tokenHash },
-				isNull('revoked_at'),
-				gt('expires_at', nowSeconds),
+				isNull(oauthTokens.revoked_at),
+				gt(oauthTokens.expires_at, nowSeconds),
 			),
 		},
 	)
@@ -161,8 +161,8 @@ export async function renewActiveRefreshToken(
 				{ token_hash: input.tokenHash },
 				{ token_kind: 'refresh' },
 				{ client_id: input.clientId },
-				isNull('revoked_at'),
-				gt('expires_at', input.nowSeconds),
+				isNull(oauthTokens.revoked_at),
+				gt(oauthTokens.expires_at, input.nowSeconds),
 			),
 		},
 	)
