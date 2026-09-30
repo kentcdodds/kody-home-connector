@@ -1,8 +1,8 @@
-import { type VenstarThermostatConfig } from '../../config.ts'
 import {
 	type VenstarControlRequest,
 	type VenstarControlResponse,
 	type VenstarInfoResponse,
+	type VenstarManagedThermostat,
 	type VenstarRuntimesResponse,
 	type VenstarSensorsResponse,
 	type VenstarSettingsRequest,
@@ -10,14 +10,17 @@ import {
 } from './types.ts'
 
 const venstarRequestTimeoutMs = 5_000
+type VenstarThermostatConfig = Pick<VenstarManagedThermostat, 'ip'>
 
-function buildThermostatBaseUrl(thermostat: VenstarThermostatConfig) {
+function buildThermostatBaseUrl(
+	thermostat: Pick<VenstarManagedThermostat, 'ip'>,
+) {
 	const normalized = thermostat.ip.trim().replace(/^https?:\/\//i, '')
 	return `http://${normalized.replace(/\/$/, '')}`
 }
 
 function buildThermostatUrl(
-	thermostat: VenstarThermostatConfig,
+	thermostat: Pick<VenstarManagedThermostat, 'ip'>,
 	pathname: string,
 ) {
 	const path = pathname.startsWith('/') ? pathname : `/${pathname}`

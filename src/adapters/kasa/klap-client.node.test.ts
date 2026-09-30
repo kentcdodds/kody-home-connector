@@ -79,6 +79,8 @@ function respondToKlapSysinfoRequest(
 		authHash: Buffer
 		sequence: number
 		payload: Record<string, unknown>
+		deviceOn?: unknown
+		relayState?: unknown
 	},
 ) {
 	if (input.payload.method === 'get_device_info') {
@@ -96,7 +98,7 @@ function respondToKlapSysinfoRequest(
 						),
 						model: 'EP25',
 						device_id: 'device-1',
-						device_on: true,
+						device_on: input.deviceOn === undefined ? true : input.deviceOn,
 					},
 				}),
 			}),
@@ -116,7 +118,7 @@ function respondToKlapSysinfoRequest(
 						alias: 'Water recirculating pump',
 						model: 'EP25',
 						device_id: 'device-1',
-						relay_state: 1,
+						relay_state: input.relayState === undefined ? 1 : input.relayState,
 					},
 				},
 			}),
@@ -177,6 +179,8 @@ test('KLAP client authenticates and sends encrypted requests to a fake server', 
 	const authHash = generateKlapAuthHash(credentials)
 	const iv = deriveKlapIv({ localSeed, remoteSeed, authHash })
 	const requests: Array<Record<string, unknown>> = []
+	let deviceOnResponse: unknown = true
+	let relayStateResponse: unknown = 1
 
 	const server = http.createServer(async (request, response) => {
 		const url = new URL(request.url ?? '/', 'http://127.0.0.1')
@@ -213,7 +217,7 @@ test('KLAP client authenticates and sends encrypted requests to a fake server', 
 		if (url.pathname === '/app/request') {
 			expect(request.headers.cookie).toContain('TP_SESSIONID=session-123')
 			const sequence = Number(url.searchParams.get('seq'))
-			expect(sequence).toBe(iv.sequence + 1)
+			expect(sequence).toBe(iv.sequence + requests.length + 1)
 			const payload = decryptKlapRequest(body, {
 				localSeed,
 				remoteSeed,
@@ -227,6 +231,8 @@ test('KLAP client authenticates and sends encrypted requests to a fake server', 
 				authHash,
 				sequence,
 				payload,
+				deviceOn: deviceOnResponse,
+				relayState: relayStateResponse,
 			})
 			return
 		}
@@ -251,6 +257,12 @@ test('KLAP client authenticates and sends encrypted requests to a fake server', 
 	expect(requests).toEqual([
 		expect.objectContaining({ method: 'get_device_info' }),
 	])
+
+	deviceOnResponse = 'unexpected'
+	relayStateResponse = 'unexpected'
+	await expect(client.getSysInfo()).resolves.toMatchObject({
+		relay_state: undefined,
+	})
 })
 
 test('KLAP client trims handshake1 body to Content-Length when an extra byte is received', async () => {

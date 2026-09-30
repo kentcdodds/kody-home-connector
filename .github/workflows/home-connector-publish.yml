@@ -35,10 +35,10 @@ jobs:
       - name: 📥 Install Dependencies
         run: npm ci
 
-      - name: ✅ Run Home Connector Tests
+      - name: ✅ Validate Home Connector
         env:
           NODE_OPTIONS: --disable-warning=ExperimentalWarning
-        run: npm test
+        run: npm run validate
 
       - name: ✅ Smoke-test Home Connector on Node
         shell: bash

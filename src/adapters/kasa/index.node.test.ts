@@ -1,53 +1,21 @@
 import { expect, test } from 'vitest'
 import { createAppState } from '../../state.ts'
 import { createHomeConnectorStorage } from '../../storage/index.ts'
+import { createTestHomeConnectorConfig } from '../../test-home-connector-config.ts'
 import { createKasaAdapter } from './index.ts'
 import { type KasaClient } from './types.ts'
 
 function createConfig() {
-	return {
-		homeConnectorId: 'default',
-		publicBaseUrl: 'http://localhost:4040',
-		mcpPath: '/mcp',
-		mcpUrl: 'http://localhost:4040/mcp',
-		sharedSecret: 'secret',
+	return createTestHomeConnectorConfig({
 		accessNetworksUnleashedScanCidrs: ['192.168.1.10/32'],
 		accessNetworksUnleashedAllowInsecureTls: true,
 		accessNetworksUnleashedRequestTimeoutMs: 8_000,
 		kasaScanCidrs: ['192.168.1.145/32'],
 		kasaRequestTimeoutMs: 8_000,
-		kasaUsername: null,
-		kasaPassword: null,
-		islandRouterHost: null,
-		islandRouterPort: 22,
-		islandRouterUsername: null,
-		islandRouterPrivateKeyPath: null,
-		islandRouterKnownHostsPath: null,
-		islandRouterHostFingerprint: null,
-		islandRouterCommandTimeoutMs: 8_000,
-		islandRouterApiBaseUrl: 'https://my.islandrouter.com',
-		islandRouterApiRequestTimeoutMs: 8_000,
-		islandRouterApiAllowInsecureTls: false,
-		rokuDiscoveryUrl: 'http://roku.mock.local/discovery',
-		samsungTvDiscoveryUrl: 'http://samsung-tv.mock.local/discovery',
-		lutronDiscoveryUrl: 'http://lutron.mock.local/discovery',
-		sonosDiscoveryUrl: 'http://sonos.mock.local/discovery',
-		bondDiscoveryUrl: 'http://bond.mock.local/discovery',
-		bondRequestPaceMs: 0,
-		bondCircuitBreakerCooldownMs: 0,
-		jellyfishDiscoveryUrl: 'http://jellyfish.mock.local/discovery',
-		venstarScanCidrs: ['192.168.10.40/32'],
-		jellyfishScanCidrs: ['192.168.10.93/32'],
-		courtPjlinkProjectorId: null,
-		pjlinkScanCidrs: ['192.168.0.128/32'],
-		pjlinkScanExtraHosts: ['192.168.0.128'],
-		pjlinkRequestTimeoutMs: 5_000,
-		courtPjlinkTimeoutMs: 1_500,
 		dataPath: '/tmp',
 		dbPath: ':memory:',
-		port: 4040,
 		mocksEnabled: true,
-	}
+	})
 }
 
 test('adapter scans, adopts, reads status, and controls adopted Kasa plugs', async () => {

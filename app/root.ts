@@ -34,7 +34,7 @@ const navigationSections: Array<{
 			{
 				href: routes.islandRouterStatus.href(),
 				label: 'Island router',
-				description: 'SSH readiness, interfaces, neighbors, and host diagnosis',
+				description: 'SSH readiness, interfaces, and neighbors',
 			},
 			{
 				href: routes.islandRouterApiStatus.href(),

@@ -261,7 +261,7 @@ export function createAccessNetworksUnleashedAjaxClient(input: {
 					'Access Networks Unleashed redirected after reauthentication.',
 				)
 			}
-			await ensureSession(allowInsecureTls)
+			await ensureSession()
 			return await postCmdstat(xml, action, allowInsecureTls, redirectCount + 1)
 		}
 		const text = await response.text()

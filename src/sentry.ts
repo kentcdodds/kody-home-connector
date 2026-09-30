@@ -1,8 +1,8 @@
 import * as Sentry from '@sentry/node'
 
 type EnvRecord = Record<string, string | undefined>
-type SentryContextValue = Record<string, unknown> | undefined
-type SentryContextMap = Record<string, SentryContextValue>
+type SentryScopeContext = Extract<Sentry.CaptureContext, { contexts?: unknown }>
+type SentryContextMap = NonNullable<SentryScopeContext['contexts']>
 type HomeConnectorSentryLevel =
 	| 'fatal'
 	| 'error'
@@ -182,7 +182,7 @@ export function initializeHomeConnectorSentry(env: EnvRecord = process.env) {
 
 export function captureHomeConnectorException(
 	error: unknown,
-	captureContext: Parameters<typeof Sentry.captureException>[1] = {},
+	captureContext: SentryScopeContext = {},
 ) {
 	if (!Sentry.isEnabled()) {
 		return
@@ -205,7 +205,7 @@ export function captureHomeConnectorException(
 		},
 		contexts: mergeContextRecords(
 			derivedSentryCaptureContext.contexts,
-			captureContext.contexts as SentryContextMap | undefined,
+			captureContext.contexts,
 		),
 		extra: {
 			...derivedSentryCaptureContext.extra,
@@ -218,10 +218,7 @@ export function resetHomeConnectorSentryDedupeForTests() {
 	exceptionDedupeExpirations.clear()
 }
 
-export type HomeConnectorMessageCaptureContext = Exclude<
-	Parameters<typeof Sentry.captureMessage>[1],
-	string
-> & {
+export type HomeConnectorMessageCaptureContext = SentryScopeContext & {
 	dedupe?: { key: string; ttlMs: number }
 }
 

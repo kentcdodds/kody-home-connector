@@ -520,11 +520,11 @@ export function parseIslandRouterVersion(
 	return {
 		model:
 			findField(fieldMap, ['model', 'hardware_model']) ??
-			bannerMatch?.groups['model']?.trim() ??
+			bannerMatch?.groups?.['model']?.trim() ??
 			null,
 		serialNumber:
 			findField(fieldMap, ['serial_number', 'serial']) ??
-			bannerMatch?.groups['serialNumber']?.trim() ??
+			bannerMatch?.groups?.['serialNumber']?.trim() ??
 			null,
 		firmwareVersion:
 			findField(fieldMap, [
@@ -532,7 +532,7 @@ export function parseIslandRouterVersion(
 				'software_version',
 				'version',
 			]) ??
-			bannerMatch?.groups['firmwareVersion']?.trim() ??
+			bannerMatch?.groups?.['firmwareVersion']?.trim() ??
 			null,
 		attributes: attributes.length > 0 ? attributes : fallbackAttributes,
 		rawOutput: lines.join('\n'),

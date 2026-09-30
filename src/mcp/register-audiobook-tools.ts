@@ -7,7 +7,7 @@ import {
 } from '../adapters/audiobook/index.ts'
 import {
 	buildToolInputSchema,
-	type ToolInputSchema,
+	type SdkToolInputSchema,
 } from './tool-input-schema.ts'
 
 type AudiobookToolDescriptor = {
@@ -19,7 +19,7 @@ type AudiobookToolDescriptor = {
 }
 
 type AudiobookRegisteredToolDescriptor = AudiobookToolDescriptor & {
-	sdkInputSchema?: ToolInputSchema
+	sdkInputSchema?: SdkToolInputSchema
 }
 
 type AudiobookToolHandler = (
@@ -28,7 +28,7 @@ type AudiobookToolHandler = (
 
 function structuredTextResult(
 	text: string,
-	structuredContent: unknown,
+	structuredContent: Record<string, unknown>,
 ): CallToolResult {
 	return {
 		content: [

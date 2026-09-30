@@ -114,15 +114,15 @@ function parsePatternListResponse(
 	return patterns.sort((left, right) => left.path.localeCompare(right.path))
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
 function parsePatternFileDataResponse(
 	response: Record<string, unknown>,
 ): JellyfishPatternData {
 	const patternFileData = response['patternFileData']
-	if (
-		!patternFileData ||
-		typeof patternFileData !== 'object' ||
-		Array.isArray(patternFileData)
-	) {
+	if (!isRecord(patternFileData)) {
 		throw new Error(
 			'JellyFish controller did not return a valid patternFileData payload.',
 		)
@@ -174,10 +174,6 @@ function getScheduleResponseKey(scheduleType: JellyfishScheduleType) {
 			return exhaustiveCheck
 		}
 	}
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
 function normalizeStringArray(input: unknown, path: string) {

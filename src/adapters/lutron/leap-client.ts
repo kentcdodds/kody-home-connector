@@ -12,6 +12,7 @@ import {
 	type LutronAssociatedGangedDevice,
 } from './types.ts'
 import { type HomeConnectorErrorCaptureContext } from '../../sentry.ts'
+import { toLutronPublicProcessor } from './repository.ts'
 
 type LeapResponse = {
 	CommuniqueType?: string
@@ -999,8 +1000,11 @@ async function buildVirtualButtons(
 export async function loadLutronInventory(input: {
 	processor: LutronPersistedProcessor
 	credentials: LutronCredentials
+	createClient?: typeof createLutronLeapClient
 }): Promise<LutronInventory> {
-	const client = await createLutronLeapClient(input.processor)
+	const client = await (input.createClient ?? createLutronLeapClient)(
+		input.processor,
+	)
 	try {
 		await client.login(input.credentials)
 		const areas = await buildAreaTree(client, input.processor.processorId)
@@ -1020,7 +1024,7 @@ export async function loadLutronInventory(input: {
 			input.processor.processorId,
 		)
 		return {
-			processor: input.processor,
+			processor: toLutronPublicProcessor(input.processor),
 			areas,
 			zones,
 			controlStations,

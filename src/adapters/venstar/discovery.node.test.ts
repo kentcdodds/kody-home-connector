@@ -1,59 +1,18 @@
 import { expect, test, vi } from 'vitest'
 import { createAppState } from '../../state.ts'
 import { type HomeConnectorConfig } from '../../config.ts'
+import { createTestHomeConnectorConfig } from '../../test-home-connector-config.ts'
 import { scanVenstarThermostats } from './discovery.ts'
 
 function createConfig(scanCidrs: Array<string>): HomeConnectorConfig {
-	return {
-		homeConnectorId: 'default',
-		publicBaseUrl: 'http://localhost:4040',
-		mcpPath: '/mcp',
-		mcpUrl: 'http://localhost:4040/mcp',
-		sharedSecret: 'secret',
-		phoneDeviceToken: null,
-		accessNetworksUnleashedScanCidrs: ['192.168.1.10/32'],
+	return createTestHomeConnectorConfig({
 		accessNetworksUnleashedAllowInsecureTls: false,
-		accessNetworksUnleashedRequestTimeoutMs: 8_000,
-		islandRouterHost: null,
-		islandRouterPort: 22,
-		islandRouterUsername: null,
-		islandRouterPrivateKeyPath: null,
-		islandRouterKnownHostsPath: null,
-		islandRouterHostFingerprint: null,
-		islandRouterCommandTimeoutMs: 8_000,
-		islandRouterApiBaseUrl: 'https://my.islandrouter.com',
-		islandRouterApiRequestTimeoutMs: 8_000,
-		islandRouterApiAllowInsecureTls: false,
-		rokuDiscoveryUrl: 'http://roku.mock.local/discovery',
-		lutronDiscoveryUrl: 'http://lutron.mock.local/discovery',
-		sonosDiscoveryUrl: 'http://sonos.mock.local/discovery',
-		samsungTvDiscoveryUrl: 'http://samsung-tv.mock.local/discovery',
-		bondDiscoveryUrl: 'http://bond.mock.local/discovery',
 		bondRequestPaceMs: 500,
 		bondCircuitBreakerCooldownMs: 60_000,
 		jellyfishDiscoveryUrl: null,
 		venstarScanCidrs: scanCidrs,
-		jellyfishScanCidrs: ['192.168.10.93/32'],
-		courtPjlinkProjectorId: null,
-		courtBlurayHost: null,
-		courtBlurayMacAddress: null,
-		courtBlurayAuthCookie: null,
-		courtBlurayPsk: null,
-		courtBlurayTimeoutMs: 1_500,
-		courtBlurayScanExtraHosts: [],
-		courtBlurayScanCidrs: [],
-		pjlinkScanCidrs: ['192.168.0.128/32'],
-		pjlinkScanExtraHosts: ['192.168.0.128'],
-		pjlinkRequestTimeoutMs: 5_000,
-		courtPjlinkTimeoutMs: 1_500,
-		audiobookLibraryPath: '/media/audiobooks',
-		ffmpegPath: 'ffmpeg',
-		audiobookImportTimeoutMs: 30 * 60 * 1000,
-		dataPath: '/tmp',
-		dbPath: ':memory:',
-		port: 4040,
 		mocksEnabled: false,
-	}
+	})
 }
 
 test('venstar subnet discovery finds thermostat details and diagnostics', async () => {

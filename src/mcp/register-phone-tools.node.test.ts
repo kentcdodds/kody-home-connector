@@ -28,9 +28,12 @@ function createFakePhone(input: {
 		options?: { timeoutMs?: number }
 	}> = []
 	const phone = {
-		async getStatus() {
+		async getStatus(): Promise<PhoneConnectionStatus> {
 			return {
 				tokenConfigured: true,
+				hasStoredToken: false,
+				hasEnvToken: false,
+				tokenSource: null,
 				connected: false,
 				websocketPath: '/phone/ws',
 				publicWebSocketUrl: 'wss://kody-home.doddsfamily.us/phone/ws',

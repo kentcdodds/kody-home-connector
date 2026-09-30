@@ -21,7 +21,8 @@
     "lint:fix": "oxlint . --fix",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
-    "validate": "npm run format:check && npm run lint && npm test"
+    "typecheck": "tsc -p tsconfig.json",
+    "validate": "npm run format:check && npm run lint && npm run typecheck && npm test"
   },
   "dependencies": {
     "@kody-bot/connector-kit": "^2.0.0",
@@ -39,6 +40,8 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@types/dns-txt": "2.0.2",
+    "@types/multicast-dns": "7.2.4",
     "@types/node": "^25.5.0",
     "@types/ws": "^8.18.1",
     "oxfmt": "^0.42.0",

@@ -1,6 +1,7 @@
 import { z } from 'zod'
 
 export type ToolInputSchema = z.ZodRawShape | z.ZodTypeAny
+export type SdkToolInputSchema = z.ZodTypeAny
 
 function isZodSchema(schema: ToolInputSchema): schema is z.ZodTypeAny {
 	return (
@@ -13,11 +14,11 @@ function isZodSchema(schema: ToolInputSchema): schema is z.ZodTypeAny {
 
 export function buildToolInputSchema(schema: ToolInputSchema = {}): {
 	inputSchema: Record<string, unknown>
-	sdkInputSchema: ToolInputSchema
+	sdkInputSchema: SdkToolInputSchema
 } {
 	const zodSchema = isZodSchema(schema) ? schema : z.object(schema)
 	return {
 		inputSchema: z.toJSONSchema(zodSchema) as Record<string, unknown>,
-		sdkInputSchema: schema,
+		sdkInputSchema: zodSchema,
 	}
 }

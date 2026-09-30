@@ -43,8 +43,9 @@ function createSamsungDeviceId(input: {
 	host: string
 	rawDeviceInfo: Record<string, unknown> | null
 }) {
+	const rawDeviceInfo = input.rawDeviceInfo ?? {}
 	const device =
-		(input.rawDeviceInfo['device'] as Record<string, unknown> | undefined) ?? {}
+		(rawDeviceInfo['device'] as Record<string, unknown> | undefined) ?? {}
 	const base =
 		String(device['id'] ?? '') ||
 		String(device['duid'] ?? '') ||

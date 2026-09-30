@@ -8,7 +8,7 @@ import {
 } from '../adapters/island-router-api/index.ts'
 import {
 	buildToolInputSchema,
-	type ToolInputSchema,
+	type SdkToolInputSchema,
 } from './tool-input-schema.ts'
 
 type IslandRouterApiToolDescriptor = {
@@ -20,7 +20,7 @@ type IslandRouterApiToolDescriptor = {
 }
 
 type IslandRouterApiRegisteredToolDescriptor = IslandRouterApiToolDescriptor & {
-	sdkInputSchema?: ToolInputSchema
+	sdkInputSchema?: SdkToolInputSchema
 }
 
 type IslandRouterApiToolHandler = (
@@ -29,7 +29,7 @@ type IslandRouterApiToolHandler = (
 
 function structuredTextResult(
 	text: string,
-	structuredContent: unknown,
+	structuredContent: Record<string, unknown>,
 ): CallToolResult {
 	return {
 		content: [

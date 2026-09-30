@@ -6,7 +6,7 @@ import {
 } from '../adapters/court/index.ts'
 import {
 	buildToolInputSchema,
-	type ToolInputSchema,
+	type SdkToolInputSchema,
 } from './tool-input-schema.ts'
 
 type CourtToolDescriptor = {
@@ -18,7 +18,7 @@ type CourtToolDescriptor = {
 }
 
 type CourtRegisteredToolDescriptor = CourtToolDescriptor & {
-	sdkInputSchema?: ToolInputSchema
+	sdkInputSchema?: SdkToolInputSchema
 }
 
 type CourtToolHandler = (
@@ -27,7 +27,7 @@ type CourtToolHandler = (
 
 function structuredTextResult(
 	text: string,
-	structuredContent: unknown,
+	structuredContent: Record<string, unknown>,
 ): CallToolResult {
 	return {
 		content: [

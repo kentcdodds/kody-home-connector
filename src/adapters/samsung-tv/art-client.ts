@@ -211,7 +211,8 @@ export async function getSamsungTvArtMode(input: {
 		request: 'get_artmode_status',
 		mocksEnabled: input.mocksEnabled,
 	})
-	const mode = String(result.payload['value'] ?? 'off') === 'on' ? 'on' : 'off'
+	const mode: 'on' | 'off' =
+		String(result.payload['value'] ?? 'off') === 'on' ? 'on' : 'off'
 	return {
 		token: result.token,
 		mode,
