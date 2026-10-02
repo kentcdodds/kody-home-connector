@@ -93,7 +93,7 @@ trusted.
 
 The admin UI is server-rendered with `remix/html-template` and ships no browser
 JavaScript: native forms submit without hydration, so there is no asset server,
-client entry, or `remix/ui` component runtime to configure. Read-only pages are
+client entry, or `remix/component` runtime to configure. Read-only pages are
 `GET` routes (the router serves `HEAD` and answers other methods with `405`);
 pages that also process form submissions dispatch on `request.method` inside a
 single action. `createRequestListener` runs without `trustProxy` because the
