@@ -115,19 +115,38 @@ function looksLikeVapXmlBody(xmlBody: string) {
  * aioruckus `get_vap_stats` posts:
  * `<ajax-request ... caller='SCI'><vap INTERVAL-STATS='no' LEVEL='1' /></ajax-request>`
  * Bare `<vap/>` (as used by @kentcdodds/unleashed-wifi) returns empty on fw 200.18.
- * Preserve bodies that already set INTERVAL-STATS (including interval queries).
+ * Inject missing INTERVAL-STATS / LEVEL without discarding other attrs or children.
  */
 function normalizeVapXmlBody(xmlBody: string) {
 	if (!looksLikeVapXmlBody(xmlBody)) return xmlBody
-	if (/\bINTERVAL-STATS\s*=/i.test(xmlBody)) return xmlBody.trim()
-	return '<vap INTERVAL-STATS="no" LEVEL="1"/>'
+	const trimmed = xmlBody.trim()
+	if (/\bINTERVAL-STATS\s*=/i.test(trimmed)) return trimmed
+
+	const match = /^<vap(\s[^>]*)?\s*(\/>|>)([\s\S]*)$/i.exec(trimmed)
+	if (!match) return trimmed
+	const existingAttrs = match[1] ?? ''
+	const closing = match[2] ?? '/>'
+	const rest = match[3] ?? ''
+	const levelAttr = /\bLEVEL\s*=/i.test(existingAttrs) ? '' : ' LEVEL="1"'
+	const attrs = `${existingAttrs} INTERVAL-STATS="no"${levelAttr}`.replace(
+		/^\s+/,
+		' ',
+	)
+	if (closing === '/>') {
+		return `<vap${attrs}/>`
+	}
+	return `<vap${attrs}>${rest}`
+}
+
+function resolveExplicitCaller(caller: string | undefined) {
+	return caller?.trim() ?? ''
 }
 
 function resolveGetstatCaller(input: {
 	xmlBody: string
 	caller: string | undefined
 }) {
-	const explicit = input.caller?.trim()
+	const explicit = resolveExplicitCaller(input.caller)
 	if (explicit) return explicit
 	// aioruckus: vap and wlangroup stats require caller="SCI".
 	if (
@@ -137,6 +156,10 @@ function resolveGetstatCaller(input: {
 		return 'SCI'
 	}
 	return ''
+}
+
+function callerAttribute(caller: string) {
+	return caller ? ` caller="${escapeXmlAttribute(caller)}"` : ''
 }
 
 function buildAjaxRequestEnvelope(input: {
@@ -163,20 +186,21 @@ function buildAjaxRequestEnvelope(input: {
 				xmlBody,
 				caller: input.caller,
 			})
-			const callerAttr = caller ? ` caller="${escapeXmlAttribute(caller)}"` : ''
 			return {
 				updater,
 				xml:
 					`<ajax-request action="getstat" comp="${escapedComp}"` +
-					` enable-gzip="0"${callerAttr}${updaterAttr}>${xmlBody}</ajax-request>`,
+					` enable-gzip="0"${callerAttribute(caller)}${updaterAttr}>${xmlBody}</ajax-request>`,
 			}
 		}
 		case 'getconf': {
 			const xmlBody = input.xmlBody
 			const updater = input.updater?.trim() || generateUpdater(comp)
+			const caller = resolveExplicitCaller(input.caller)
 			const attrs =
 				`action="getconf" DECRYPT_X="false" ` +
-				`updater="${escapeXmlAttribute(updater)}" comp="${escapedComp}"`
+				`updater="${escapeXmlAttribute(updater)}" comp="${escapedComp}"` +
+				callerAttribute(caller)
 			if (xmlBody.trim()) {
 				return {
 					updater,
@@ -192,12 +216,14 @@ function buildAjaxRequestEnvelope(input: {
 		case 'docmd': {
 			const xmlBody = input.xmlBody
 			const updater = input.updater?.trim() || generateUpdater(comp)
+			const caller = resolveExplicitCaller(input.caller)
 			return {
 				updater,
 				xml:
 					`<ajax-request action="${action}" ` +
 					`comp="${escapedComp}" ` +
-					`updater="${escapeXmlAttribute(updater)}">` +
+					`updater="${escapeXmlAttribute(updater)}"` +
+					`${callerAttribute(caller)}>` +
 					`${xmlBody}</ajax-request>`,
 			}
 		}
