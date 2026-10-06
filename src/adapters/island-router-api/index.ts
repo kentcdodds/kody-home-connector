@@ -97,6 +97,71 @@ function startupShapeMismatchError(payload: unknown, detail: string) {
 	)
 }
 
+const islandRouterJwtLikePattern =
+	/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)?/g
+const islandRouterSecretKeyPattern =
+	/^(authorization|access|refresh|session|token|pin|password|secret|otp)$/i
+
+/**
+ * Truncated, secret-safe summary of an Island HTTP error body for error
+ * messages (never lastAuthError of tokens/PINs).
+ */
+export function formatIslandRouterHttpErrorBody(
+	payload: unknown,
+	maxLength = 240,
+): string {
+	if (payload == null || payload === '') return ''
+	const text =
+		typeof payload === 'string'
+			? payload
+			: JSON.stringify(sanitizeIslandRouterErrorPayload(payload))
+	const redacted = text
+		.replaceAll(islandRouterJwtLikePattern, '[redacted-jwt]')
+		.replaceAll(/\s+/g, ' ')
+		.trim()
+	if (!redacted) return ''
+	if (redacted.length <= maxLength) return redacted
+	return `${redacted.slice(0, Math.max(0, maxLength - 1))}…`
+}
+
+function sanitizeIslandRouterErrorPayload(value: unknown, depth = 0): unknown {
+	if (depth > 4) return 'max-depth'
+	if (value === null || typeof value !== 'object') {
+		if (typeof value === 'string' && value.length > 80) {
+			return `${value.slice(0, 79)}…`
+		}
+		return value
+	}
+	if (Array.isArray(value)) {
+		return value
+			.slice(0, 8)
+			.map((entry) => sanitizeIslandRouterErrorPayload(entry, depth + 1))
+	}
+	const result: Record<string, unknown> = {}
+	for (const [key, entry] of Object.entries(
+		value as Record<string, unknown>,
+	).slice(0, 20)) {
+		if (islandRouterSecretKeyPattern.test(key)) {
+			result[key] = '[redacted]'
+			continue
+		}
+		result[sanitizeIslandStartupShapeKey(key)] =
+			sanitizeIslandRouterErrorPayload(entry, depth + 1)
+	}
+	return result
+}
+
+function islandRouterHttpFailureMessage(
+	status: number,
+	payload: unknown,
+	prefix = 'Island Router API request failed',
+) {
+	const body = formatIslandRouterHttpErrorBody(payload)
+	return body
+		? `${prefix} with HTTP ${String(status)}. Body: ${body}`
+		: `${prefix} with HTTP ${String(status)}.`
+}
+
 function assertWriteAllowed(request: WriteOperationRequest) {
 	if (!request.acknowledgeHighRisk) {
 		throw new Error(
@@ -385,7 +450,8 @@ async function requestJson(input: {
 		body = JSON.stringify(input.body)
 	}
 	if (input.token) {
-		headers.authorization = `Bearer ${input.token}`
+		// Island Flutter app sends the bare access token (no "Bearer " prefix).
+		headers.authorization = input.token
 	}
 	return await fetchIslandRouterApi({
 		url: buildUrl(input.config.islandRouterApiBaseUrl, input.path),
@@ -583,7 +649,8 @@ export function createIslandRouterApiAdapter(input: {
 			method,
 			headers: {
 				accept: 'application/json',
-				authorization: `Bearer ${authTokens.access}`,
+				// Island Flutter app: bare access token, no "Bearer " prefix.
+				authorization: authTokens.access,
 				...(requestInput.body === undefined
 					? {}
 					: { 'content-type': 'application/json' }),
@@ -607,7 +674,7 @@ export function createIslandRouterApiAdapter(input: {
 					...init,
 					headers: {
 						...(init.headers as Record<string, string>),
-						authorization: `Bearer ${refreshedTokens.access}`,
+						authorization: refreshedTokens.access,
 					},
 				},
 				timeoutMs,
@@ -630,9 +697,7 @@ export function createIslandRouterApiAdapter(input: {
 		}
 		const body = await parseJsonResponse(response)
 		if (!response.ok) {
-			throw new Error(
-				`Island Router API request failed with HTTP ${response.status}.`,
-			)
+			throw new Error(islandRouterHttpFailureMessage(response.status, body))
 		}
 		return {
 			method,

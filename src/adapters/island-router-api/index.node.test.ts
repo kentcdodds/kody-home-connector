@@ -9,6 +9,7 @@ import { createTestHomeConnectorConfig } from '../../test-home-connector-config.
 import {
 	createIslandRouterApiAdapter,
 	describeIslandRouterJsonShape,
+	formatIslandRouterHttpErrorBody,
 	islandRouterApiWriteConfirmation,
 } from './index.ts'
 import { computeIslandRouterHotp } from './otp.ts'
@@ -493,11 +494,212 @@ test('auth handshake sends startup, PIN OTP exchange, and bearer request', async
 			}),
 			timeBlocks,
 		})
-		expect(
-			(requests[3]?.init.headers as Record<string, string>)?.authorization,
-		).toBe('Bearer access-token')
+		const authenticatedHeaders = requests[3]?.init.headers as Record<
+			string,
+			string
+		>
+		expect(authenticatedHeaders).toEqual({
+			accept: 'application/json',
+			authorization: 'access-token',
+		})
+		expect(authenticatedHeaders).not.toHaveProperty('content-type')
+		expect(authenticatedHeaders.authorization).not.toMatch(/^Bearer\b/i)
 	} finally {
 		vi.useRealTimers()
+		await storage.close()
+	}
+})
+
+test('authenticated GET sends bare access token and no content-type; writes send json', async () => {
+	const storage = await createHomeConnectorStorage(createConfig(':memory:'))
+	const captured: Array<{ path: string; headers: Record<string, string> }> = []
+	let startupCalls = 0
+	const fetchImpl: IslandRouterApiFetch = async (url, init = {}) => {
+		const pathName = new URL(String(url)).pathname
+		captured.push({
+			path: pathName,
+			headers: { ...(init.headers as Record<string, string>) },
+		})
+		if (pathName === '/api/startup/info') {
+			return createJsonResponse({ error: 'not found' }, 404)
+		}
+		if (pathName === '/api/startup') {
+			startupCalls += 1
+			return startupCalls % 2 === 1
+				? createJsonResponse({
+						data: {
+							id: 'startup-id',
+							c: 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ',
+							d: 0,
+						},
+					})
+				: createJsonResponse({
+						data: {
+							session: 'session-token',
+							access: 'access-token',
+							refresh: 'refresh-token',
+						},
+					})
+		}
+		return createJsonResponse({ ok: true })
+	}
+	try {
+		const adapter = createIslandRouterApiAdapter({
+			config: createConfig(':memory:'),
+			storage,
+			fetchImpl,
+		})
+		await adapter.setPin('246810')
+		await adapter.request({ method: 'GET', path: '/api/interfaces' })
+		await adapter.request({
+			method: 'POST',
+			path: '/api/interfaces',
+			body: { name: 'lan' },
+			acknowledgeHighRisk: true,
+			reason: 'test write path headers for Island Router API',
+			confirmation: islandRouterApiWriteConfirmation,
+		})
+		const getCall = captured.find((entry) => entry.path === '/api/interfaces')
+		expect(getCall?.headers).toEqual({
+			accept: 'application/json',
+			authorization: 'access-token',
+		})
+		const postCall = captured
+			.filter((entry) => entry.path === '/api/interfaces')
+			.at(-1)
+		expect(postCall?.headers).toEqual({
+			accept: 'application/json',
+			authorization: 'access-token',
+			'content-type': 'application/json',
+		})
+	} finally {
+		await storage.close()
+	}
+})
+
+test('401 retry uses bare refreshed access token without Bearer', async () => {
+	const storage = await createHomeConnectorStorage(createConfig(':memory:'))
+	const authHeaders: Array<string | undefined> = []
+	let filtersCalls = 0
+	let startupCalls = 0
+	const fetchImpl: IslandRouterApiFetch = async (url, init = {}) => {
+		const pathName = new URL(String(url)).pathname
+		if (pathName === '/api/startup/info') {
+			return createJsonResponse({ error: 'not found' }, 404)
+		}
+		if (pathName === '/api/startup') {
+			startupCalls += 1
+			return startupCalls % 2 === 1
+				? createJsonResponse({
+						data: {
+							id: 'startup-id',
+							c: 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ',
+							d: 0,
+						},
+					})
+				: createJsonResponse({
+						data: {
+							session: 'session-token',
+							access: 'access-token',
+							refresh: 'refresh-token',
+						},
+					})
+		}
+		if (pathName === '/api/refresh') {
+			return createJsonResponse({
+				data: {
+					session: 'session-token-2',
+					access: 'access-token-2',
+					refresh: 'refresh-token-2',
+				},
+			})
+		}
+		authHeaders.push(
+			(init.headers as Record<string, string> | undefined)?.authorization,
+		)
+		filtersCalls += 1
+		return filtersCalls === 1
+			? createJsonResponse({ error: 'expired' }, 401)
+			: createJsonResponse({ filters: ['ok'] })
+	}
+	try {
+		const adapter = createIslandRouterApiAdapter({
+			config: createConfig(':memory:'),
+			storage,
+			fetchImpl,
+		})
+		await adapter.setPin('246810')
+		await expect(
+			adapter.request({ method: 'GET', path: '/api/filters' }),
+		).resolves.toMatchObject({ status: 200 })
+		expect(authHeaders).toEqual(['access-token', 'access-token-2'])
+	} finally {
+		await storage.close()
+	}
+})
+
+test('non-OK Island responses include truncated secret-safe body text', async () => {
+	const storage = await createHomeConnectorStorage(createConfig(':memory:'))
+	let startupCalls = 0
+	const fetchImpl: IslandRouterApiFetch = async (url) => {
+		const pathName = new URL(String(url)).pathname
+		if (pathName === '/api/startup/info') {
+			return createJsonResponse({ error: 'not found' }, 404)
+		}
+		if (pathName === '/api/startup') {
+			startupCalls += 1
+			return startupCalls % 2 === 1
+				? createJsonResponse({
+						data: {
+							id: 'startup-id',
+							c: 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ',
+							d: 0,
+						},
+					})
+				: createJsonResponse({
+						data: {
+							session: 'session-token',
+							access: 'access-token',
+							refresh: 'refresh-token',
+						},
+					})
+		}
+		return createJsonResponse(
+			{
+				error: 'bad request: unknown field',
+				access: 'should-not-leak',
+				token:
+					'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signature',
+			},
+			400,
+		)
+	}
+	try {
+		const adapter = createIslandRouterApiAdapter({
+			config: createConfig(':memory:'),
+			storage,
+			fetchImpl,
+		})
+		await adapter.setPin('246810')
+		await expect(
+			adapter.request({ method: 'GET', path: '/api/interfaces' }),
+		).rejects.toThrow(/HTTP 400.*bad request: unknown field/)
+		await expect(
+			adapter.request({ method: 'GET', path: '/api/interfaces' }),
+		).rejects.toThrow(/\[redacted\]/)
+		let thrown: unknown
+		try {
+			await adapter.request({ method: 'GET', path: '/api/interfaces' })
+		} catch (error) {
+			thrown = error
+		}
+		const message = thrown instanceof Error ? thrown.message : String(thrown)
+		expect(message).not.toContain('should-not-leak')
+		expect(message).not.toContain('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9')
+		const longBody = formatIslandRouterHttpErrorBody({ error: 'x'.repeat(300) })
+		expect(longBody).toContain('…')
+		expect(longBody.length).toBeLessThan(300)
+	} finally {
 		await storage.close()
 	}
 })
