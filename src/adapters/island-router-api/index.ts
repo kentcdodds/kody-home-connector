@@ -99,54 +99,96 @@ function startupShapeMismatchError(payload: unknown, detail: string) {
 
 const islandRouterJwtLikePattern =
 	/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)?/g
-const islandRouterSecretKeyPattern =
-	/^(authorization|access|refresh|session|token|pin|password|secret|otp)$/i
+const islandRouterOpaqueTokenPattern = /[A-Za-z0-9_-]{24,}/g
+const islandRouterDiagnosticKeyPattern =
+	/^(error|message|detail|code|reason|status|statusCode|status_code)$/i
 
 /**
- * Truncated, secret-safe summary of an Island HTTP error body for error
- * messages (never lastAuthError of tokens/PINs).
+ * Truncated, secret-safe summary of an Island HTTP error body for thrown
+ * errors. Only allowlisted diagnostic fields are echoed; JWTs / opaque tokens
+ * are redacted; everything else is shape-only.
  */
 export function formatIslandRouterHttpErrorBody(
 	payload: unknown,
 	maxLength = 240,
 ): string {
 	if (payload == null || payload === '') return ''
-	const text =
-		typeof payload === 'string'
-			? payload
-			: JSON.stringify(sanitizeIslandRouterErrorPayload(payload))
+
+	const parts: Array<string> = []
+	if (typeof payload === 'string') {
+		const diagnostic = redactIslandRouterErrorText(payload)
+		if (diagnostic) parts.push(diagnostic)
+	} else if (typeof payload === 'object') {
+		const diagnostics = collectIslandRouterDiagnosticFields(payload)
+		if (diagnostics && Object.keys(diagnostics).length > 0) {
+			parts.push(JSON.stringify(diagnostics))
+		}
+		parts.push(
+			`shape=${JSON.stringify(describeIslandRouterJsonShape(payload))}`,
+		)
+	} else {
+		parts.push(
+			`shape=${JSON.stringify(describeIslandRouterJsonShape(payload))}`,
+		)
+	}
+
+	const text = parts.join(' ').replaceAll(/\s+/g, ' ').trim()
+	if (!text) return ''
+	if (text.length <= maxLength) return text
+	return `${text.slice(0, Math.max(0, maxLength - 1))}…`
+}
+
+function redactIslandRouterErrorText(text: string) {
 	const redacted = text
 		.replaceAll(islandRouterJwtLikePattern, '[redacted-jwt]')
+		.replaceAll(islandRouterOpaqueTokenPattern, '[redacted]')
+		// Avoid echoing PIN-sized digit runs that a router may include in text.
+		.replaceAll(/\b\d{4,8}\b/g, '[redacted-digits]')
 		.replaceAll(/\s+/g, ' ')
 		.trim()
 	if (!redacted) return ''
-	if (redacted.length <= maxLength) return redacted
-	return `${redacted.slice(0, Math.max(0, maxLength - 1))}…`
+	const withoutMarkers = redacted
+		.replaceAll(/\[redacted(?:-jwt|-digits)?\]/gi, '')
+		.replaceAll(/[\s.,;:]/g, '')
+	if (!withoutMarkers) return ''
+	return redacted.length > 120 ? `${redacted.slice(0, 119)}…` : redacted
 }
 
-function sanitizeIslandRouterErrorPayload(value: unknown, depth = 0): unknown {
-	if (depth > 4) return 'max-depth'
-	if (value === null || typeof value !== 'object') {
-		if (typeof value === 'string' && value.length > 80) {
-			return `${value.slice(0, 79)}…`
-		}
-		return value
-	}
-	if (Array.isArray(value)) {
-		return value
-			.slice(0, 8)
-			.map((entry) => sanitizeIslandRouterErrorPayload(entry, depth + 1))
+function collectIslandRouterDiagnosticFields(
+	value: unknown,
+	depth = 0,
+): Record<string, unknown> | null {
+	if (
+		depth > 3 ||
+		!value ||
+		typeof value !== 'object' ||
+		Array.isArray(value)
+	) {
+		return null
 	}
 	const result: Record<string, unknown> = {}
 	for (const [key, entry] of Object.entries(
 		value as Record<string, unknown>,
-	).slice(0, 20)) {
-		if (islandRouterSecretKeyPattern.test(key)) {
-			result[key] = '[redacted]'
+	).slice(0, 30)) {
+		if (islandRouterDiagnosticKeyPattern.test(key)) {
+			if (typeof entry === 'string') {
+				const redacted = redactIslandRouterErrorText(entry)
+				if (redacted) result[key] = redacted
+			} else if (
+				typeof entry === 'number' ||
+				typeof entry === 'boolean' ||
+				entry === null
+			) {
+				result[key] = entry
+			}
 			continue
 		}
-		result[sanitizeIslandStartupShapeKey(key)] =
-			sanitizeIslandRouterErrorPayload(entry, depth + 1)
+		if (entry && typeof entry === 'object' && !Array.isArray(entry)) {
+			const nested = collectIslandRouterDiagnosticFields(entry, depth + 1)
+			if (nested && Object.keys(nested).length > 0) {
+				result[sanitizeIslandStartupShapeKey(key)] = nested
+			}
+		}
 	}
 	return result
 }

@@ -670,6 +670,7 @@ test('non-OK Island responses include truncated secret-safe body text', async ()
 				access: 'should-not-leak',
 				token:
 					'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signature',
+				note: 'pin 246810 leaked',
 			},
 			400,
 		)
@@ -681,12 +682,6 @@ test('non-OK Island responses include truncated secret-safe body text', async ()
 			fetchImpl,
 		})
 		await adapter.setPin('246810')
-		await expect(
-			adapter.request({ method: 'GET', path: '/api/interfaces' }),
-		).rejects.toThrow(/HTTP 400.*bad request: unknown field/)
-		await expect(
-			adapter.request({ method: 'GET', path: '/api/interfaces' }),
-		).rejects.toThrow(/\[redacted\]/)
 		let thrown: unknown
 		try {
 			await adapter.request({ method: 'GET', path: '/api/interfaces' })
@@ -694,11 +689,25 @@ test('non-OK Island responses include truncated secret-safe body text', async ()
 			thrown = error
 		}
 		const message = thrown instanceof Error ? thrown.message : String(thrown)
+		expect(message).toMatch(/HTTP 400/)
+		expect(message).toMatch(/bad request: unknown field/)
+		expect(message).toMatch(/shape=/)
 		expect(message).not.toContain('should-not-leak')
 		expect(message).not.toContain('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9')
-		const longBody = formatIslandRouterHttpErrorBody({ error: 'x'.repeat(300) })
-		expect(longBody).toContain('…')
-		expect(longBody.length).toBeLessThan(300)
+		expect(message).not.toContain('246810')
+		expect(message).not.toContain('pin 246810')
+		// Non-allowlisted fields are shape-only (types), not values.
+		expect(message).toMatch(/"note":"string"/)
+		expect(
+			formatIslandRouterHttpErrorBody({
+				error: `detail ${'x'.repeat(300)}`,
+			}),
+		).toContain('[redacted]')
+		expect(
+			formatIslandRouterHttpErrorBody({
+				error: `detail ${'word '.repeat(40)}more`,
+			}),
+		).toMatch(/…/)
 	} finally {
 		await storage.close()
 	}
