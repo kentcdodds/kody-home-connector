@@ -184,6 +184,13 @@ function isGzipContentEncoding(value: string | null) {
 	return /(^|,)\s*(gzip|x-gzip)\s*(,|$)/i.test(value)
 }
 
+function looksLikeGzipBytes(bytes: Uint8Array) {
+	// gzip magic number 1f 8b. Native fetch may already decompress while
+	// leaving Content-Encoding: gzip, so only gunzip when the body is still
+	// compressed (raw insecure-TLS path).
+	return bytes.byteLength >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b
+}
+
 async function readResponseBodyText(response: Response) {
 	const encoding = response.headers.get('content-encoding')
 	if (!isGzipContentEncoding(encoding)) {
@@ -191,6 +198,9 @@ async function readResponseBodyText(response: Response) {
 	}
 	const bytes = new Uint8Array(await response.arrayBuffer())
 	if (bytes.byteLength === 0) return ''
+	if (!looksLikeGzipBytes(bytes)) {
+		return new TextDecoder().decode(bytes)
+	}
 	try {
 		const decompressed = gunzipSync(bytes)
 		return new TextDecoder().decode(decompressed)

@@ -350,6 +350,64 @@ test('gzip-encoded AJAX responses are decoded', async () => {
 	})
 })
 
+test('Content-Encoding gzip with already-decoded body is not gunzipped again', async () => {
+	const config = createConfig()
+	const payload =
+		'<ajax-response><system name="native-decoded"/></ajax-response>'
+	installFetch(loginHandler(), (href) => {
+		if (href.endsWith('/_cmdstat.jsp')) {
+			// Models native fetch: header still says gzip, body is plain XML.
+			return new Response(payload, {
+				status: 200,
+				headers: {
+					'content-encoding': 'gzip',
+					'content-type': 'text/xml',
+				},
+			})
+		}
+		return null
+	})
+
+	const client = createAccessNetworksUnleashedAjaxClient({
+		config,
+		controller: createController(),
+	})
+	const result = await client.request({
+		action: 'getstat',
+		comp: 'system',
+		xmlBody: '<sysinfo/>',
+	})
+	expect(result.xml).toBe(payload)
+})
+
+test('corrupt gzip bodies with gzip magic bytes still fail closed', async () => {
+	const config = createConfig()
+	installFetch(loginHandler(), (href) => {
+		if (href.endsWith('/_cmdstat.jsp')) {
+			return new Response(Uint8Array.of(0x1f, 0x8b, 0x08, 0x00, 0xff), {
+				status: 200,
+				headers: {
+					'content-encoding': 'gzip',
+					'content-type': 'text/xml',
+				},
+			})
+		}
+		return null
+	})
+
+	const client = createAccessNetworksUnleashedAjaxClient({
+		config,
+		controller: createController(),
+	})
+	await expect(
+		client.request({
+			action: 'getstat',
+			comp: 'system',
+			xmlBody: '<sysinfo/>',
+		}),
+	).rejects.toThrow(/gzip body that could not be decoded/)
+})
+
 test('login redirect back to the login page is reported as an auth error', async () => {
 	const config = createConfig()
 	installFetch((href, init) => {
