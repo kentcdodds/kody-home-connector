@@ -800,9 +800,12 @@ the adapter exposes a single generic capability:
   name such as `system`, `stamgr`, `wlansvc-list`, `apStat`, `eventd`),
   `xmlBody` (inner XML; empty for self-closing `getconf`), an optional `updater`
   string (generated for `getconf`/`setconf`/`docmd`; omitted on `getstat` unless
-  supplied), and an optional `allowInsecureTls` override. `getstat` always sends
-  `enable-gzip="0"` and still gunzips a gzip body if the controller returns one.
-  Responses are returned as both raw XML and a best-effort parsed object.
+  supplied), an optional `caller` string (vap/wlangroup getstat defaults to
+  `SCI` per aioruckus; bare `<vap/>` is normalized to
+  `<vap INTERVAL-STATS="no" LEVEL="1"/>`), and an optional `allowInsecureTls`
+  override. `getstat` always sends `enable-gzip="0"` and still gunzips a gzip
+  body if the controller returns one. Responses are returned as both raw XML and
+  a best-effort parsed object.
 
 The capability is deliberately warning-heavy because `setconf` and `docmd`
 actions can disconnect clients, take SSIDs offline, reboot access points, or

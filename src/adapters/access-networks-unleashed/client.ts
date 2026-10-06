@@ -107,35 +107,112 @@ function isMutatingAction(action: AccessNetworksUnleashedAjaxAction) {
 	}
 }
 
+function looksLikeVapXmlBody(xmlBody: string) {
+	return /^\s*<vap(\s|\/|>)/i.test(xmlBody)
+}
+
+/**
+ * aioruckus `get_vap_stats` posts:
+ * `<ajax-request ... caller='SCI'><vap INTERVAL-STATS='no' LEVEL='1' /></ajax-request>`
+ * Bare `<vap/>` (as used by @kentcdodds/unleashed-wifi) returns empty on fw 200.18.
+ * Inject missing INTERVAL-STATS / LEVEL without discarding other attrs or children.
+ */
+function normalizeVapXmlBody(xmlBody: string) {
+	if (!looksLikeVapXmlBody(xmlBody)) return xmlBody
+	const trimmed = xmlBody.trim()
+
+	const selfClosing = /^<vap([^>]*)\/>$/i.exec(trimmed)
+	if (selfClosing) {
+		return `<vap ${injectVapDefaultAttrs(selfClosing[1] ?? '')}/>`
+	}
+
+	const open = /^<vap([^>]*)>([\s\S]*)$/i.exec(trimmed)
+	if (!open) return trimmed
+	return `<vap ${injectVapDefaultAttrs(open[1] ?? '')}>${open[2] ?? ''}`
+}
+
+function hasExactXmlAttribute(attrs: string, name: string) {
+	// Match the exact attribute name on the opening tag only (not RADIO-LEVEL
+	// for LEVEL, and not attributes that only appear on child elements).
+	const pattern = new RegExp(`(?:^|[\\s"'])${name}\\s*=`, 'i')
+	return pattern.test(attrs)
+}
+
+function injectVapDefaultAttrs(existingAttrs: string) {
+	const existing = existingAttrs.trim()
+	const injections: Array<string> = []
+	if (!hasExactXmlAttribute(existing, 'INTERVAL-STATS')) {
+		injections.push('INTERVAL-STATS="no"')
+	}
+	if (!hasExactXmlAttribute(existing, 'LEVEL')) {
+		injections.push('LEVEL="1"')
+	}
+	return [...injections, existing].filter(Boolean).join(' ')
+}
+
+function resolveExplicitCaller(caller: string | undefined) {
+	return caller?.trim() ?? ''
+}
+
+function resolveGetstatCaller(input: {
+	xmlBody: string
+	caller: string | undefined
+}) {
+	const explicit = resolveExplicitCaller(input.caller)
+	if (explicit) return explicit
+	// aioruckus: vap and wlangroup stats require caller="SCI".
+	if (
+		looksLikeVapXmlBody(input.xmlBody) ||
+		/^\s*<wlangroup(\s|\/|>)/i.test(input.xmlBody)
+	) {
+		return 'SCI'
+	}
+	return ''
+}
+
+function callerAttribute(caller: string) {
+	return caller ? ` caller="${escapeXmlAttribute(caller)}"` : ''
+}
+
 function buildAjaxRequestEnvelope(input: {
 	action: AccessNetworksUnleashedAjaxAction
 	comp: string
 	xmlBody: string
 	updater: string | undefined
+	caller: string | undefined
 }): { xml: string; updater: string } {
-	const { action, comp, xmlBody } = input
+	const { action, comp } = input
 	const escapedComp = escapeXmlAttribute(comp)
 
 	switch (action) {
 		case 'getstat': {
 			// fw 200.18 curl ground truth: double-quoted attrs, enable-gzip="0",
-			// no updater unless the caller supplies one.
+			// no updater unless the caller supplies one. VAP stats additionally
+			// need caller="SCI" + INTERVAL-STATS (aioruckus get_vap_stats).
+			const xmlBody = normalizeVapXmlBody(input.xmlBody)
 			const updater = input.updater?.trim() ?? ''
 			const updaterAttr = updater
 				? ` updater="${escapeXmlAttribute(updater)}"`
 				: ''
+			const caller = resolveGetstatCaller({
+				xmlBody,
+				caller: input.caller,
+			})
 			return {
 				updater,
 				xml:
 					`<ajax-request action="getstat" comp="${escapedComp}"` +
-					` enable-gzip="0"${updaterAttr}>${xmlBody}</ajax-request>`,
+					` enable-gzip="0"${callerAttribute(caller)}${updaterAttr}>${xmlBody}</ajax-request>`,
 			}
 		}
 		case 'getconf': {
+			const xmlBody = input.xmlBody
 			const updater = input.updater?.trim() || generateUpdater(comp)
+			const caller = resolveExplicitCaller(input.caller)
 			const attrs =
 				`action="getconf" DECRYPT_X="false" ` +
-				`updater="${escapeXmlAttribute(updater)}" comp="${escapedComp}"`
+				`updater="${escapeXmlAttribute(updater)}" comp="${escapedComp}"` +
+				callerAttribute(caller)
 			if (xmlBody.trim()) {
 				return {
 					updater,
@@ -149,13 +226,16 @@ function buildAjaxRequestEnvelope(input: {
 		}
 		case 'setconf':
 		case 'docmd': {
+			const xmlBody = input.xmlBody
 			const updater = input.updater?.trim() || generateUpdater(comp)
+			const caller = resolveExplicitCaller(input.caller)
 			return {
 				updater,
 				xml:
 					`<ajax-request action="${action}" ` +
 					`comp="${escapedComp}" ` +
-					`updater="${escapeXmlAttribute(updater)}">` +
+					`updater="${escapeXmlAttribute(updater)}"` +
+					`${callerAttribute(caller)}>` +
 					`${xmlBody}</ajax-request>`,
 			}
 		}
@@ -496,6 +576,7 @@ export function createAccessNetworksUnleashedAjaxClient(input: {
 				comp,
 				xmlBody,
 				updater: requestInput.updater,
+				caller: requestInput.caller,
 			})
 			const responseXml = await postAjax(xml, action, allowInsecureTls)
 			return {
