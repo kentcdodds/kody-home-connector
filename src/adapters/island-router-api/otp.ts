@@ -26,12 +26,36 @@ export function decodeBase32(value: string) {
 }
 
 /**
- * Island 3.2.3 uses the startup `token` string's character codes as the HOTP
- * key (the Flutter UI base32-encodes then decodes those codes, which
- * round-trips to the same bytes). Match Dart `codeUnits` / char codes: one
- * byte per UTF-16 code unit (low 8 bits), not UTF-8 multi-byte sequences.
+ * RFC 4648 standard Base32 encode (alphabet A–Z2–7) with `=` padding.
+ * Used by Island 3.2.3 (`B.nz` / `A.cmg`) on the token's code-unit bytes.
  */
-export function islandStartupTokenKeyBytes(token: string) {
+export function encodeBase32(bytes: Buffer | Uint8Array) {
+	if (bytes.byteLength === 0) return ''
+	let bits = 0
+	let bitCount = 0
+	let output = ''
+	for (const byte of bytes) {
+		bits = (bits << 8) | byte
+		bitCount += 8
+		while (bitCount >= 5) {
+			output += base32Alphabet[(bits >> (bitCount - 5)) & 0x1f]!
+			bitCount -= 5
+		}
+	}
+	if (bitCount > 0) {
+		output += base32Alphabet[(bits << (5 - bitCount)) & 0x1f]!
+	}
+	while (output.length % 8 !== 0) {
+		output += '='
+	}
+	return output
+}
+
+/**
+ * Island 3.2.3 token → code-unit bytes (Dart `CodeUnits` / `A.kj` into
+ * `Uint8Array`). One byte per UTF-16 code unit (low 8 bits), not UTF-8.
+ */
+export function islandStartupTokenCodeUnitBytes(token: string) {
 	const bytes = Buffer.alloc(token.length)
 	for (let index = 0; index < token.length; index += 1) {
 		bytes[index] = token.charCodeAt(index) & 0xff
@@ -40,8 +64,18 @@ export function islandStartupTokenKeyBytes(token: string) {
 }
 
 /**
+ * Island 3.2.3 HOTP key recipe from decompiled Flutter (`cs2` / `vG`):
+ * 1. secretStr = RFC4648 base32 encode of token code-unit bytes
+ * 2. HMAC key = UTF-8 bytes of secretStr itself (do not base32-decode)
+ */
+export function island323HotpKeyFromToken(token: string) {
+	const secretStr = encodeBase32(islandStartupTokenCodeUnitBytes(token))
+	return Buffer.from(secretStr, 'utf8')
+}
+
+/**
  * Island 3.2.3 counter: floor((floor(unixSeconds) + offset*30) / 30).
- * `offset` is in 30-second blocks and is added before dividing.
+ * `offset` is in 30-second blocks and is added before dividing (`cwA`).
  */
 export function computeIsland323HotpCounter(input: {
 	nowMs: number
@@ -63,6 +97,8 @@ export function computeIslandRouterHotpFromKey(input: {
 	}
 	const counterBuffer = Buffer.alloc(8)
 	counterBuffer.writeBigUInt64BE(BigInt(input.counter))
+	// node:crypto createHmac uses standard HMAC key handling (hash if longer
+	// than the block size, else zero-pad) matching the Flutter SHA1 HMAC.
 	const digest = createHmac('sha1', input.key).update(counterBuffer).digest()
 	const offset = digest[digest.length - 1]! & 0x0f
 	const code =
@@ -90,7 +126,7 @@ export function computeIsland323Hotp(input: {
 	offset: number
 }) {
 	return computeIslandRouterHotpFromKey({
-		key: islandStartupTokenKeyBytes(input.token),
+		key: island323HotpKeyFromToken(input.token),
 		counter: computeIsland323HotpCounter({
 			nowMs: input.nowMs,
 			offset: input.offset,
