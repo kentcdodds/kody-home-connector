@@ -302,6 +302,132 @@ test('login without a CSRF token is reported as an auth error', async () => {
 	).rejects.toThrow(/no CSRF token/)
 })
 
+test('parses misspelled csfrToken from _csrfTokenVar.jsp with single quotes', async () => {
+	const config = createConfig()
+	const fetchMock = installFetch((href, init) => {
+		if (init?.method === 'GET' && href === 'https://unleashed.local') {
+			return response(null, {
+				status: 302,
+				headers: { Location: '/admin/wsg/login.jsp' },
+				url: 'https://unleashed.local/',
+			})
+		}
+		if (init?.method === 'GET' && href.endsWith('/admin/wsg/login.jsp')) {
+			return response(null, {
+				status: 200,
+				url: 'https://unleashed.local/admin/wsg/login.jsp',
+			})
+		}
+		if (init?.method === 'GET' && href.includes('username=admin')) {
+			return response(null, {
+				status: 302,
+				headers: {
+					Location: '/admin/wsg/',
+					'set-cookie': 'JSESSIONID=abc; Path=/admin',
+				},
+				url: href,
+			})
+		}
+		if (href.endsWith('/_csrfTokenVar.jsp')) {
+			// Exact format captured from Unleashed 200.18.7.101 (R550).
+			return response(
+				"<script>var csfrToken = 'unleashed-csrf-from-jsp';</script>",
+				{
+					status: 200,
+				},
+			)
+		}
+		if (href.endsWith('/_cmdstat.jsp')) {
+			return response(
+				'<ajax-response><system name="Unleashed" version="200.18"/></ajax-response>',
+			)
+		}
+		return null
+	})
+
+	const client = createAccessNetworksUnleashedAjaxClient({
+		config,
+		controller: createController(),
+	})
+	const result = await client.request({
+		action: 'getstat',
+		comp: 'system',
+		xmlBody: '<sysinfo/>',
+	})
+	expect(result.parsed).toEqual({
+		'ajax-response': {
+			system: {
+				'@name': 'Unleashed',
+				'@version': '200.18',
+			},
+		},
+	})
+	const cmdHeaders = new Headers(
+		fetchMock.mock.calls.find(([url]) =>
+			String(url).endsWith('/_cmdstat.jsp'),
+		)?.[1]?.headers,
+	)
+	expect(cmdHeaders.get('X-CSRF-Token')).toBe('unleashed-csrf-from-jsp')
+	expect(cmdHeaders.get('Cookie')).toContain('JSESSIONID=abc')
+})
+
+test('parses csrfToken from _csrfTokenVar.jsp with double quotes', async () => {
+	const config = createConfig()
+	const fetchMock = installFetch((href, init) => {
+		if (init?.method === 'GET' && href === 'https://unleashed.local') {
+			return response(null, {
+				status: 302,
+				headers: { Location: '/admin/wsg/login.jsp' },
+				url: 'https://unleashed.local/',
+			})
+		}
+		if (init?.method === 'GET' && href.endsWith('/admin/wsg/login.jsp')) {
+			return response(null, {
+				status: 200,
+				url: 'https://unleashed.local/admin/wsg/login.jsp',
+			})
+		}
+		if (init?.method === 'GET' && href.includes('username=admin')) {
+			return response(null, {
+				status: 302,
+				headers: {
+					Location: '/admin/wsg/',
+					'set-cookie': 'JSESSIONID=abc; Path=/admin',
+				},
+				url: href,
+			})
+		}
+		if (href.endsWith('/_csrfTokenVar.jsp')) {
+			return response(
+				'<script>var csrfToken = "double-quoted-csrf";</script>',
+				{
+					status: 200,
+				},
+			)
+		}
+		if (href.endsWith('/_cmdstat.jsp')) {
+			return response('<ajax-response><ok/></ajax-response>')
+		}
+		return null
+	})
+
+	const client = createAccessNetworksUnleashedAjaxClient({
+		config,
+		controller: createController(),
+	})
+	await client.request({
+		action: 'getstat',
+		comp: 'system',
+		xmlBody: '<sysinfo/>',
+	})
+	const cmdHeaders = new Headers(
+		fetchMock.mock.calls.find(([url]) =>
+			String(url).endsWith('/_cmdstat.jsp'),
+		)?.[1]?.headers,
+	)
+	expect(cmdHeaders.get('X-CSRF-Token')).toBe('double-quoted-csrf')
+})
+
 test('request honors a caller-supplied updater', async () => {
 	const config = createConfig()
 	const fetchMock = installFetch(loginHandler(), (href) => {

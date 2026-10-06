@@ -65,10 +65,16 @@ function collectCookies(headers: Headers, existing: string | null) {
 
 function extractCsrfToken(text: string) {
 	const match =
+		// Access Networks / RUCKUS Unleashed 200.18 ships a misspelled
+		// `csfrToken` assignment from `_csrfTokenVar.jsp` (single or double quotes).
+		/\bcsfrToken\s*=\s*(['"])([^'"]+)\1/i.exec(text) ??
+		/\bcsrfToken\s*=\s*(['"])([^'"]+)\1/i.exec(text) ??
 		/HTTP_X_CSRF_TOKEN["']?\s*[:=]\s*["']([^"']+)["']/i.exec(text) ??
-		/X-CSRF-Token["']?\s*[:=]\s*["']([^"']+)["']/i.exec(text) ??
-		/([a-zA-Z0-9]{10,})/.exec(text)
-	return match?.[1] ?? null
+		/X-CSRF-Token["']?\s*[:=]\s*["']([^"']+)["']/i.exec(text)
+	if (!match) return null
+	// Named `csfrToken`/`csrfToken` captures put the token in group 2; header
+	// patterns keep it in group 1.
+	return match[2] ?? match[1] ?? null
 }
 
 function isLoginPageUrl(url: string) {
