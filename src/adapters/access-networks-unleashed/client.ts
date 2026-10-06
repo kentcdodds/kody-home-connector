@@ -1,3 +1,4 @@
+import { gunzipSync } from 'node:zlib'
 import { type HomeConnectorConfig } from '../../config.ts'
 import { AccessNetworksUnleashedCookieJar } from './cookie-jar.ts'
 import {
@@ -76,6 +77,131 @@ function resolveUrl(location: string, base: string) {
 	}
 }
 
+function endpointForAction(action: AccessNetworksUnleashedAjaxAction) {
+	switch (action) {
+		case 'getconf':
+		case 'setconf':
+			return '_conf.jsp'
+		case 'getstat':
+		case 'docmd':
+			return '_cmdstat.jsp'
+		default: {
+			const _exhaustive: never = action
+			return _exhaustive
+		}
+	}
+}
+
+function isMutatingAction(action: AccessNetworksUnleashedAjaxAction) {
+	switch (action) {
+		case 'getstat':
+		case 'getconf':
+			return false
+		case 'setconf':
+		case 'docmd':
+			return true
+		default: {
+			const _exhaustive: never = action
+			return _exhaustive
+		}
+	}
+}
+
+function buildAjaxRequestEnvelope(input: {
+	action: AccessNetworksUnleashedAjaxAction
+	comp: string
+	xmlBody: string
+	updater: string | undefined
+}): { xml: string; updater: string } {
+	const { action, comp, xmlBody } = input
+	const escapedComp = escapeXmlAttribute(comp)
+
+	switch (action) {
+		case 'getstat': {
+			// fw 200.18 curl ground truth: double-quoted attrs, enable-gzip="0",
+			// no updater unless the caller supplies one.
+			const updater = input.updater?.trim() ?? ''
+			const updaterAttr = updater
+				? ` updater="${escapeXmlAttribute(updater)}"`
+				: ''
+			return {
+				updater,
+				xml:
+					`<ajax-request action="getstat" comp="${escapedComp}"` +
+					` enable-gzip="0"${updaterAttr}>${xmlBody}</ajax-request>`,
+			}
+		}
+		case 'getconf': {
+			const updater = input.updater?.trim() || generateUpdater(comp)
+			const attrs =
+				`action="getconf" DECRYPT_X="false" ` +
+				`updater="${escapeXmlAttribute(updater)}" comp="${escapedComp}"`
+			if (xmlBody.trim()) {
+				return {
+					updater,
+					xml: `<ajax-request ${attrs}>${xmlBody}</ajax-request>`,
+				}
+			}
+			return {
+				updater,
+				xml: `<ajax-request ${attrs}/>`,
+			}
+		}
+		case 'setconf':
+		case 'docmd': {
+			const updater = input.updater?.trim() || generateUpdater(comp)
+			return {
+				updater,
+				xml:
+					`<ajax-request action="${action}" ` +
+					`comp="${escapedComp}" ` +
+					`updater="${escapeXmlAttribute(updater)}">` +
+					`${xmlBody}</ajax-request>`,
+			}
+		}
+		default: {
+			const _exhaustive: never = action
+			return _exhaustive
+		}
+	}
+}
+
+function describeEmptyResponse(response: Response) {
+	const contentLength = response.headers.get('content-length')
+	const contentEncoding = response.headers.get('content-encoding')
+	const contentType = response.headers.get('content-type')
+	return (
+		`Access Networks Unleashed returned an empty response ` +
+		`(status=${String(response.status)}, ` +
+		`content-length=${contentLength ?? 'missing'}, ` +
+		`content-encoding=${contentEncoding ?? 'missing'}, ` +
+		`content-type=${contentType ?? 'missing'}).`
+	)
+}
+
+function isGzipContentEncoding(value: string | null) {
+	if (!value) return false
+	return /(^|,)\s*(gzip|x-gzip)\s*(,|$)/i.test(value)
+}
+
+async function readResponseBodyText(response: Response) {
+	const encoding = response.headers.get('content-encoding')
+	if (!isGzipContentEncoding(encoding)) {
+		return await response.text()
+	}
+	const bytes = new Uint8Array(await response.arrayBuffer())
+	if (bytes.byteLength === 0) return ''
+	try {
+		const decompressed = gunzipSync(bytes)
+		return new TextDecoder().decode(decompressed)
+	} catch (error) {
+		throw new Error(
+			'Access Networks Unleashed returned a gzip body that could not be decoded.',
+			{ cause: error },
+		)
+	}
+}
+
 export function createAccessNetworksUnleashedAjaxClient(input: {
 	config: HomeConnectorConfig
 	controller: AccessNetworksUnleashedPersistedController
@@ -147,7 +273,7 @@ export function createAccessNetworksUnleashedAjaxClient(input: {
 	}
 
 	// Login uses the controller-wide TLS setting. The per-request override on
-	// `client.request(...)` only applies to the actual _cmdstat.jsp post; the
+	// `client.request(...)` only applies to the actual AJAX post; the
 	// session-establishment hops are concurrency-shared (see ensureSession),
 	// so the first caller's per-request override would otherwise silently win
 	// for every concurrent caller.
@@ -281,11 +407,7 @@ export function createAccessNetworksUnleashedAjaxClient(input: {
 		state.cookies.clear()
 	}
 
-	function isMutatingAction(action: AccessNetworksUnleashedAjaxAction) {
-		return action !== 'getstat'
-	}
-
-	async function postCmdstat(
+	async function postAjax(
 		xml: string,
 		action: AccessNetworksUnleashedAjaxAction,
 		allowInsecureTls: boolean,
@@ -295,18 +417,19 @@ export function createAccessNetworksUnleashedAjaxClient(input: {
 		if (!state.baseUrl) {
 			throw new Error('Access Networks Unleashed session has no base URL.')
 		}
+		const endpoint = endpointForAction(action)
 		const response = await rawRequest(
-			`${state.baseUrl}/_cmdstat.jsp`,
+			`${state.baseUrl}/${endpoint}`,
 			{
 				method: 'POST',
 				headers: {
-					'Content-Type': 'application/x-www-form-urlencoded',
-					Accept: 'text/xml, */*',
+					'Content-Type': 'text/xml',
+					Accept: 'text/xml',
 				},
-				body: `request=${encodeURIComponent(xml)}`,
+				body: xml,
 			},
 			allowInsecureTls,
-			'post _cmdstat.jsp',
+			`post ${endpoint}`,
 		)
 		if (response.status === 302) {
 			resetSession()
@@ -321,16 +444,16 @@ export function createAccessNetworksUnleashedAjaxClient(input: {
 				)
 			}
 			await ensureSession()
-			return await postCmdstat(xml, action, allowInsecureTls, redirectCount + 1)
+			return await postAjax(xml, action, allowInsecureTls, redirectCount + 1)
 		}
-		const text = await response.text()
+		const text = await readResponseBodyText(response)
 		if (!response.ok) {
 			throw new Error(
 				`Access Networks Unleashed request failed with HTTP ${response.status}: ${text.trim()}`,
 			)
 		}
 		if (!text.trim()) {
-			throw new Error('Access Networks Unleashed returned an empty response.')
+			throw new Error(describeEmptyResponse(response))
 		}
 		if (
 			/<xmsg\b[^>]*\b(?:error|status)=["'](?:1|true|error|failed)["']/i.test(
@@ -355,22 +478,22 @@ export function createAccessNetworksUnleashedAjaxClient(input: {
 			if (typeof xmlBody !== 'string') {
 				throw new Error('xmlBody must be a string of inner ajax-request XML.')
 			}
-			const updater = requestInput.updater?.trim() || generateUpdater(comp)
 			const allowInsecureTls =
 				requestInput.allowInsecureTls ??
 				config.accessNetworksUnleashedAllowInsecureTls
-			const envelope =
-				`<ajax-request action='${escapeXmlAttribute(action)}' ` +
-				`comp='${escapeXmlAttribute(comp)}' ` +
-				`updater='${escapeXmlAttribute(updater)}'>` +
-				`${xmlBody}</ajax-request>`
-			const xml = await postCmdstat(envelope, action, allowInsecureTls)
+			const { xml, updater } = buildAjaxRequestEnvelope({
+				action,
+				comp,
+				xmlBody,
+				updater: requestInput.updater,
+			})
+			const responseXml = await postAjax(xml, action, allowInsecureTls)
 			return {
 				action,
 				comp,
 				updater,
-				xml,
-				parsed: parseAccessNetworksUnleashedXml(xml),
+				xml: responseXml,
+				parsed: parseAccessNetworksUnleashedXml(responseXml),
 			}
 		},
 	}
