@@ -40,6 +40,49 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return Boolean(value && typeof value === 'object' && !Array.isArray(value))
 }
 
+/**
+ * Describe a JSON value's structure for diagnostics without exposing secrets.
+ * Returns key names and value types only — never string/number/boolean values.
+ */
+export function describeIslandRouterJsonShape(
+	value: unknown,
+	depth = 0,
+): unknown {
+	if (depth > 5) return 'max-depth'
+	if (value === null) return 'null'
+	if (Array.isArray(value)) {
+		return {
+			type: 'array',
+			length: value.length,
+			sample: value
+				.slice(0, 3)
+				.map((entry) => describeIslandRouterJsonShape(entry, depth + 1)),
+		}
+	}
+	const valueType = typeof value
+	if (valueType === 'object') {
+		const shape: Record<string, unknown> = {}
+		for (const [key, entry] of Object.entries(
+			value as Record<string, unknown>,
+		).slice(0, 40)) {
+			shape[key] = describeIslandRouterJsonShape(entry, depth + 1)
+		}
+		return shape
+	}
+	return valueType
+}
+
+function startupShapeMismatchError(payload: unknown, detail: string) {
+	const shape = describeIslandRouterJsonShape(payload)
+	const shapeJson = JSON.stringify(shape)
+	console.warn(
+		`Island Router startup response shape mismatch (${detail}). Observed keys/types only: ${shapeJson}`,
+	)
+	return new Error(
+		`Island Router startup response shape mismatch (${detail}). Observed keys/types only: ${shapeJson}`,
+	)
+}
+
 function assertWriteAllowed(request: WriteOperationRequest) {
 	if (!request.acknowledgeHighRisk) {
 		throw new Error(
@@ -139,19 +182,31 @@ async function parseJsonResponse(response: Response) {
 function getStartupData(payload: unknown) {
 	const data = isRecord(payload) ? payload['data'] : null
 	if (!isRecord(data)) {
-		throw new Error('Island Router startup response did not include data.')
+		throw startupShapeMismatchError(
+			payload,
+			'expected a data object with id, c (base32 secret), and d (HOTP offset)',
+		)
 	}
 	const id = data['id']
 	const secret = data['c']
 	const offset = data['d']
 	if (typeof id !== 'string' && typeof id !== 'number') {
-		throw new Error('Island Router startup response did not include id.')
+		throw startupShapeMismatchError(
+			payload,
+			'expected data.id as string or number',
+		)
 	}
 	if (typeof secret !== 'string') {
-		throw new Error('Island Router startup response did not include c.')
+		throw startupShapeMismatchError(
+			payload,
+			'expected data.c as base32 secret string',
+		)
 	}
 	if (typeof offset !== 'number') {
-		throw new Error('Island Router startup response did not include d.')
+		throw startupShapeMismatchError(
+			payload,
+			'expected data.d as numeric HOTP offset',
+		)
 	}
 	return {
 		id,

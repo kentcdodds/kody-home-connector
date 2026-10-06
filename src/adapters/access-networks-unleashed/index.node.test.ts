@@ -81,6 +81,7 @@ function installLoginAndCmdstat(handler: (body: string) => Response) {
 			return response(null, {
 				status: 302,
 				headers: {
+					Location: '/admin/wsg/',
 					HTTP_X_CSRF_TOKEN: 'csrf-token',
 					'set-cookie': 'JSESSIONID=abc; Path=/admin',
 				},

@@ -81,7 +81,7 @@ function assertNonEmpty(value: string, field: string) {
 
 function isAuthFailure(error: unknown) {
 	const message = error instanceof Error ? error.message : String(error)
-	return /\b(login was rejected|missing stored credentials|redirected after reauthentication|session has no base URL|did not return an admin redirect)\b/i.test(
+	return /\b(login was rejected|authentication failed|missing stored credentials|redirected after reauthentication|session has no base URL|did not return an admin redirect|no session cookie|no CSRF token)\b/i.test(
 		message,
 	)
 }

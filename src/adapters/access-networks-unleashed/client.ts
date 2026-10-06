@@ -71,6 +71,19 @@ function extractCsrfToken(text: string) {
 	return match?.[1] ?? null
 }
 
+function isLoginPageUrl(url: string) {
+	try {
+		return /login/i.test(new URL(url).pathname)
+	} catch {
+		return /login/i.test(url)
+	}
+}
+
+function hasSessionCookie(cookieHeader: string | null) {
+	if (!cookieHeader?.trim()) return false
+	return /(?:^|;\s*)JSESSIONID=[^\s;]+/i.test(cookieHeader)
+}
+
 export function createAccessNetworksUnleashedAjaxClient(input: {
 	config: HomeConnectorConfig
 	controller: AccessNetworksUnleashedPersistedController
@@ -183,8 +196,30 @@ export function createAccessNetworksUnleashedAjaxClient(input: {
 			allowInsecureTls,
 			'establish a session',
 		)
-		if (loginResult.status === 200) {
-			throw new Error('Access Networks Unleashed login was rejected.')
+		const loginRedirect = loginResult.headers.get('location')
+		const loginRedirectUrl = loginRedirect
+			? new URL(loginRedirect, loginUrl).toString()
+			: null
+		const landedOnLoginPage =
+			loginResult.status === 200 ||
+			(loginRedirectUrl != null && isLoginPageUrl(loginRedirectUrl))
+		if (landedOnLoginPage) {
+			resetSession()
+			throw new Error(
+				'Access Networks Unleashed authentication failed: login was rejected (still on the login page). Check stored controller credentials.',
+			)
+		}
+		if (loginResult.status < 300 || loginResult.status >= 400) {
+			resetSession()
+			throw new Error(
+				`Access Networks Unleashed authentication failed: login returned HTTP ${String(loginResult.status)} instead of a post-login redirect.`,
+			)
+		}
+		if (!loginRedirectUrl) {
+			resetSession()
+			throw new Error(
+				'Access Networks Unleashed authentication failed: login redirect was missing a Location header.',
+			)
 		}
 		const csrfHeader =
 			loginResult.headers.get('HTTP_X_CSRF_TOKEN') ??
@@ -201,6 +236,18 @@ export function createAccessNetworksUnleashedAjaxClient(input: {
 			if (tokenResponse.ok) {
 				csrfToken = extractCsrfToken(await tokenResponse.text())
 			}
+		}
+		if (!hasSessionCookie(state.cookie)) {
+			resetSession()
+			throw new Error(
+				'Access Networks Unleashed authentication failed: no session cookie (JSESSIONID) was established after login.',
+			)
+		}
+		if (!csrfToken?.trim()) {
+			resetSession()
+			throw new Error(
+				'Access Networks Unleashed authentication failed: no CSRF token was returned after login.',
+			)
 		}
 		state.loginUrl = loginUrl
 		state.baseUrl = baseUrl
