@@ -104,7 +104,12 @@ test('startup shape mismatch reports key names and value types only', async () =
 		const adapter = createIslandRouterApiAdapter({
 			config: createConfig(':memory:'),
 			storage,
-			fetchImpl,
+			fetchImpl: async (url, init) => {
+				if (new URL(String(url)).pathname === '/api/startup/info') {
+					return createJsonResponse({ error: 'not found' }, 404)
+				}
+				return fetchImpl(url, init)
+			},
 		})
 		await adapter.setPin('246810')
 		let thrown: unknown
@@ -137,25 +142,34 @@ test('startup shape mismatch reports key names and value types only', async () =
 	}
 })
 
-test('unconfirmed 3.2.3 token/offset handshake derives HOTP without logging token', async () => {
+test('3.2.3 token-bytes HOTP handshake matches RFC 4226 at a fixed clock', async () => {
 	const storage = await createHomeConnectorStorage(createConfig(':memory:'))
-	const requests: Array<{ body: unknown }> = []
-	const secret = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ'
-	const fetchImpl: IslandRouterApiFetch = async (_url, init = {}) => {
+	const requests: Array<{ body: unknown; url: string }> = []
+	const token = '12345678901234567890'
+	const fetchImpl: IslandRouterApiFetch = async (url, init = {}) => {
+		const pathname = new URL(String(url)).pathname
 		const body = init?.body ? JSON.parse(String(init.body)) : null
-		requests.push({ body })
-		if (requests.length === 1) {
+		requests.push({ body, url: String(url) })
+		if (pathname === '/api/startup/info') {
+			return createJsonResponse({ data: { version: '3.2.3' } })
+		}
+		if (
+			pathname === '/api/startup' &&
+			body &&
+			'timeBlocks' in body &&
+			!('id' in body)
+		) {
 			return createJsonResponse({
 				data: {
 					id: 42,
 					device: 7,
-					token: secret,
+					token,
 					offset: 1,
-					type: 1,
+					type: 0,
 				},
 			})
 		}
-		if (requests.length === 2) {
+		if (pathname === '/api/startup' && body && 'otp' in body) {
 			return createJsonResponse({
 				data: {
 					session: 'session-token',
@@ -168,7 +182,7 @@ test('unconfirmed 3.2.3 token/offset handshake derives HOTP without logging toke
 	}
 	try {
 		vi.useFakeTimers()
-		vi.setSystemTime(new Date('2026-05-05T00:00:00.000Z'))
+		vi.setSystemTime(new Date(0))
 		const adapter = createIslandRouterApiAdapter({
 			config: createConfig(':memory:'),
 			storage,
@@ -178,39 +192,92 @@ test('unconfirmed 3.2.3 token/offset handshake derives HOTP without logging toke
 		await expect(
 			adapter.request({ method: 'GET', path: '/api/filters' }),
 		).resolves.toMatchObject({ status: 200 })
-		const timeBlocks = Math.floor(Date.now() / 1000 / 30)
-		expect(requests[1]?.body).toEqual({
-			id: 42,
+		expect(requests.map((request) => new URL(request.url).pathname)).toEqual([
+			'/api/startup/info',
+			'/api/startup',
+			'/api/startup',
+			'/api/filters',
+		])
+		expect(requests[1]?.body).toEqual({ timeBlocks: '0' })
+		expect(requests[2]?.body).toEqual({
+			id: '42',
 			pin: '246810',
-			otp: computeIslandRouterHotp({
-				secret,
-				counter: timeBlocks + 1,
-			}),
-			timeBlocks,
+			otp: '287082',
 		})
-		expect(JSON.stringify(requests)).not.toContain(secret)
+		expect(JSON.stringify(requests)).not.toContain(token)
 	} finally {
 		vi.useRealTimers()
 		await storage.close()
 	}
 })
 
-test('unconfirmed 3.2.3 handshake failure names the attempt without token values', async () => {
+test('3.2.3 authentication failure does not log token, PIN, or otp', async () => {
 	const storage = await createHomeConnectorStorage(createConfig(':memory:'))
-	const fetchImpl: IslandRouterApiFetch = async (_url, init = {}) => {
+	const secretToken = 'super-secret-island-token-value'
+	const fetchImpl: IslandRouterApiFetch = async (url, init = {}) => {
+		const pathname = new URL(String(url)).pathname
 		const body = init?.body ? JSON.parse(String(init.body)) : null
-		if (body && Object.keys(body).length === 1 && 'timeBlocks' in body) {
+		if (pathname === '/api/startup/info') {
+			return createJsonResponse({ data: { version: '3.2.3' } })
+		}
+		if (pathname === '/api/startup' && body && !('id' in (body as object))) {
 			return createJsonResponse({
 				data: {
 					id: 42,
 					device: 7,
-					token: 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ',
+					token: secretToken,
 					offset: 0,
-					type: 1,
+					type: 0,
 				},
 			})
 		}
 		return createJsonResponse({ error: 'denied' }, 401)
+	}
+	try {
+		vi.useFakeTimers()
+		vi.setSystemTime(new Date(0))
+		const adapter = createIslandRouterApiAdapter({
+			config: createConfig(':memory:'),
+			storage,
+			fetchImpl,
+		})
+		await adapter.setPin('246810')
+		await expect(
+			adapter.request({ method: 'GET', path: '/api/filters' }),
+		).rejects.toThrow(/3\.2\.3 authentication failed/)
+		const status = await adapter.getStatus()
+		expect(status.lastAuthError).toMatch(/3\.2\.3 authentication failed/)
+		expect(status.lastAuthError).not.toMatch(/unconfirmed/i)
+		expect(status.lastAuthError).not.toContain(secretToken)
+		expect(status.lastAuthError).not.toContain('246810')
+		expect(status.lastAuthError).not.toContain('755224')
+	} finally {
+		vi.useRealTimers()
+		await storage.close()
+	}
+})
+
+test('3.2.3 non-normal startup types are rejected clearly', async () => {
+	const storage = await createHomeConnectorStorage(createConfig(':memory:'))
+	const secretToken = 'pairing-token-must-not-leak'
+	const fetchImpl: IslandRouterApiFetch = async (url, init = {}) => {
+		const pathname = new URL(String(url)).pathname
+		const body = init?.body ? JSON.parse(String(init.body)) : null
+		if (pathname === '/api/startup/info') {
+			return createJsonResponse({ data: { version: '3.2.3' } })
+		}
+		if (pathname === '/api/startup' && body && !('id' in (body as object))) {
+			return createJsonResponse({
+				data: {
+					id: 42,
+					device: 7,
+					token: secretToken,
+					offset: 0,
+					type: 2,
+				},
+			})
+		}
+		throw new Error(`Unexpected fetch ${pathname}`)
 	}
 	try {
 		const adapter = createIslandRouterApiAdapter({
@@ -221,10 +288,10 @@ test('unconfirmed 3.2.3 handshake failure names the attempt without token values
 		await adapter.setPin('246810')
 		await expect(
 			adapter.request({ method: 'GET', path: '/api/filters' }),
-		).rejects.toThrow(/unconfirmed 3\.2\.3 handshake failed/)
+		).rejects.toThrow(/startup type 2 is not supported/)
 		const status = await adapter.getStatus()
-		expect(status.lastAuthError).toMatch(/unconfirmed 3\.2\.3/)
-		expect(status.lastAuthError).not.toContain('GEZDGNBVGY3TQOJQ')
+		expect(status.lastAuthError).toMatch(/PIN-reset and first-device pairing/)
+		expect(status.lastAuthError).not.toContain(secretToken)
 	} finally {
 		await storage.close()
 	}
@@ -278,22 +345,28 @@ test('auth handshake sends startup, PIN OTP exchange, and bearer request', async
 		init: RequestInit
 		body: unknown
 	}> = []
+	let startupPosts = 0
 	const fetchImpl: IslandRouterApiFetch = async (url, init = {}) => {
 		requests.push({
 			url: String(url),
 			init,
 			body: init?.body ? JSON.parse(String(init.body)) : null,
 		})
-		if (String(url).endsWith('/api/startup') && requests.length === 1) {
-			return createJsonResponse({
-				data: {
-					id: 'startup-id',
-					c: 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ',
-					d: 1,
-				},
-			})
+		const pathname = new URL(String(url)).pathname
+		if (pathname === '/api/startup/info') {
+			return createJsonResponse({ error: 'not found' }, 404)
 		}
-		if (String(url).endsWith('/api/startup') && requests.length === 2) {
+		if (pathname === '/api/startup') {
+			startupPosts += 1
+			if (startupPosts === 1) {
+				return createJsonResponse({
+					data: {
+						id: 'startup-id',
+						c: 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ',
+						d: 1,
+					},
+				})
+			}
 			return createJsonResponse({
 				data: {
 					session: 'session-token',
@@ -325,12 +398,13 @@ test('auth handshake sends startup, PIN OTP exchange, and bearer request', async
 		})
 		const timeBlocks = Math.floor(Date.now() / 1000 / 30)
 		expect(requests.map((request) => new URL(request.url).pathname)).toEqual([
+			'/api/startup/info',
 			'/api/startup',
 			'/api/startup',
 			'/api/filters',
 		])
-		expect(requests[0]?.body).toEqual({ timeBlocks })
-		expect(requests[1]?.body).toEqual({
+		expect(requests[1]?.body).toEqual({ timeBlocks })
+		expect(requests[2]?.body).toEqual({
 			id: 'startup-id',
 			pin: '246810',
 			otp: computeIslandRouterHotp({
@@ -340,7 +414,7 @@ test('auth handshake sends startup, PIN OTP exchange, and bearer request', async
 			timeBlocks,
 		})
 		expect(
-			(requests[2]?.init.headers as Record<string, string>)?.authorization,
+			(requests[3]?.init.headers as Record<string, string>)?.authorization,
 		).toBe('Bearer access-token')
 	} finally {
 		vi.useRealTimers()
@@ -355,6 +429,9 @@ test('401 refreshes tokens and retries once, but a second 401 surfaces auth erro
 	let startupCalls = 0
 	const fetchImpl: IslandRouterApiFetch = async (url) => {
 		const pathName = new URL(String(url)).pathname
+		if (pathName === '/api/startup/info') {
+			return createJsonResponse({ error: 'not found' }, 404)
+		}
 		if (pathName === '/api/startup') {
 			startupCalls += 1
 			if (startupCalls % 2 === 1) {
@@ -418,6 +495,9 @@ test('401 refreshes tokens and retries once, but a second 401 surfaces auth erro
 	let failingStartupCalls = 0
 	const failingFetch: IslandRouterApiFetch = async (url) => {
 		const pathName = new URL(String(url)).pathname
+		if (pathName === '/api/startup/info') {
+			return createJsonResponse({ error: 'not found' }, 404)
+		}
 		if (pathName === '/api/startup') {
 			failingStartupCalls += 1
 			return failingStartupCalls % 2 === 1
