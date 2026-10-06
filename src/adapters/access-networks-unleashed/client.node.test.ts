@@ -310,6 +310,62 @@ test('vap bodies that already set INTERVAL-STATS keep their attrs and still get 
 	)
 })
 
+test('vap LEVEL is preserved when injecting INTERVAL-STATS', async () => {
+	const config = createConfig()
+	const fetchMock = installFetch(loginHandler(), (href) => {
+		if (href.endsWith('/_cmdstat.jsp')) {
+			return response('<ajax-response><vap-list/></ajax-response>')
+		}
+		return null
+	})
+
+	const client = createAccessNetworksUnleashedAjaxClient({
+		config,
+		controller: createController(),
+	})
+	await client.request({
+		action: 'getstat',
+		comp: 'stamgr',
+		xmlBody: '<vap LEVEL="2"/>',
+	})
+
+	const cmdCall = fetchMock.mock.calls.find(([url]) =>
+		String(url).endsWith('/_cmdstat.jsp'),
+	)
+	expect(String(cmdCall?.[1]?.body ?? '')).toBe(
+		'<ajax-request action="getstat" comp="stamgr" enable-gzip="0" caller="SCI"><vap LEVEL="2" INTERVAL-STATS="no"/></ajax-request>',
+	)
+})
+
+test('explicit caller is emitted on non-getstat actions', async () => {
+	const config = createConfig()
+	const fetchMock = installFetch(loginHandler(), (href) => {
+		if (href.endsWith('/_cmdstat.jsp')) {
+			return response('<ajax-response><ok/></ajax-response>')
+		}
+		return null
+	})
+
+	const client = createAccessNetworksUnleashedAjaxClient({
+		config,
+		controller: createController(),
+	})
+	await client.request({
+		action: 'docmd',
+		comp: 'stamgr',
+		xmlBody: '<xcmd cmd="ping"/>',
+		updater: 'cmd.1',
+		caller: 'SCI',
+	})
+
+	const cmdCall = fetchMock.mock.calls.find(([url]) =>
+		String(url).endsWith('/_cmdstat.jsp'),
+	)
+	expect(String(cmdCall?.[1]?.body ?? '')).toBe(
+		'<ajax-request action="docmd" comp="stamgr" updater="cmd.1" caller="SCI"><xcmd cmd="ping"/></ajax-request>',
+	)
+})
+
 test('fw 200.18 curl ground-truth getconf wlansvc-list body is posted to _conf.jsp exactly', async () => {
 	const config = createConfig()
 	const fetchMock = installFetch(loginHandler(), (href) => {
