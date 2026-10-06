@@ -804,8 +804,8 @@ the adapter exposes a single generic capability:
   `SCI` per aioruckus; bare `<vap/>` is normalized to
   `<vap INTERVAL-STATS="no" LEVEL="1"/>`), and an optional `allowInsecureTls`
   override. `getstat` always sends `enable-gzip="0"` and still gunzips a gzip
-  body if the controller returns one. Responses are returned as both raw XML
-  and a best-effort parsed object.
+  body if the controller returns one. Responses are returned as both raw XML and
+  a best-effort parsed object.
 
 The capability is deliberately warning-heavy because `setconf` and `docmd`
 actions can disconnect clients, take SSIDs offline, reboot access points, or

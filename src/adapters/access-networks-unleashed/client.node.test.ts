@@ -337,6 +337,33 @@ test('vap LEVEL is preserved when injecting INTERVAL-STATS', async () => {
 	)
 })
 
+test('RADIO-LEVEL does not suppress LEVEL default; child INTERVAL-STATS does not skip inject', async () => {
+	const config = createConfig()
+	const fetchMock = installFetch(loginHandler(), (href) => {
+		if (href.endsWith('/_cmdstat.jsp')) {
+			return response('<ajax-response><vap-list/></ajax-response>')
+		}
+		return null
+	})
+
+	const client = createAccessNetworksUnleashedAjaxClient({
+		config,
+		controller: createController(),
+	})
+	await client.request({
+		action: 'getstat',
+		comp: 'stamgr',
+		xmlBody: '<vap RADIO-LEVEL="2"><child INTERVAL-STATS="yes"/></vap>',
+	})
+
+	const cmdCall = fetchMock.mock.calls.find(([url]) =>
+		String(url).endsWith('/_cmdstat.jsp'),
+	)
+	expect(String(cmdCall?.[1]?.body ?? '')).toBe(
+		'<ajax-request action="getstat" comp="stamgr" enable-gzip="0" caller="SCI"><vap INTERVAL-STATS="no" LEVEL="1" RADIO-LEVEL="2"><child INTERVAL-STATS="yes"/></vap></ajax-request>',
+	)
+})
+
 test('explicit caller is emitted on non-getstat actions', async () => {
 	const config = createConfig()
 	const fetchMock = installFetch(loginHandler(), (href) => {

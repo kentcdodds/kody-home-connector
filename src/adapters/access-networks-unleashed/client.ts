@@ -120,7 +120,6 @@ function looksLikeVapXmlBody(xmlBody: string) {
 function normalizeVapXmlBody(xmlBody: string) {
 	if (!looksLikeVapXmlBody(xmlBody)) return xmlBody
 	const trimmed = xmlBody.trim()
-	if (/\bINTERVAL-STATS\s*=/i.test(trimmed)) return trimmed
 
 	const selfClosing = /^<vap([^>]*)\/>$/i.exec(trimmed)
 	if (selfClosing) {
@@ -132,13 +131,20 @@ function normalizeVapXmlBody(xmlBody: string) {
 	return `<vap ${injectVapDefaultAttrs(open[1] ?? '')}>${open[2] ?? ''}`
 }
 
+function hasExactXmlAttribute(attrs: string, name: string) {
+	// Match the exact attribute name on the opening tag only (not RADIO-LEVEL
+	// for LEVEL, and not attributes that only appear on child elements).
+	const pattern = new RegExp(`(?:^|[\\s"'])${name}\\s*=`, 'i')
+	return pattern.test(attrs)
+}
+
 function injectVapDefaultAttrs(existingAttrs: string) {
 	const existing = existingAttrs.trim()
 	const injections: Array<string> = []
-	if (!/\bINTERVAL-STATS\s*=/i.test(existing)) {
+	if (!hasExactXmlAttribute(existing, 'INTERVAL-STATS')) {
 		injections.push('INTERVAL-STATS="no"')
 	}
-	if (!/\bLEVEL\s*=/i.test(existing)) {
+	if (!hasExactXmlAttribute(existing, 'LEVEL')) {
 		injections.push('LEVEL="1"')
 	}
 	return [...injections, existing].filter(Boolean).join(' ')
