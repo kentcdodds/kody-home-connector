@@ -25,6 +25,18 @@ export class AccessNetworksUnleashedRequestError extends Error {
 	}
 }
 
+/**
+ * Session-establishment failures only. Matched by identity so command-rejection
+ * bodies that happen to contain phrases like "authentication failed" do not
+ * overwrite controller auth status.
+ */
+export class AccessNetworksUnleashedAuthError extends Error {
+	constructor(message: string, options?: ErrorOptions) {
+		super(message, options)
+		this.name = 'AccessNetworksUnleashedAuthError'
+	}
+}
+
 function getErrorName(error: unknown) {
 	if (error instanceof Error) return error.name
 	if (error && typeof error === 'object' && 'name' in error) {

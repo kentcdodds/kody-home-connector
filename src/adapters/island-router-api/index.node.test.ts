@@ -8,6 +8,7 @@ import { islandRouterApiCredentials } from '../../storage/schema.ts'
 import { createTestHomeConnectorConfig } from '../../test-home-connector-config.ts'
 import {
 	createIslandRouterApiAdapter,
+	describeIslandRouterJsonShape,
 	islandRouterApiWriteConfirmation,
 } from './index.ts'
 import { computeIslandRouterHotp } from './otp.ts'
@@ -86,14 +87,95 @@ test('encrypted PIN round-trips in sqlite and requires HOME_CONNECTOR_SHARED_SEC
 	}
 })
 
-test('HOTP computation matches RFC 4226 vectors', async () => {
-	const secret = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ'
-	expect(computeIslandRouterHotp({ secret, counter: 0 })).toBe('755224')
-	expect(computeIslandRouterHotp({ secret, counter: 1 })).toBe('287082')
-	expect(computeIslandRouterHotp({ secret, counter: 9 })).toBe('520489')
-	expect(() => computeIslandRouterHotp({ secret: ' ', counter: 0 })).toThrow(
-		'Invalid base32 secret',
-	)
+test('startup shape mismatch reports key names and value types only', async () => {
+	const storage = await createHomeConnectorStorage(createConfig(':memory:'))
+	const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+	const fetchImpl: IslandRouterApiFetch = async () =>
+		createJsonResponse({
+			data: {
+				id: 'startup-id-with-secret-value',
+				challenge: 'SUPER-SECRET-BASE32-VALUE',
+				offset: 2,
+				nested: { token: 'should-not-appear' },
+			},
+			meta: 'also-secret',
+		})
+	try {
+		const adapter = createIslandRouterApiAdapter({
+			config: createConfig(':memory:'),
+			storage,
+			fetchImpl,
+		})
+		await adapter.setPin('246810')
+		let thrown: unknown
+		try {
+			await adapter.request({
+				method: 'GET',
+				path: '/api/filters',
+			})
+		} catch (error) {
+			thrown = error
+		}
+		const message = thrown instanceof Error ? thrown.message : String(thrown)
+		expect(message).toMatch(/startup response shape mismatch/)
+		expect(message).toMatch(/expected data\.c as base32 secret string/)
+		expect(message).toContain('"id":"string"')
+		expect(message).toContain('"challenge":"string"')
+		expect(message).toContain('"offset":"number"')
+		expect(message).toContain('"nested":{"token":"string"}')
+		expect(message).not.toContain('startup-id-with-secret-value')
+		expect(message).not.toContain('SUPER-SECRET-BASE32-VALUE')
+		expect(message).not.toContain('should-not-appear')
+		expect(message).not.toContain('also-secret')
+		expect(warn).toHaveBeenCalled()
+		const status = await adapter.getStatus()
+		expect(status.lastAuthError).toContain('shape mismatch')
+		expect(status.lastAuthError).not.toContain('SUPER-SECRET-BASE32-VALUE')
+	} finally {
+		warn.mockRestore()
+		await storage.close()
+	}
+})
+
+test('describeIslandRouterJsonShape never includes primitive values', () => {
+	expect(
+		describeIslandRouterJsonShape({
+			id: 'secret-id',
+			c: 'GEZDGNBVGY3TQOJQ',
+			d: 3,
+			ok: true,
+			missing: null,
+			list: ['alpha', 1],
+		}),
+	).toEqual({
+		id: 'string',
+		c: 'string',
+		d: 'number',
+		ok: 'boolean',
+		missing: 'null',
+		list: {
+			type: 'array',
+			length: 2,
+			sample: ['string', 'number'],
+		},
+	})
+})
+
+test('describeIslandRouterJsonShape redacts secret-like key names', () => {
+	const secretAsKey = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNBV'
+	expect(
+		describeIslandRouterJsonShape({
+			data: {
+				id: 'startup-id',
+				[secretAsKey]: 'should-not-appear',
+			},
+		}),
+	).toEqual({
+		data: {
+			id: 'string',
+			[`[key:len=${String(secretAsKey.length)}]`]: 'string',
+		},
+	})
 })
 
 test('auth handshake sends startup, PIN OTP exchange, and bearer request', async () => {

@@ -97,6 +97,7 @@ function loginHandler(): FetchHandler {
 			return response(null, {
 				status: 302,
 				headers: {
+					Location: '/admin/wsg/',
 					HTTP_X_CSRF_TOKEN: 'csrf-token',
 					'set-cookie': 'JSESSIONID=abc; Path=/admin',
 				},
@@ -164,9 +165,341 @@ test('request posts a fully formed ajax-request envelope to _cmdstat.jsp', async
 	expect(decoded).toContain("comp='system'")
 	expect(decoded).toContain('<sysinfo/>')
 	expect(decoded).toMatch(/updater='system\.\d+\.[a-z0-9]+'/)
-	expect(new Headers(cmdCall?.[1]?.headers).get('Content-Type')).toBe(
+	const cmdHeaders = new Headers(cmdCall?.[1]?.headers)
+	expect(cmdHeaders.get('Content-Type')).toBe(
 		'application/x-www-form-urlencoded',
 	)
+	expect(cmdHeaders.get('Cookie')).toContain('JSESSIONID=abc')
+	expect(cmdHeaders.get('X-CSRF-Token')).toBe('csrf-token')
+})
+
+test('login redirect back to the login page is reported as an auth error', async () => {
+	const config = createConfig()
+	installFetch((href, init) => {
+		if (init?.method === 'GET' && href === 'https://unleashed.local') {
+			return response(null, {
+				status: 302,
+				headers: { Location: '/admin/wsg/login.jsp' },
+				url: 'https://unleashed.local/',
+			})
+		}
+		if (init?.method === 'GET' && href.endsWith('/admin/wsg/login.jsp')) {
+			return response(null, {
+				status: 200,
+				url: 'https://unleashed.local/admin/wsg/login.jsp',
+			})
+		}
+		if (init?.method === 'GET' && href.includes('username=admin')) {
+			return response(null, {
+				status: 302,
+				headers: {
+					Location: '/admin/wsg/login.jsp',
+					'set-cookie': 'JSESSIONID=stale; Path=/admin',
+				},
+				url: href,
+			})
+		}
+		return null
+	})
+
+	const client = createAccessNetworksUnleashedAjaxClient({
+		config,
+		controller: createController(),
+	})
+	await expect(
+		client.request({
+			action: 'getstat',
+			comp: 'system',
+			xmlBody: '<sysinfo/>',
+		}),
+	).rejects.toThrow(/authentication failed: login was rejected/)
+})
+
+test('login without a session cookie is reported as an auth error', async () => {
+	const config = createConfig()
+	installFetch((href, init) => {
+		if (init?.method === 'GET' && href === 'https://unleashed.local') {
+			return response(null, {
+				status: 302,
+				headers: { Location: '/admin/wsg/login.jsp' },
+				url: 'https://unleashed.local/',
+			})
+		}
+		if (init?.method === 'GET' && href.endsWith('/admin/wsg/login.jsp')) {
+			return response(null, {
+				status: 200,
+				url: 'https://unleashed.local/admin/wsg/login.jsp',
+			})
+		}
+		if (init?.method === 'GET' && href.includes('username=admin')) {
+			return response(null, {
+				status: 302,
+				headers: {
+					Location: '/admin/wsg/',
+					HTTP_X_CSRF_TOKEN: 'csrf-token',
+				},
+				url: href,
+			})
+		}
+		return null
+	})
+
+	const client = createAccessNetworksUnleashedAjaxClient({
+		config,
+		controller: createController(),
+	})
+	await expect(
+		client.request({
+			action: 'getstat',
+			comp: 'system',
+			xmlBody: '<sysinfo/>',
+		}),
+	).rejects.toThrow(/no session cookie \(JSESSIONID\)/)
+})
+
+test('login without a CSRF token is reported as an auth error', async () => {
+	const config = createConfig()
+	installFetch((href, init) => {
+		if (init?.method === 'GET' && href === 'https://unleashed.local') {
+			return response(null, {
+				status: 302,
+				headers: { Location: '/admin/wsg/login.jsp' },
+				url: 'https://unleashed.local/',
+			})
+		}
+		if (init?.method === 'GET' && href.endsWith('/admin/wsg/login.jsp')) {
+			return response(null, {
+				status: 200,
+				url: 'https://unleashed.local/admin/wsg/login.jsp',
+			})
+		}
+		if (init?.method === 'GET' && href.includes('username=admin')) {
+			return response(null, {
+				status: 302,
+				headers: {
+					Location: '/admin/wsg/',
+					'set-cookie': 'JSESSIONID=abc; Path=/admin',
+				},
+				url: href,
+			})
+		}
+		if (href.endsWith('/_csrfTokenVar.jsp')) {
+			return response('no token here', { status: 200 })
+		}
+		return null
+	})
+
+	const client = createAccessNetworksUnleashedAjaxClient({
+		config,
+		controller: createController(),
+	})
+	await expect(
+		client.request({
+			action: 'getstat',
+			comp: 'system',
+			xmlBody: '<sysinfo/>',
+		}),
+	).rejects.toThrow(/no CSRF token/)
+})
+
+test('parses misspelled csfrToken from _csrfTokenVar.jsp with single quotes', async () => {
+	const config = createConfig()
+	const fetchMock = installFetch((href, init) => {
+		if (init?.method === 'GET' && href === 'https://unleashed.local') {
+			return response(null, {
+				status: 302,
+				headers: { Location: '/admin/wsg/login.jsp' },
+				url: 'https://unleashed.local/',
+			})
+		}
+		if (init?.method === 'GET' && href.endsWith('/admin/wsg/login.jsp')) {
+			return response(null, {
+				status: 200,
+				url: 'https://unleashed.local/admin/wsg/login.jsp',
+			})
+		}
+		if (init?.method === 'GET' && href.includes('username=admin')) {
+			return response(null, {
+				status: 302,
+				headers: {
+					Location: '/admin/wsg/',
+					'set-cookie': 'JSESSIONID=abc; Path=/admin',
+				},
+				url: href,
+			})
+		}
+		if (href.endsWith('/_csrfTokenVar.jsp')) {
+			// Exact format captured from Unleashed 200.18.7.101 (R550).
+			return response(
+				"<script>var csfrToken = 'unleashed-csrf-from-jsp';</script>",
+				{
+					status: 200,
+				},
+			)
+		}
+		if (href.endsWith('/_cmdstat.jsp')) {
+			return response(
+				'<ajax-response><system name="Unleashed" version="200.18"/></ajax-response>',
+			)
+		}
+		return null
+	})
+
+	const client = createAccessNetworksUnleashedAjaxClient({
+		config,
+		controller: createController(),
+	})
+	const result = await client.request({
+		action: 'getstat',
+		comp: 'system',
+		xmlBody: '<sysinfo/>',
+	})
+	expect(result.parsed).toEqual({
+		'ajax-response': {
+			system: {
+				'@name': 'Unleashed',
+				'@version': '200.18',
+			},
+		},
+	})
+	const cmdHeaders = new Headers(
+		fetchMock.mock.calls.find(([url]) =>
+			String(url).endsWith('/_cmdstat.jsp'),
+		)?.[1]?.headers,
+	)
+	expect(cmdHeaders.get('X-CSRF-Token')).toBe('unleashed-csrf-from-jsp')
+	expect(cmdHeaders.get('Cookie')).toContain('JSESSIONID=abc')
+})
+
+test('parses csrfToken from _csrfTokenVar.jsp with double quotes', async () => {
+	const config = createConfig()
+	const fetchMock = installFetch((href, init) => {
+		if (init?.method === 'GET' && href === 'https://unleashed.local') {
+			return response(null, {
+				status: 302,
+				headers: { Location: '/admin/wsg/login.jsp' },
+				url: 'https://unleashed.local/',
+			})
+		}
+		if (init?.method === 'GET' && href.endsWith('/admin/wsg/login.jsp')) {
+			return response(null, {
+				status: 200,
+				url: 'https://unleashed.local/admin/wsg/login.jsp',
+			})
+		}
+		if (init?.method === 'GET' && href.includes('username=admin')) {
+			return response(null, {
+				status: 302,
+				headers: {
+					Location: '/admin/wsg/',
+					'set-cookie': 'JSESSIONID=abc; Path=/admin',
+				},
+				url: href,
+			})
+		}
+		if (href.endsWith('/_csrfTokenVar.jsp')) {
+			return response(
+				'<script>var csrfToken = "double-quoted-csrf";</script>',
+				{
+					status: 200,
+				},
+			)
+		}
+		if (href.endsWith('/_cmdstat.jsp')) {
+			return response('<ajax-response><ok/></ajax-response>')
+		}
+		return null
+	})
+
+	const client = createAccessNetworksUnleashedAjaxClient({
+		config,
+		controller: createController(),
+	})
+	await client.request({
+		action: 'getstat',
+		comp: 'system',
+		xmlBody: '<sysinfo/>',
+	})
+	const cmdHeaders = new Headers(
+		fetchMock.mock.calls.find(([url]) =>
+			String(url).endsWith('/_cmdstat.jsp'),
+		)?.[1]?.headers,
+	)
+	expect(cmdHeaders.get('X-CSRF-Token')).toBe('double-quoted-csrf')
+})
+
+test('malformed login redirect clears session cookies before retry', async () => {
+	const config = createConfig()
+	let credentialAttempts = 0
+	const fetchMock = installFetch((href, init) => {
+		if (init?.method === 'GET' && href === 'https://unleashed.local') {
+			return response(null, {
+				status: 302,
+				headers: { Location: '/admin/wsg/login.jsp' },
+				url: 'https://unleashed.local/',
+			})
+		}
+		if (init?.method === 'GET' && href.endsWith('/admin/wsg/login.jsp')) {
+			return response(null, {
+				status: 200,
+				headers: { 'set-cookie': 'JSESSIONID=preauth; Path=/admin' },
+				url: 'https://unleashed.local/admin/wsg/login.jsp',
+			})
+		}
+		if (init?.method === 'GET' && href.includes('username=admin')) {
+			credentialAttempts += 1
+			if (credentialAttempts === 1) {
+				return response(null, {
+					status: 302,
+					headers: {
+						Location: 'http://[',
+						'set-cookie': 'JSESSIONID=stale; Path=/admin',
+					},
+					url: href,
+				})
+			}
+			return response(null, {
+				status: 302,
+				headers: {
+					Location: '/admin/wsg/',
+					HTTP_X_CSRF_TOKEN: 'csrf-token',
+					'set-cookie': 'JSESSIONID=fresh; Path=/admin',
+				},
+				url: href,
+			})
+		}
+		if (href.endsWith('/_cmdstat.jsp')) {
+			return response('<ajax-response><ok/></ajax-response>')
+		}
+		return null
+	})
+
+	const client = createAccessNetworksUnleashedAjaxClient({
+		config,
+		controller: createController(),
+	})
+	await expect(
+		client.request({
+			action: 'getstat',
+			comp: 'system',
+			xmlBody: '<sysinfo/>',
+		}),
+	).rejects.toThrow(/login redirect Location was not a valid URL/)
+
+	const result = await client.request({
+		action: 'getstat',
+		comp: 'system',
+		xmlBody: '<sysinfo/>',
+	})
+	expect(result.parsed).toEqual({ 'ajax-response': { ok: null } })
+
+	const loginPageCalls = fetchMock.mock.calls.filter(
+		([url, init]) =>
+			init?.method === 'GET' && String(url).endsWith('/admin/wsg/login.jsp'),
+	)
+	expect(loginPageCalls.length).toBeGreaterThanOrEqual(2)
+	// After the malformed redirect failure, the next login must not reuse stale cookies.
+	expect(new Headers(loginPageCalls[1]?.[1]?.headers).get('Cookie')).toBeNull()
 })
 
 test('request honors a caller-supplied updater', async () => {
@@ -326,6 +659,7 @@ test('failed login does not leave a partial session', async () => {
 			return response(null, {
 				status: 302,
 				headers: {
+					Location: '/admin/wsg/',
 					HTTP_X_CSRF_TOKEN: 'csrf-token',
 					'set-cookie': 'JSESSIONID=abc; Path=/admin',
 				},

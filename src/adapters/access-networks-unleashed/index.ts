@@ -3,6 +3,7 @@ import { type HomeConnectorState } from '../../state.ts'
 import { type HomeConnectorStorage } from '../../storage/index.ts'
 import { createAccessNetworksUnleashedAjaxClient } from './client.ts'
 import { scanAccessNetworksUnleashedControllers } from './discovery.ts'
+import { AccessNetworksUnleashedAuthError } from './errors.ts'
 import {
 	adoptAccessNetworksUnleashedController,
 	getAccessNetworksUnleashedController,
@@ -80,10 +81,7 @@ function assertNonEmpty(value: string, field: string) {
 }
 
 function isAuthFailure(error: unknown) {
-	const message = error instanceof Error ? error.message : String(error)
-	return /\b(login was rejected|missing stored credentials|redirected after reauthentication|session has no base URL|did not return an admin redirect)\b/i.test(
-		message,
-	)
+	return error instanceof AccessNetworksUnleashedAuthError
 }
 
 function assertWriteAllowed(
