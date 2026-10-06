@@ -2,6 +2,7 @@ import { expect, test, vi } from 'vitest'
 import { loadHomeConnectorConfig } from '../../config.ts'
 import { createAppState } from '../../state.ts'
 import { createHomeConnectorStorage } from '../../storage/index.ts'
+import { AccessNetworksUnleashedAuthError } from './errors.ts'
 import {
 	accessNetworksUnleashedRequestConfirmation,
 	createAccessNetworksUnleashedAdapter,
@@ -380,7 +381,9 @@ test('request records lastAuthError when the underlying call is an auth failure'
 		storage,
 		clientFactory: () => ({
 			async request() {
-				throw new Error('Access Networks Unleashed login was rejected.')
+				throw new AccessNetworksUnleashedAuthError(
+					'Access Networks Unleashed authentication failed: login was rejected.',
+				)
 			},
 		}),
 	})
@@ -412,6 +415,60 @@ test('request records lastAuthError when the underlying call is an auth failure'
 
 		const adopted = await adapter.getAdoptedController()
 		expect(adopted?.lastAuthError).toMatch(/login was rejected/)
+	} finally {
+		await storage.close()
+	}
+})
+
+test('request does not record lastAuthError for command rejection text', async () => {
+	const config = createConfig()
+	const state = createAppState()
+	const storage = await createHomeConnectorStorage(config)
+	const adapter = createAccessNetworksUnleashedAdapter({
+		config,
+		state,
+		storage,
+	})
+	let cmdstatCalls = 0
+	using _server = installLoginAndCmdstat(() => {
+		cmdstatCalls += 1
+		if (cmdstatCalls === 1) {
+			return response(
+				'<ajax-response><system name="Access Networks Unleashed"/></ajax-response>',
+			)
+		}
+		return response(
+			'<ajax-response><xmsg error="1" lmsg="authentication failed for remote user"/></ajax-response>',
+		)
+	})
+
+	try {
+		await adapter.scan()
+		await adapter.adoptController({ controllerId: '192.168.10.60' })
+		await adapter.setCredentials({
+			controllerId: '192.168.10.60',
+			username: 'admin',
+			password: 'secret-password',
+		})
+		await adapter.authenticate('192.168.10.60')
+		const afterAuth = await adapter.getAdoptedController()
+		expect(afterAuth?.lastAuthenticatedAt).toBeTruthy()
+		expect(afterAuth?.lastAuthError).toBeNull()
+
+		await expect(
+			adapter.request({
+				action: 'docmd',
+				comp: 'stamgr',
+				xmlBody: "<xcmd cmd='reset'/>",
+				acknowledgeHighRisk: true,
+				reason: validReason,
+				confirmation: accessNetworksUnleashedRequestConfirmation,
+			}),
+		).rejects.toThrow('rejected the command')
+
+		const adopted = await adapter.getAdoptedController()
+		expect(adopted?.lastAuthenticatedAt).toBe(afterAuth?.lastAuthenticatedAt)
+		expect(adopted?.lastAuthError).toBeNull()
 	} finally {
 		await storage.close()
 	}

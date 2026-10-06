@@ -428,6 +428,80 @@ test('parses csrfToken from _csrfTokenVar.jsp with double quotes', async () => {
 	expect(cmdHeaders.get('X-CSRF-Token')).toBe('double-quoted-csrf')
 })
 
+test('malformed login redirect clears session cookies before retry', async () => {
+	const config = createConfig()
+	let credentialAttempts = 0
+	const fetchMock = installFetch((href, init) => {
+		if (init?.method === 'GET' && href === 'https://unleashed.local') {
+			return response(null, {
+				status: 302,
+				headers: { Location: '/admin/wsg/login.jsp' },
+				url: 'https://unleashed.local/',
+			})
+		}
+		if (init?.method === 'GET' && href.endsWith('/admin/wsg/login.jsp')) {
+			return response(null, {
+				status: 200,
+				headers: { 'set-cookie': 'JSESSIONID=preauth; Path=/admin' },
+				url: 'https://unleashed.local/admin/wsg/login.jsp',
+			})
+		}
+		if (init?.method === 'GET' && href.includes('username=admin')) {
+			credentialAttempts += 1
+			if (credentialAttempts === 1) {
+				return response(null, {
+					status: 302,
+					headers: {
+						Location: 'http://[',
+						'set-cookie': 'JSESSIONID=stale; Path=/admin',
+					},
+					url: href,
+				})
+			}
+			return response(null, {
+				status: 302,
+				headers: {
+					Location: '/admin/wsg/',
+					HTTP_X_CSRF_TOKEN: 'csrf-token',
+					'set-cookie': 'JSESSIONID=fresh; Path=/admin',
+				},
+				url: href,
+			})
+		}
+		if (href.endsWith('/_cmdstat.jsp')) {
+			return response('<ajax-response><ok/></ajax-response>')
+		}
+		return null
+	})
+
+	const client = createAccessNetworksUnleashedAjaxClient({
+		config,
+		controller: createController(),
+	})
+	await expect(
+		client.request({
+			action: 'getstat',
+			comp: 'system',
+			xmlBody: '<sysinfo/>',
+		}),
+	).rejects.toThrow(/login redirect Location was not a valid URL/)
+
+	const result = await client.request({
+		action: 'getstat',
+		comp: 'system',
+		xmlBody: '<sysinfo/>',
+	})
+	expect(result.parsed).toEqual({ 'ajax-response': { ok: null } })
+
+	const loginPageCalls = fetchMock.mock.calls.filter(
+		([url, init]) =>
+			init?.method === 'GET' && String(url).endsWith('/admin/wsg/login.jsp'),
+	)
+	expect(loginPageCalls.length).toBeGreaterThanOrEqual(2)
+	// After the malformed redirect failure, the next login must not reuse stale cookies.
+	expect(new Headers(loginPageCalls[1]?.[1]?.headers).get('Cookie')).toBeNull()
+})
+
 test('request honors a caller-supplied updater', async () => {
 	const config = createConfig()
 	const fetchMock = installFetch(loginHandler(), (href) => {

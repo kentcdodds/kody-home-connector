@@ -161,6 +161,23 @@ test('describeIslandRouterJsonShape never includes primitive values', () => {
 	})
 })
 
+test('describeIslandRouterJsonShape redacts secret-like key names', () => {
+	const secretAsKey = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNBV'
+	expect(
+		describeIslandRouterJsonShape({
+			data: {
+				id: 'startup-id',
+				[secretAsKey]: 'should-not-appear',
+			},
+		}),
+	).toEqual({
+		data: {
+			id: 'string',
+			[`[key:len=${String(secretAsKey.length)}]`]: 'string',
+		},
+	})
+})
+
 test('auth handshake sends startup, PIN OTP exchange, and bearer request', async () => {
 	const storage = await createHomeConnectorStorage(createConfig(':memory:'))
 	const requests: Array<{

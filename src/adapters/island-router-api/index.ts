@@ -43,6 +43,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /**
  * Describe a JSON value's structure for diagnostics without exposing secrets.
  * Returns key names and value types only — never string/number/boolean values.
+ * Key names that look like secret material (long / high-entropy) are replaced
+ * with a length marker so a secret-as-key cannot leak into logs or lastAuthError.
  */
 export function describeIslandRouterJsonShape(
 	value: unknown,
@@ -65,11 +67,23 @@ export function describeIslandRouterJsonShape(
 		for (const [key, entry] of Object.entries(
 			value as Record<string, unknown>,
 		).slice(0, 40)) {
-			shape[key] = describeIslandRouterJsonShape(entry, depth + 1)
+			shape[sanitizeIslandStartupShapeKey(key)] = describeIslandRouterJsonShape(
+				entry,
+				depth + 1,
+			)
 		}
 		return shape
 	}
 	return valueType
+}
+
+function sanitizeIslandStartupShapeKey(key: string) {
+	// Keep short identifier-style keys (id, c, d, challenge, data, …).
+	// Longer keys are treated as possible secret-as-key material.
+	if (key.length <= 24 && /^[A-Za-z_][\w.-]*$/.test(key)) {
+		return key
+	}
+	return `[key:len=${String(key.length)}]`
 }
 
 function startupShapeMismatchError(payload: unknown, detail: string) {

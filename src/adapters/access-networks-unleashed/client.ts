@@ -1,5 +1,8 @@
 import { type HomeConnectorConfig } from '../../config.ts'
-import { createAccessNetworksUnleashedRequestError } from './errors.ts'
+import {
+	AccessNetworksUnleashedAuthError,
+	createAccessNetworksUnleashedRequestError,
+} from './errors.ts'
 import { fetchAccessNetworksUnleashed } from './http.ts'
 import { parseAccessNetworksUnleashedXml } from './xml.ts'
 import {
@@ -165,99 +168,116 @@ export function createAccessNetworksUnleashedAjaxClient(input: {
 	// so the first caller's per-request override would otherwise silently win
 	// for every concurrent caller.
 	async function login() {
-		const allowInsecureTls = config.accessNetworksUnleashedAllowInsecureTls
-		const credentials = requireConfig()
-		let csrfToken: string | null = null
-		const head = await rawRequest(
-			credentials.host,
-			{ method: 'GET' },
-			allowInsecureTls,
-			'establish a session',
-			3_000,
-		)
-		const location = head.headers.get('location')
-		if (!location) {
-			throw new Error(
-				'Access Networks Unleashed login did not return an admin redirect.',
+		try {
+			const allowInsecureTls = config.accessNetworksUnleashedAllowInsecureTls
+			const credentials = requireConfig()
+			let csrfToken: string | null = null
+			const head = await rawRequest(
+				credentials.host,
+				{ method: 'GET' },
+				allowInsecureTls,
+				'establish a session',
+				3_000,
 			)
-		}
-		const loginUrl = new URL(location, head.url || credentials.host).toString()
-		const baseUrl = new URL('.', loginUrl).toString().replace(/\/$/, '')
-		const loginPage = await rawRequest(
-			loginUrl,
-			{
-				method: 'GET',
-				headers: { Accept: '*/*' },
-			},
-			allowInsecureTls,
-			'establish a session',
-		)
-		const loginWithParams = new URL(loginPage.url || loginUrl)
-		loginWithParams.searchParams.set('username', credentials.username)
-		loginWithParams.searchParams.set('password', credentials.password)
-		loginWithParams.searchParams.set('ok', 'Log In')
-		const loginResult = await rawRequest(
-			loginWithParams.toString(),
-			{ method: 'GET' },
-			allowInsecureTls,
-			'establish a session',
-		)
-		const loginRedirect = loginResult.headers.get('location')
-		const loginRedirectUrl = loginRedirect
-			? new URL(loginRedirect, loginUrl).toString()
-			: null
-		const landedOnLoginPage =
-			loginResult.status === 200 ||
-			(loginRedirectUrl != null && isLoginPageUrl(loginRedirectUrl))
-		if (landedOnLoginPage) {
-			resetSession()
-			throw new Error(
-				'Access Networks Unleashed authentication failed: login was rejected (still on the login page). Check stored controller credentials.',
+			const location = head.headers.get('location')
+			if (!location) {
+				throw new AccessNetworksUnleashedAuthError(
+					'Access Networks Unleashed login did not return an admin redirect.',
+				)
+			}
+			let loginUrl: string
+			let baseUrl: string
+			try {
+				loginUrl = new URL(location, head.url || credentials.host).toString()
+				baseUrl = new URL('.', loginUrl).toString().replace(/\/$/, '')
+			} catch (error) {
+				throw new AccessNetworksUnleashedAuthError(
+					'Access Networks Unleashed authentication failed: admin redirect Location was not a valid URL.',
+					{ cause: error },
+				)
+			}
+			const loginPage = await rawRequest(
+				loginUrl,
+				{
+					method: 'GET',
+					headers: { Accept: '*/*' },
+				},
+				allowInsecureTls,
+				'establish a session',
 			)
-		}
-		if (loginResult.status < 300 || loginResult.status >= 400) {
-			resetSession()
-			throw new Error(
-				`Access Networks Unleashed authentication failed: login returned HTTP ${String(loginResult.status)} instead of a post-login redirect.`,
-			)
-		}
-		if (!loginRedirectUrl) {
-			resetSession()
-			throw new Error(
-				'Access Networks Unleashed authentication failed: login redirect was missing a Location header.',
-			)
-		}
-		const csrfHeader =
-			loginResult.headers.get('HTTP_X_CSRF_TOKEN') ??
-			loginResult.headers.get('x-csrf-token')
-		if (csrfHeader) {
-			csrfToken = csrfHeader
-		} else {
-			const tokenResponse = await rawRequest(
-				`${baseUrl}/_csrfTokenVar.jsp`,
+			const loginWithParams = new URL(loginPage.url || loginUrl)
+			loginWithParams.searchParams.set('username', credentials.username)
+			loginWithParams.searchParams.set('password', credentials.password)
+			loginWithParams.searchParams.set('ok', 'Log In')
+			const loginResult = await rawRequest(
+				loginWithParams.toString(),
 				{ method: 'GET' },
 				allowInsecureTls,
 				'establish a session',
 			)
-			if (tokenResponse.ok) {
-				csrfToken = extractCsrfToken(await tokenResponse.text())
+			const loginRedirect = loginResult.headers.get('location')
+			let loginRedirectUrl: string | null = null
+			if (loginRedirect) {
+				try {
+					loginRedirectUrl = new URL(loginRedirect, loginUrl).toString()
+				} catch (error) {
+					throw new AccessNetworksUnleashedAuthError(
+						'Access Networks Unleashed authentication failed: login redirect Location was not a valid URL.',
+						{ cause: error },
+					)
+				}
 			}
-		}
-		if (!hasSessionCookie(state.cookie)) {
+			const landedOnLoginPage =
+				loginResult.status === 200 ||
+				(loginRedirectUrl != null && isLoginPageUrl(loginRedirectUrl))
+			if (landedOnLoginPage) {
+				throw new AccessNetworksUnleashedAuthError(
+					'Access Networks Unleashed authentication failed: login was rejected (still on the login page). Check stored controller credentials.',
+				)
+			}
+			if (loginResult.status < 300 || loginResult.status >= 400) {
+				throw new AccessNetworksUnleashedAuthError(
+					`Access Networks Unleashed authentication failed: login returned HTTP ${String(loginResult.status)} instead of a post-login redirect.`,
+				)
+			}
+			if (!loginRedirectUrl) {
+				throw new AccessNetworksUnleashedAuthError(
+					'Access Networks Unleashed authentication failed: login redirect was missing a Location header.',
+				)
+			}
+			const csrfHeader =
+				loginResult.headers.get('HTTP_X_CSRF_TOKEN') ??
+				loginResult.headers.get('x-csrf-token')
+			if (csrfHeader) {
+				csrfToken = csrfHeader
+			} else {
+				const tokenResponse = await rawRequest(
+					`${baseUrl}/_csrfTokenVar.jsp`,
+					{ method: 'GET' },
+					allowInsecureTls,
+					'establish a session',
+				)
+				if (tokenResponse.ok) {
+					csrfToken = extractCsrfToken(await tokenResponse.text())
+				}
+			}
+			if (!hasSessionCookie(state.cookie)) {
+				throw new AccessNetworksUnleashedAuthError(
+					'Access Networks Unleashed authentication failed: no session cookie (JSESSIONID) was established after login.',
+				)
+			}
+			if (!csrfToken?.trim()) {
+				throw new AccessNetworksUnleashedAuthError(
+					'Access Networks Unleashed authentication failed: no CSRF token was returned after login.',
+				)
+			}
+			state.loginUrl = loginUrl
+			state.baseUrl = baseUrl
+			state.csrfToken = csrfToken
+		} catch (error) {
 			resetSession()
-			throw new Error(
-				'Access Networks Unleashed authentication failed: no session cookie (JSESSIONID) was established after login.',
-			)
+			throw error
 		}
-		if (!csrfToken?.trim()) {
-			resetSession()
-			throw new Error(
-				'Access Networks Unleashed authentication failed: no CSRF token was returned after login.',
-			)
-		}
-		state.loginUrl = loginUrl
-		state.baseUrl = baseUrl
-		state.csrfToken = csrfToken
 	}
 
 	async function ensureSession() {
