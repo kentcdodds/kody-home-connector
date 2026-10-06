@@ -1,4 +1,5 @@
 import { type HomeConnectorConfig } from '../../config.ts'
+import { AccessNetworksUnleashedCookieJar } from './cookie-jar.ts'
 import {
 	AccessNetworksUnleashedAuthError,
 	createAccessNetworksUnleashedRequestError,
@@ -17,7 +18,7 @@ type SessionState = {
 	baseUrl: string | null
 	loginUrl: string | null
 	csrfToken: string | null
-	cookie: string | null
+	cookies: AccessNetworksUnleashedCookieJar
 }
 
 function escapeXmlAttribute(value: string) {
@@ -42,38 +43,14 @@ function generateUpdater(comp: string) {
 	return `${safeComp}.${ts}.${rand}`
 }
 
-function collectCookies(headers: Headers, existing: string | null) {
-	const cookies = new Map<string, string>()
-	if (existing) {
-		for (const cookie of existing.split(';')) {
-			const [name, ...rest] = cookie.trim().split('=')
-			if (name && rest.length > 0) cookies.set(name, rest.join('='))
-		}
-	}
-	const setCookie =
-		typeof headers.getSetCookie === 'function'
-			? headers.getSetCookie()
-			: headers.get('set-cookie')
-				? [headers.get('set-cookie') ?? '']
-				: []
-	for (const cookieHeader of setCookie) {
-		const [cookie] = cookieHeader.split(';')
-		const [name, ...rest] = cookie.trim().split('=')
-		if (name && rest.length > 0) cookies.set(name, rest.join('='))
-	}
-	return [...cookies.entries()]
-		.map(([name, value]) => `${name}=${value}`)
-		.join('; ')
-}
-
 function extractCsrfToken(text: string) {
 	const match =
 		// Access Networks / RUCKUS Unleashed 200.18 ships a misspelled
 		// `csfrToken` assignment from `_csrfTokenVar.jsp` (single or double quotes).
 		/\bcsfrToken\s*=\s*(['"])([^'"]+)\1/i.exec(text) ??
 		/\bcsrfToken\s*=\s*(['"])([^'"]+)\1/i.exec(text) ??
-		/HTTP_X_CSRF_TOKEN["']?\s*[:=]\s*["']([^"']+)["']/i.exec(text) ??
-		/X-CSRF-Token["']?\s*[:=]\s*["']([^"']+)["']/i.exec(text)
+		/HTTP_X_CSRF_TOKEN["']?\s*[:=]\s*["']([^'"]+)["']/i.exec(text) ??
+		/X-CSRF-Token["']?\s*[:=]\s*["']([^'"]+)["']/i.exec(text)
 	if (!match) return null
 	// Named `csfrToken`/`csrfToken` captures put the token in group 2; header
 	// patterns keep it in group 1.
@@ -88,9 +65,15 @@ function isLoginPageUrl(url: string) {
 	}
 }
 
-function hasSessionCookie(cookieHeader: string | null) {
-	if (!cookieHeader?.trim()) return false
-	return /(?:^|;\s*)JSESSIONID=[^\s;]+/i.test(cookieHeader)
+function resolveUrl(location: string, base: string) {
+	try {
+		return new URL(location, base).toString()
+	} catch (error) {
+		throw new AccessNetworksUnleashedAuthError(
+			'Access Networks Unleashed authentication failed: redirect Location was not a valid URL.',
+			{ cause: error },
+		)
+	}
 }
 
 export function createAccessNetworksUnleashedAjaxClient(input: {
@@ -102,7 +85,7 @@ export function createAccessNetworksUnleashedAjaxClient(input: {
 		baseUrl: null,
 		loginUrl: null,
 		csrfToken: null,
-		cookie: null,
+		cookies: new AccessNetworksUnleashedCookieJar(),
 	}
 	let loginPromise: Promise<void> | null = null
 
@@ -136,7 +119,8 @@ export function createAccessNetworksUnleashedAjaxClient(input: {
 		timeoutMs = config.accessNetworksUnleashedRequestTimeoutMs,
 	) {
 		const headers = new Headers(init.headers)
-		if (state.cookie) headers.set('Cookie', state.cookie)
+		const cookieHeader = state.cookies.headerValue()
+		if (cookieHeader) headers.set('Cookie', cookieHeader)
 		if (state.csrfToken) headers.set('X-CSRF-Token', state.csrfToken)
 		let response: Response
 		try {
@@ -158,7 +142,7 @@ export function createAccessNetworksUnleashedAjaxClient(input: {
 				error,
 			})
 		}
-		state.cookie = collectCookies(response.headers, state.cookie)
+		state.cookies.absorb(response.headers)
 		return response
 	}
 
@@ -172,6 +156,9 @@ export function createAccessNetworksUnleashedAjaxClient(input: {
 			const allowInsecureTls = config.accessNetworksUnleashedAllowInsecureTls
 			const credentials = requireConfig()
 			let csrfToken: string | null = null
+
+			// Discover the admin login URL (redirect from the controller root),
+			// falling back to /admin/login.jsp used by Unleashed 200.18.
 			const head = await rawRequest(
 				credentials.host,
 				{ method: 'GET' },
@@ -179,24 +166,21 @@ export function createAccessNetworksUnleashedAjaxClient(input: {
 				'establish a session',
 				3_000,
 			)
-			const location = head.headers.get('location')
-			if (!location) {
-				throw new AccessNetworksUnleashedAuthError(
-					'Access Networks Unleashed login did not return an admin redirect.',
-				)
-			}
+			const headLocation = head.headers.get('location')
 			let loginUrl: string
-			let baseUrl: string
-			try {
-				loginUrl = new URL(location, head.url || credentials.host).toString()
-				baseUrl = new URL('.', loginUrl).toString().replace(/\/$/, '')
-			} catch (error) {
-				throw new AccessNetworksUnleashedAuthError(
-					'Access Networks Unleashed authentication failed: admin redirect Location was not a valid URL.',
-					{ cause: error },
-				)
+			if (headLocation) {
+				loginUrl = resolveUrl(headLocation, head.url || credentials.host)
+			} else {
+				loginUrl = new URL(
+					'/admin/login.jsp',
+					`${credentials.host}/`,
+				).toString()
 			}
-			const loginPage = await rawRequest(
+			const baseUrl = new URL('.', loginUrl).toString().replace(/\/$/, '')
+
+			// Pre-login GET establishes the session cookie (e.g. `-ejs-session-`
+			// on 200.18, or JSESSIONID on older builds).
+			await rawRequest(
 				loginUrl,
 				{
 					method: 'GET',
@@ -205,28 +189,29 @@ export function createAccessNetworksUnleashedAjaxClient(input: {
 				allowInsecureTls,
 				'establish a session',
 			)
-			const loginWithParams = new URL(loginPage.url || loginUrl)
-			loginWithParams.searchParams.set('username', credentials.username)
-			loginWithParams.searchParams.set('password', credentials.password)
-			loginWithParams.searchParams.set('ok', 'Log In')
+
+			const loginBody = new URLSearchParams({
+				username: credentials.username,
+				password: credentials.password,
+				ok: 'Log In',
+			}).toString()
 			const loginResult = await rawRequest(
-				loginWithParams.toString(),
-				{ method: 'GET' },
+				loginUrl,
+				{
+					method: 'POST',
+					headers: {
+						'Content-Type': 'application/x-www-form-urlencoded',
+						Accept: '*/*',
+					},
+					body: loginBody,
+				},
 				allowInsecureTls,
 				'establish a session',
 			)
 			const loginRedirect = loginResult.headers.get('location')
-			let loginRedirectUrl: string | null = null
-			if (loginRedirect) {
-				try {
-					loginRedirectUrl = new URL(loginRedirect, loginUrl).toString()
-				} catch (error) {
-					throw new AccessNetworksUnleashedAuthError(
-						'Access Networks Unleashed authentication failed: login redirect Location was not a valid URL.',
-						{ cause: error },
-					)
-				}
-			}
+			const loginRedirectUrl = loginRedirect
+				? resolveUrl(loginRedirect, loginUrl)
+				: null
 			const landedOnLoginPage =
 				loginResult.status === 200 ||
 				(loginRedirectUrl != null && isLoginPageUrl(loginRedirectUrl))
@@ -245,6 +230,7 @@ export function createAccessNetworksUnleashedAjaxClient(input: {
 					'Access Networks Unleashed authentication failed: login redirect was missing a Location header.',
 				)
 			}
+
 			const csrfHeader =
 				loginResult.headers.get('HTTP_X_CSRF_TOKEN') ??
 				loginResult.headers.get('x-csrf-token')
@@ -261,14 +247,14 @@ export function createAccessNetworksUnleashedAjaxClient(input: {
 					csrfToken = extractCsrfToken(await tokenResponse.text())
 				}
 			}
-			if (!hasSessionCookie(state.cookie)) {
-				throw new AccessNetworksUnleashedAuthError(
-					'Access Networks Unleashed authentication failed: no session cookie (JSESSIONID) was established after login.',
-				)
-			}
 			if (!csrfToken?.trim()) {
 				throw new AccessNetworksUnleashedAuthError(
 					'Access Networks Unleashed authentication failed: no CSRF token was returned after login.',
+				)
+			}
+			if (state.cookies.size === 0) {
+				throw new AccessNetworksUnleashedAuthError(
+					'Access Networks Unleashed authentication failed: no session cookies were established after login.',
 				)
 			}
 			state.loginUrl = loginUrl
@@ -292,7 +278,7 @@ export function createAccessNetworksUnleashedAjaxClient(input: {
 		state.baseUrl = null
 		state.loginUrl = null
 		state.csrfToken = null
-		state.cookie = null
+		state.cookies.clear()
 	}
 
 	function isMutatingAction(action: AccessNetworksUnleashedAjaxAction) {

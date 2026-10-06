@@ -193,39 +193,111 @@ async function parseJsonResponse(response: Response) {
 	}
 }
 
-function getStartupData(payload: unknown) {
+type IslandStartupChallenge =
+	| {
+			kind: 'classic'
+			id: string | number
+			secret: string
+			offset: number
+	  }
+	| {
+			/**
+			 * Unconfirmed Island Pro 3.2.3 shape. Public/app sources do not document
+			 * how `token` + `offset` produce the OTP; we attempt HOTP(token, timeBlocks+offset)
+			 * as the structurally closest reading of the classic c/d protocol and surface
+			 * a clear error if that attempt fails. Never log token values.
+			 */
+			kind: 'token-offset-unconfirmed'
+			id: string | number
+			token: string
+			offset: number
+	  }
+
+function getStartupData(payload: unknown): IslandStartupChallenge {
 	const data = isRecord(payload) ? payload['data'] : null
 	if (!isRecord(data)) {
 		throw startupShapeMismatchError(
 			payload,
-			'expected a data object with id, c (base32 secret), and d (HOTP offset)',
+			'expected a data object with classic id/c/d or 3.2.3 id/token/offset',
 		)
 	}
 	const id = data['id']
-	const secret = data['c']
-	const offset = data['d']
 	if (typeof id !== 'string' && typeof id !== 'number') {
 		throw startupShapeMismatchError(
 			payload,
 			'expected data.id as string or number',
 		)
 	}
-	if (typeof secret !== 'string') {
-		throw startupShapeMismatchError(
-			payload,
-			'expected data.c as base32 secret string',
-		)
+
+	const classicSecret = data['c']
+	const classicOffset = data['d']
+	const hasClassic =
+		typeof classicSecret === 'string' && typeof classicOffset === 'number'
+	if (hasClassic) {
+		return {
+			kind: 'classic',
+			id,
+			secret: classicSecret,
+			offset: classicOffset,
+		}
 	}
-	if (typeof offset !== 'number') {
-		throw startupShapeMismatchError(
-			payload,
-			'expected data.d as numeric HOTP offset',
-		)
+
+	const token = data['token']
+	const offset = data['offset']
+	const hasTokenOffset =
+		typeof token === 'string' &&
+		token.length > 0 &&
+		typeof offset === 'number' &&
+		Number.isFinite(offset)
+	if (hasTokenOffset) {
+		return {
+			kind: 'token-offset-unconfirmed',
+			id,
+			token,
+			offset,
+		}
 	}
-	return {
-		id,
-		secret,
-		offset,
+
+	throw startupShapeMismatchError(
+		payload,
+		'expected classic data.c (base32) + data.d (number), or 3.2.3 data.token (string) + data.offset (number)',
+	)
+}
+
+function computeStartupOtp(input: {
+	challenge: IslandStartupChallenge
+	timeBlocks: number
+}) {
+	const { challenge, timeBlocks } = input
+	switch (challenge.kind) {
+		case 'classic':
+			return {
+				otp: computeIslandRouterHotp({
+					secret: challenge.secret,
+					counter: timeBlocks + challenge.offset,
+				}),
+				handshakeLabel: 'classic id/c/d HOTP',
+			}
+		case 'token-offset-unconfirmed':
+			try {
+				return {
+					otp: computeIslandRouterHotp({
+						secret: challenge.token,
+						counter: timeBlocks + challenge.offset,
+					}),
+					handshakeLabel:
+						'unconfirmed 3.2.3 id/token/offset HOTP (token as base32 secret; offset as counter skew; no vendor docs found)',
+				}
+			} catch (error) {
+				const detail = error instanceof Error ? error.message : String(error)
+				throw new Error(
+					`Island Router unconfirmed 3.2.3 handshake could not derive OTP from data.token + data.offset (${detail}). Tried treating data.token as a base32 HOTP secret and data.offset as classic-style counter skew (timeBlocks+offset). Token value not logged. This mapping is unconfirmed — no public Island app/HA evidence found.`,
+				)
+			}
+		default: {
+			const _exhaustive: never = challenge
+			return _exhaustive
+		}
 	}
 }
 
@@ -327,9 +399,9 @@ export function createIslandRouterApiAdapter(input: {
 				)
 			}
 			const startup = getStartupData(startupPayload)
-			const otp = computeIslandRouterHotp({
-				secret: startup.secret,
-				counter: timeBlocks + startup.offset,
+			const { otp, handshakeLabel } = computeStartupOtp({
+				challenge: startup,
+				timeBlocks,
 			})
 			const authResponse = await requestJson({
 				fetchImpl,
@@ -345,6 +417,11 @@ export function createIslandRouterApiAdapter(input: {
 			})
 			const authPayload = await parseJsonResponse(authResponse)
 			if (!authResponse.ok) {
+				if (startup.kind === 'token-offset-unconfirmed') {
+					throw new Error(
+						`Island Router unconfirmed 3.2.3 handshake failed with HTTP ${String(authResponse.status)} after trying ${handshakeLabel}. Auth POST body fields: id, pin, otp, timeBlocks (token value not logged).`,
+					)
+				}
 				throw new Error(
 					`Island Router authentication failed with HTTP ${authResponse.status}.`,
 				)

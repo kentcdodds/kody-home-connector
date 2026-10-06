@@ -75,10 +75,17 @@ function installLoginAndCmdstat(handler: (body: string) => Response) {
 		if (init?.method === 'GET' && href.endsWith('/admin/wsg/login.jsp')) {
 			return response(null, {
 				status: 200,
+				headers: {
+					'set-cookie': 'JSESSIONID=abc; Path=/admin; HttpOnly',
+				},
 				url: 'https://192.168.10.60/admin/wsg/login.jsp',
 			})
 		}
-		if (init?.method === 'GET' && href.includes('username=admin')) {
+		if (
+			(init?.method === 'POST' || init?.method === 'post') &&
+			href.endsWith('/login.jsp') &&
+			String(init?.body ?? '').includes('username=admin')
+		) {
 			return response(null, {
 				status: 302,
 				headers: {

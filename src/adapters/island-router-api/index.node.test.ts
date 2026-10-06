@@ -118,7 +118,7 @@ test('startup shape mismatch reports key names and value types only', async () =
 		}
 		const message = thrown instanceof Error ? thrown.message : String(thrown)
 		expect(message).toMatch(/startup response shape mismatch/)
-		expect(message).toMatch(/expected data\.c as base32 secret string/)
+		expect(message).toMatch(/expected classic data\.c|data\.token/)
 		expect(message).toContain('"id":"string"')
 		expect(message).toContain('"challenge":"string"')
 		expect(message).toContain('"offset":"number"')
@@ -133,6 +133,99 @@ test('startup shape mismatch reports key names and value types only', async () =
 		expect(status.lastAuthError).not.toContain('SUPER-SECRET-BASE32-VALUE')
 	} finally {
 		warn.mockRestore()
+		await storage.close()
+	}
+})
+
+test('unconfirmed 3.2.3 token/offset handshake derives HOTP without logging token', async () => {
+	const storage = await createHomeConnectorStorage(createConfig(':memory:'))
+	const requests: Array<{ body: unknown }> = []
+	const secret = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ'
+	const fetchImpl: IslandRouterApiFetch = async (_url, init = {}) => {
+		const body = init?.body ? JSON.parse(String(init.body)) : null
+		requests.push({ body })
+		if (requests.length === 1) {
+			return createJsonResponse({
+				data: {
+					id: 42,
+					device: 7,
+					token: secret,
+					offset: 1,
+					type: 1,
+				},
+			})
+		}
+		if (requests.length === 2) {
+			return createJsonResponse({
+				data: {
+					session: 'session-token',
+					access: 'access-token',
+					refresh: 'refresh-token',
+				},
+			})
+		}
+		return createJsonResponse({ filters: [] })
+	}
+	try {
+		vi.useFakeTimers()
+		vi.setSystemTime(new Date('2026-05-05T00:00:00.000Z'))
+		const adapter = createIslandRouterApiAdapter({
+			config: createConfig(':memory:'),
+			storage,
+			fetchImpl,
+		})
+		await adapter.setPin('246810')
+		await expect(
+			adapter.request({ method: 'GET', path: '/api/filters' }),
+		).resolves.toMatchObject({ status: 200 })
+		const timeBlocks = Math.floor(Date.now() / 1000 / 30)
+		expect(requests[1]?.body).toEqual({
+			id: 42,
+			pin: '246810',
+			otp: computeIslandRouterHotp({
+				secret,
+				counter: timeBlocks + 1,
+			}),
+			timeBlocks,
+		})
+		expect(JSON.stringify(requests)).not.toContain(secret)
+	} finally {
+		vi.useRealTimers()
+		await storage.close()
+	}
+})
+
+test('unconfirmed 3.2.3 handshake failure names the attempt without token values', async () => {
+	const storage = await createHomeConnectorStorage(createConfig(':memory:'))
+	const fetchImpl: IslandRouterApiFetch = async (_url, init = {}) => {
+		const body = init?.body ? JSON.parse(String(init.body)) : null
+		if (body && Object.keys(body).length === 1 && 'timeBlocks' in body) {
+			return createJsonResponse({
+				data: {
+					id: 42,
+					device: 7,
+					token: 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ',
+					offset: 0,
+					type: 1,
+				},
+			})
+		}
+		return createJsonResponse({ error: 'denied' }, 401)
+	}
+	try {
+		const adapter = createIslandRouterApiAdapter({
+			config: createConfig(':memory:'),
+			storage,
+			fetchImpl,
+		})
+		await adapter.setPin('246810')
+		await expect(
+			adapter.request({ method: 'GET', path: '/api/filters' }),
+		).rejects.toThrow(/unconfirmed 3\.2\.3 handshake failed/)
+		const status = await adapter.getStatus()
+		expect(status.lastAuthError).toMatch(/unconfirmed 3\.2\.3/)
+		expect(status.lastAuthError).not.toContain('GEZDGNBVGY3TQOJQ')
+	} finally {
 		await storage.close()
 	}
 })

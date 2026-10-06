@@ -78,28 +78,45 @@ type FetchHandler = (
 	init: RequestInit | undefined,
 ) => Promise<Response> | Response | null | undefined
 
-function loginHandler(): FetchHandler {
+function isLoginPost(href: string, init: RequestInit | undefined) {
+	return (
+		(init?.method === 'POST' || init?.method === 'post') &&
+		href.endsWith('/login.jsp') &&
+		String(init?.body ?? '').includes('username=admin')
+	)
+}
+
+function loginHandler(options?: {
+	loginPath?: string
+	sessionCookie?: string
+	dashboardPath?: string
+}): FetchHandler {
+	const loginPath = options?.loginPath ?? '/admin/wsg/login.jsp'
+	const sessionCookie =
+		options?.sessionCookie ?? 'JSESSIONID=abc; Path=/admin; HttpOnly; Secure'
+	const dashboardPath = options?.dashboardPath ?? '/admin/wsg/'
 	return (href, init) => {
 		if (init?.method === 'GET' && href === 'https://unleashed.local') {
 			return response(null, {
 				status: 302,
-				headers: { Location: '/admin/wsg/login.jsp' },
+				headers: { Location: loginPath },
 				url: 'https://unleashed.local/',
 			})
 		}
-		if (init?.method === 'GET' && href.endsWith('/admin/wsg/login.jsp')) {
+		if (init?.method === 'GET' && href.endsWith(loginPath)) {
 			return response(null, {
 				status: 200,
-				url: 'https://unleashed.local/admin/wsg/login.jsp',
+				headers: { 'set-cookie': sessionCookie },
+				url: `https://unleashed.local${loginPath}`,
 			})
 		}
-		if (init?.method === 'GET' && href.includes('username=admin')) {
+		if (isLoginPost(href, init)) {
 			return response(null, {
 				status: 302,
 				headers: {
-					Location: '/admin/wsg/',
+					Location: dashboardPath,
 					HTTP_X_CSRF_TOKEN: 'csrf-token',
-					'set-cookie': 'JSESSIONID=abc; Path=/admin',
+					'set-cookie': sessionCookie,
 				},
 				url: href,
 			})
@@ -189,7 +206,7 @@ test('login redirect back to the login page is reported as an auth error', async
 				url: 'https://unleashed.local/admin/wsg/login.jsp',
 			})
 		}
-		if (init?.method === 'GET' && href.includes('username=admin')) {
+		if (isLoginPost(href, init)) {
 			return response(null, {
 				status: 302,
 				headers: {
@@ -215,7 +232,7 @@ test('login redirect back to the login page is reported as an auth error', async
 	).rejects.toThrow(/authentication failed: login was rejected/)
 })
 
-test('login without a session cookie is reported as an auth error', async () => {
+test('login without any session cookie is reported as an auth error', async () => {
 	const config = createConfig()
 	installFetch((href, init) => {
 		if (init?.method === 'GET' && href === 'https://unleashed.local') {
@@ -231,7 +248,7 @@ test('login without a session cookie is reported as an auth error', async () => 
 				url: 'https://unleashed.local/admin/wsg/login.jsp',
 			})
 		}
-		if (init?.method === 'GET' && href.includes('username=admin')) {
+		if (isLoginPost(href, init)) {
 			return response(null, {
 				status: 302,
 				headers: {
@@ -254,7 +271,7 @@ test('login without a session cookie is reported as an auth error', async () => 
 			comp: 'system',
 			xmlBody: '<sysinfo/>',
 		}),
-	).rejects.toThrow(/no session cookie \(JSESSIONID\)/)
+	).rejects.toThrow(/no session cookies were established/)
 })
 
 test('login without a CSRF token is reported as an auth error', async () => {
@@ -270,10 +287,13 @@ test('login without a CSRF token is reported as an auth error', async () => {
 		if (init?.method === 'GET' && href.endsWith('/admin/wsg/login.jsp')) {
 			return response(null, {
 				status: 200,
+				headers: {
+					'set-cookie': 'JSESSIONID=abc; Path=/admin',
+				},
 				url: 'https://unleashed.local/admin/wsg/login.jsp',
 			})
 		}
-		if (init?.method === 'GET' && href.includes('username=admin')) {
+		if (isLoginPost(href, init)) {
 			return response(null, {
 				status: 302,
 				headers: {
@@ -302,6 +322,82 @@ test('login without a CSRF token is reported as an auth error', async () => {
 	).rejects.toThrow(/no CSRF token/)
 })
 
+test('200.18 -ejs-session- cookie jar + POST login succeeds without JSESSIONID', async () => {
+	const config = createConfig()
+	const sessionCookie =
+		'-ejs-session-=ejs-session-value; Path=/admin; HttpOnly; Secure'
+	const fetchMock = installFetch((href, init) => {
+		if (init?.method === 'GET' && href === 'https://unleashed.local') {
+			return response(null, {
+				status: 302,
+				headers: { Location: '/admin/login.jsp' },
+				url: 'https://unleashed.local/',
+			})
+		}
+		if (init?.method === 'GET' && href.endsWith('/admin/login.jsp')) {
+			return response(null, {
+				status: 200,
+				headers: { 'set-cookie': sessionCookie },
+				url: 'https://unleashed.local/admin/login.jsp',
+			})
+		}
+		if (isLoginPost(href, init)) {
+			return response(null, {
+				status: 302,
+				headers: {
+					Location: '/admin/dashboard.jsp',
+					'set-cookie': sessionCookie,
+				},
+				url: href,
+			})
+		}
+		if (href.endsWith('/_csrfTokenVar.jsp')) {
+			return response(
+				"<script>var csfrToken = 'unleashed-csrf-from-jsp';</script>",
+				{ status: 200 },
+			)
+		}
+		if (href.endsWith('/_cmdstat.jsp')) {
+			return response(
+				'<ajax-response><system name="Unleashed" version="200.18"/></ajax-response>',
+			)
+		}
+		return null
+	})
+
+	const client = createAccessNetworksUnleashedAjaxClient({
+		config,
+		controller: createController(),
+	})
+	const result = await client.request({
+		action: 'getstat',
+		comp: 'system',
+		xmlBody: '<sysinfo/>',
+	})
+	expect(result.parsed).toEqual({
+		'ajax-response': {
+			system: {
+				'@name': 'Unleashed',
+				'@version': '200.18',
+			},
+		},
+	})
+	const loginPost = fetchMock.mock.calls.find(([url, init]) =>
+		isLoginPost(String(url), init),
+	)
+	expect(loginPost?.[1]?.method).toBe('POST')
+	expect(String(loginPost?.[1]?.body ?? '')).toContain('username=admin')
+	expect(String(loginPost?.[1]?.body ?? '')).toContain('ok=Log+In')
+	const cmdHeaders = new Headers(
+		fetchMock.mock.calls.find(([url]) =>
+			String(url).endsWith('/_cmdstat.jsp'),
+		)?.[1]?.headers,
+	)
+	expect(cmdHeaders.get('Cookie')).toContain('-ejs-session-=ejs-session-value')
+	expect(cmdHeaders.get('Cookie')).not.toMatch(/JSESSIONID=/)
+	expect(cmdHeaders.get('X-CSRF-Token')).toBe('unleashed-csrf-from-jsp')
+})
+
 test('parses misspelled csfrToken from _csrfTokenVar.jsp with single quotes', async () => {
 	const config = createConfig()
 	const fetchMock = installFetch((href, init) => {
@@ -318,7 +414,7 @@ test('parses misspelled csfrToken from _csrfTokenVar.jsp with single quotes', as
 				url: 'https://unleashed.local/admin/wsg/login.jsp',
 			})
 		}
-		if (init?.method === 'GET' && href.includes('username=admin')) {
+		if (isLoginPost(href, init)) {
 			return response(null, {
 				status: 302,
 				headers: {
@@ -387,7 +483,7 @@ test('parses csrfToken from _csrfTokenVar.jsp with double quotes', async () => {
 				url: 'https://unleashed.local/admin/wsg/login.jsp',
 			})
 		}
-		if (init?.method === 'GET' && href.includes('username=admin')) {
+		if (isLoginPost(href, init)) {
 			return response(null, {
 				status: 302,
 				headers: {
@@ -446,7 +542,7 @@ test('malformed login redirect clears session cookies before retry', async () =>
 				url: 'https://unleashed.local/admin/wsg/login.jsp',
 			})
 		}
-		if (init?.method === 'GET' && href.includes('username=admin')) {
+		if (isLoginPost(href, init)) {
 			credentialAttempts += 1
 			if (credentialAttempts === 1) {
 				return response(null, {
@@ -484,7 +580,7 @@ test('malformed login redirect clears session cookies before retry', async () =>
 			comp: 'system',
 			xmlBody: '<sysinfo/>',
 		}),
-	).rejects.toThrow(/login redirect Location was not a valid URL/)
+	).rejects.toThrow(/redirect Location was not a valid URL/)
 
 	const result = await client.request({
 		action: 'getstat',
@@ -561,7 +657,7 @@ test('request reauthenticates once on 302 for getstat actions', async () => {
 		'ajax-response': { ok: null },
 	})
 	const loginAttempts = fetchMock.mock.calls.filter((call) =>
-		String(call[0]).includes('username=admin'),
+		isLoginPost(String(call[0]), call[1]),
 	)
 	expect(loginAttempts).toHaveLength(2)
 })
@@ -588,7 +684,7 @@ test('request does not retry mutating actions after a 302', async () => {
 	).rejects.toThrow('redirected during a command')
 
 	const loginAttempts = fetchMock.mock.calls.filter((call) =>
-		String(call[0]).includes('username=admin'),
+		isLoginPost(String(call[0]), call[1]),
 	)
 	expect(loginAttempts).toHaveLength(1)
 })
@@ -634,7 +730,7 @@ test('concurrent requests share one login flow', async () => {
 	])
 
 	const loginAttempts = fetchMock.mock.calls.filter((call) =>
-		String(call[0]).includes('username=admin'),
+		isLoginPost(String(call[0]), call[1]),
 	)
 	expect(loginAttempts).toHaveLength(1)
 })
@@ -651,7 +747,7 @@ test('failed login does not leave a partial session', async () => {
 				url: 'https://unleashed.local/',
 			})
 		}
-		if (init?.method === 'GET' && href.includes('username=admin')) {
+		if (isLoginPost(href, init)) {
 			if (rejectedLogin) {
 				rejectedLogin = false
 				return response(null, { status: 200, url: href })
