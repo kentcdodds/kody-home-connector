@@ -398,6 +398,9 @@ export function createIslandRouterApiAdapter(input: {
 				method: 'GET',
 			})
 			const useFirmware323 = infoResponse.ok
+			// Drain/cancel so the discovery response does not hold the socket
+			// open until GC while we continue the challenge POST.
+			await infoResponse.body?.cancel().catch(() => {})
 
 			const startupResponse = await requestJson({
 				fetchImpl,

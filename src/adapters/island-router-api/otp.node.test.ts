@@ -58,3 +58,13 @@ test('Island 3.2.3 token-bytes HOTP matches RFC 4226 at a fixed clock', () => {
 		}),
 	).toBe('287082')
 })
+
+test('Island 3.2.3 token key uses char codes, not UTF-8 multi-byte sequences', () => {
+	const token = 'café'
+	expect([...islandStartupTokenKeyBytes(token)]).toEqual([
+		0x63, 0x61, 0x66, 0xe9,
+	])
+	expect([...islandStartupTokenKeyBytes(token)]).not.toEqual([
+		...Buffer.from(token, 'utf8'),
+	])
+})

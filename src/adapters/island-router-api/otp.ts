@@ -28,10 +28,15 @@ export function decodeBase32(value: string) {
 /**
  * Island 3.2.3 uses the startup `token` string's character codes as the HOTP
  * key (the Flutter UI base32-encodes then decodes those codes, which
- * round-trips to the same bytes). For ASCII/latin1 tokens this matches UTF-8.
+ * round-trips to the same bytes). Match Dart `codeUnits` / char codes: one
+ * byte per UTF-16 code unit (low 8 bits), not UTF-8 multi-byte sequences.
  */
 export function islandStartupTokenKeyBytes(token: string) {
-	return Buffer.from(token, 'utf8')
+	const bytes = Buffer.alloc(token.length)
+	for (let index = 0; index < token.length; index += 1) {
+		bytes[index] = token.charCodeAt(index) & 0xff
+	}
+	return bytes
 }
 
 /**
