@@ -77,6 +77,11 @@ export type AccessNetworksUnleashedRequestInput = {
 	comp: string
 	xmlBody: string
 	updater?: string
+	/**
+	 * Optional ajax-request `caller` attribute. aioruckus sets `caller="SCI"`
+	 * for VAP / WLAN-group stats; when omitted, getstat vap bodies default to SCI.
+	 */
+	caller?: string
 	allowInsecureTls?: boolean
 }
 

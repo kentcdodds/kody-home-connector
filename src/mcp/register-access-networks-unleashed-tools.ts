@@ -54,6 +54,7 @@ Inputs:
 - comp: Unleashed component name such as 'system', 'stamgr', 'wlansvc-list', 'apStat', 'eventd'.
 - xmlBody: inner XML appended inside the <ajax-request> envelope (may be empty for getconf).
 - updater: optional updater string. Required by getconf/setconf/docmd when omitted the connector generates "<comp>.<timestamp>.<rand>"; getstat omits updater unless supplied.
+- caller: optional ajax-request caller attribute. When omitted, getstat vap/wlangroup bodies default to caller="SCI" (aioruckus ground truth). Bare &lt;vap/&gt; bodies are normalized to &lt;vap INTERVAL-STATS="no" LEVEL="1"/&gt;.
 - allowInsecureTls: optional boolean. When omitted, falls back to the connector-wide ACCESS_NETWORKS_UNLEASHED_ALLOW_INSECURE_TLS setting (off unless explicitly enabled). Only applies to the actual AJAX post; the connector-wide setting also governs session establishment so concurrent callers cannot disagree about login-time TLS.
 
 Returns the raw XML response and a best-effort parsed object.`
@@ -249,6 +250,13 @@ export function registerAccessNetworksUnleashedHomeConnectorTools(input: {
 			.describe(
 				'Optional updater attribute. Defaults to a generated "<comp>.<timestamp>.<rand>" string for getconf/setconf/docmd; omitted on getstat unless supplied.',
 			),
+		caller: z
+			.string()
+			.min(1)
+			.optional()
+			.describe(
+				'Optional ajax-request caller attribute. When omitted, getstat vap/wlangroup bodies default to "SCI".',
+			),
 		allowInsecureTls: z
 			.boolean()
 			.optional()
@@ -291,6 +299,7 @@ export function registerAccessNetworksUnleashedHomeConnectorTools(input: {
 				comp: String(args['comp'] ?? ''),
 				xmlBody: String(args['xmlBody'] ?? ''),
 				updater: args['updater'] == null ? undefined : String(args['updater']),
+				caller: args['caller'] == null ? undefined : String(args['caller']),
 				allowInsecureTls:
 					typeof args['allowInsecureTls'] === 'boolean'
 						? args['allowInsecureTls']

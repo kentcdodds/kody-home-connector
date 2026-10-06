@@ -107,31 +107,72 @@ function isMutatingAction(action: AccessNetworksUnleashedAjaxAction) {
 	}
 }
 
+function looksLikeVapXmlBody(xmlBody: string) {
+	return /^\s*<vap(\s|\/|>)/i.test(xmlBody)
+}
+
+/**
+ * aioruckus `get_vap_stats` posts:
+ * `<ajax-request ... caller='SCI'><vap INTERVAL-STATS='no' LEVEL='1' /></ajax-request>`
+ * Bare `<vap/>` (as used by @kentcdodds/unleashed-wifi) returns empty on fw 200.18.
+ * Preserve bodies that already set INTERVAL-STATS (including interval queries).
+ */
+function normalizeVapXmlBody(xmlBody: string) {
+	if (!looksLikeVapXmlBody(xmlBody)) return xmlBody
+	if (/\bINTERVAL-STATS\s*=/i.test(xmlBody)) return xmlBody.trim()
+	return '<vap INTERVAL-STATS="no" LEVEL="1"/>'
+}
+
+function resolveGetstatCaller(input: {
+	xmlBody: string
+	caller: string | undefined
+}) {
+	const explicit = input.caller?.trim()
+	if (explicit) return explicit
+	// aioruckus: vap and wlangroup stats require caller="SCI".
+	if (
+		looksLikeVapXmlBody(input.xmlBody) ||
+		/^\s*<wlangroup(\s|\/|>)/i.test(input.xmlBody)
+	) {
+		return 'SCI'
+	}
+	return ''
+}
+
 function buildAjaxRequestEnvelope(input: {
 	action: AccessNetworksUnleashedAjaxAction
 	comp: string
 	xmlBody: string
 	updater: string | undefined
+	caller: string | undefined
 }): { xml: string; updater: string } {
-	const { action, comp, xmlBody } = input
+	const { action, comp } = input
 	const escapedComp = escapeXmlAttribute(comp)
 
 	switch (action) {
 		case 'getstat': {
 			// fw 200.18 curl ground truth: double-quoted attrs, enable-gzip="0",
-			// no updater unless the caller supplies one.
+			// no updater unless the caller supplies one. VAP stats additionally
+			// need caller="SCI" + INTERVAL-STATS (aioruckus get_vap_stats).
+			const xmlBody = normalizeVapXmlBody(input.xmlBody)
 			const updater = input.updater?.trim() ?? ''
 			const updaterAttr = updater
 				? ` updater="${escapeXmlAttribute(updater)}"`
 				: ''
+			const caller = resolveGetstatCaller({
+				xmlBody,
+				caller: input.caller,
+			})
+			const callerAttr = caller ? ` caller="${escapeXmlAttribute(caller)}"` : ''
 			return {
 				updater,
 				xml:
 					`<ajax-request action="getstat" comp="${escapedComp}"` +
-					` enable-gzip="0"${updaterAttr}>${xmlBody}</ajax-request>`,
+					` enable-gzip="0"${callerAttr}${updaterAttr}>${xmlBody}</ajax-request>`,
 			}
 		}
 		case 'getconf': {
+			const xmlBody = input.xmlBody
 			const updater = input.updater?.trim() || generateUpdater(comp)
 			const attrs =
 				`action="getconf" DECRYPT_X="false" ` +
@@ -149,6 +190,7 @@ function buildAjaxRequestEnvelope(input: {
 		}
 		case 'setconf':
 		case 'docmd': {
+			const xmlBody = input.xmlBody
 			const updater = input.updater?.trim() || generateUpdater(comp)
 			return {
 				updater,
@@ -496,6 +538,7 @@ export function createAccessNetworksUnleashedAjaxClient(input: {
 				comp,
 				xmlBody,
 				updater: requestInput.updater,
+				caller: requestInput.caller,
 			})
 			const responseXml = await postAjax(xml, action, allowInsecureTls)
 			return {

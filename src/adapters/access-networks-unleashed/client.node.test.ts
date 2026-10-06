@@ -253,6 +253,63 @@ test('fw 200.18 curl ground-truth getstat stamgr ap body is posted exactly', asy
 	)
 })
 
+test('aioruckus get_vap_stats body is posted exactly (caller SCI + INTERVAL-STATS)', async () => {
+	const config = createConfig()
+	const fetchMock = installFetch(loginHandler(), (href) => {
+		if (href.endsWith('/_cmdstat.jsp')) {
+			return response('<ajax-response><vap-list/></ajax-response>')
+		}
+		return null
+	})
+
+	const client = createAccessNetworksUnleashedAjaxClient({
+		config,
+		controller: createController(),
+	})
+	// Bare <vap/> is what @kentcdodds/unleashed-wifi currently sends; normalize
+	// to the aioruckus get_vap_stats ground truth (double-quoted).
+	await client.request({
+		action: 'getstat',
+		comp: 'stamgr',
+		xmlBody: '<vap/>',
+	})
+
+	const cmdCall = fetchMock.mock.calls.find(([url]) =>
+		String(url).endsWith('/_cmdstat.jsp'),
+	)
+	expect(String(cmdCall?.[1]?.body ?? '')).toBe(
+		'<ajax-request action="getstat" comp="stamgr" enable-gzip="0" caller="SCI"><vap INTERVAL-STATS="no" LEVEL="1"/></ajax-request>',
+	)
+})
+
+test('vap bodies that already set INTERVAL-STATS keep their attrs and still get caller SCI', async () => {
+	const config = createConfig()
+	const fetchMock = installFetch(loginHandler(), (href) => {
+		if (href.endsWith('/_cmdstat.jsp')) {
+			return response('<ajax-response><vap-list/></ajax-response>')
+		}
+		return null
+	})
+
+	const client = createAccessNetworksUnleashedAjaxClient({
+		config,
+		controller: createController(),
+	})
+	await client.request({
+		action: 'getstat',
+		comp: 'stamgr',
+		xmlBody:
+			'<vap INTERVAL-STATS="yes" INTERVAL-START="100" INTERVAL-STOP="200" LEVEL="1"/>',
+	})
+
+	const cmdCall = fetchMock.mock.calls.find(([url]) =>
+		String(url).endsWith('/_cmdstat.jsp'),
+	)
+	expect(String(cmdCall?.[1]?.body ?? '')).toBe(
+		'<ajax-request action="getstat" comp="stamgr" enable-gzip="0" caller="SCI"><vap INTERVAL-STATS="yes" INTERVAL-START="100" INTERVAL-STOP="200" LEVEL="1"/></ajax-request>',
+	)
+})
+
 test('fw 200.18 curl ground-truth getconf wlansvc-list body is posted to _conf.jsp exactly', async () => {
 	const config = createConfig()
 	const fetchMock = installFetch(loginHandler(), (href) => {
