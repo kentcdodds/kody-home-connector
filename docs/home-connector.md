@@ -722,9 +722,14 @@ The adapter stores the user's Island PIN locally in SQLite, encrypted with
 `HOME_CONNECTOR_SHARED_SECRET`. The PIN is supplied through
 `island_router_api_set_pin`; it is not read from env. Access, refresh, and
 session JWTs are cached in memory only. Each session starts with the Island
-`POST /api/startup` challenge, computes the HOTP value from the returned base32
-secret and offset, then posts the saved PIN plus OTP. Subsequent proxied calls
-use the access token and retry once after `POST /api/refresh` on `401`.
+`POST /api/startup` challenge. Classic firmware returns base32 `c` + offset `d`;
+Island Pro 3.2.3 (after `GET /api/startup/info`) returns
+`token`/`offset`/`type`, where type `3` (`base`) is the normal stored-PIN login.
+The 3.2.3 HOTP key is UTF-8 bytes of the RFC4648 base32 encoding of the token's
+code-unit bytes (not the raw token bytes, and not a base32 decode). Types
+`0`/`1`/`2` (init/reset/unused) are rejected with clear setup errors. Subsequent
+proxied calls use the access token and retry once after `POST /api/refresh` on
+`401`.
 
 Configuration:
 

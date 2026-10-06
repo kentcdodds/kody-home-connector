@@ -142,7 +142,7 @@ test('startup shape mismatch reports key names and value types only', async () =
 	}
 })
 
-test('3.2.3 token-bytes HOTP handshake matches RFC 4226 at a fixed clock', async () => {
+test('3.2.3 utf8(base32(token)) HOTP handshake posts exact bodies', async () => {
 	const storage = await createHomeConnectorStorage(createConfig(':memory:'))
 	const requests: Array<{ body: unknown; url: string }> = []
 	const token = '12345678901234567890'
@@ -165,7 +165,7 @@ test('3.2.3 token-bytes HOTP handshake matches RFC 4226 at a fixed clock', async
 					device: 7,
 					token,
 					offset: 1,
-					type: 0,
+					type: 3,
 				},
 			})
 		}
@@ -198,11 +198,14 @@ test('3.2.3 token-bytes HOTP handshake matches RFC 4226 at a fixed clock', async
 			'/api/startup',
 			'/api/filters',
 		])
+		// Challenge POST (vK): timeBlocks as String(floor(now/1000/30))
 		expect(requests[1]?.body).toEqual({ timeBlocks: '0' })
+		// Auth POST (ne/vG): id/pin/otp only — otp from utf8(base32(token)) HOTP
+		// counter = floor((0 + 1*30)/30) = 1 → 372946
 		expect(requests[2]?.body).toEqual({
 			id: '42',
 			pin: '246810',
-			otp: '287082',
+			otp: '372946',
 		})
 		expect(JSON.stringify(requests)).not.toContain(token)
 	} finally {
@@ -227,7 +230,7 @@ test('3.2.3 authentication failure does not log token, PIN, or otp', async () =>
 					device: 7,
 					token: secretToken,
 					offset: 0,
-					type: 0,
+					type: 3,
 				},
 			})
 		}
@@ -250,16 +253,77 @@ test('3.2.3 authentication failure does not log token, PIN, or otp', async () =>
 		expect(status.lastAuthError).not.toMatch(/unconfirmed/i)
 		expect(status.lastAuthError).not.toContain(secretToken)
 		expect(status.lastAuthError).not.toContain('246810')
-		expect(status.lastAuthError).not.toContain('755224')
+		expect(status.lastAuthError).not.toContain('312805')
 	} finally {
 		vi.useRealTimers()
 		await storage.close()
 	}
 })
 
-test('3.2.3 non-normal startup types are rejected clearly', async () => {
+test('3.2.3 startup type mapping: 0 init, 1 reset, 2 unused, 3 base', async () => {
+	const cases = [
+		{
+			type: 0,
+			pattern: /first-device setup in the Island app/,
+		},
+		{
+			type: 1,
+			pattern: /PIN was reset, set a new PIN in the Island app/,
+		},
+		{
+			type: 2,
+			pattern: /unrecognized startup response/,
+		},
+		{
+			type: '0',
+			pattern: /first-device setup in the Island app/,
+		},
+	] as const
+
+	for (const { type, pattern } of cases) {
+		const storage = await createHomeConnectorStorage(createConfig(':memory:'))
+		const secretToken = `pairing-token-type-${String(type)}`
+		const fetchImpl: IslandRouterApiFetch = async (url, init = {}) => {
+			const pathname = new URL(String(url)).pathname
+			const body = init?.body ? JSON.parse(String(init.body)) : null
+			if (pathname === '/api/startup/info') {
+				return createJsonResponse({ data: { version: '3.2.3' } })
+			}
+			if (pathname === '/api/startup' && body && !('id' in (body as object))) {
+				return createJsonResponse({
+					data: {
+						id: 42,
+						device: 7,
+						token: secretToken,
+						offset: 0,
+						type,
+					},
+				})
+			}
+			throw new Error(`Unexpected fetch ${pathname}`)
+		}
+		try {
+			const adapter = createIslandRouterApiAdapter({
+				config: createConfig(':memory:'),
+				storage,
+				fetchImpl,
+			})
+			await adapter.setPin('246810')
+			await expect(
+				adapter.request({ method: 'GET', path: '/api/filters' }),
+			).rejects.toThrow(pattern)
+			const status = await adapter.getStatus()
+			expect(status.lastAuthError).toMatch(pattern)
+			expect(status.lastAuthError).not.toContain(secretToken)
+		} finally {
+			await storage.close()
+		}
+	}
+})
+
+test('3.2.3 startup type 3 base proceeds to PIN OTP exchange', async () => {
 	const storage = await createHomeConnectorStorage(createConfig(':memory:'))
-	const secretToken = 'pairing-token-must-not-leak'
+	let authPosted = false
 	const fetchImpl: IslandRouterApiFetch = async (url, init = {}) => {
 		const pathname = new URL(String(url)).pathname
 		const body = init?.body ? JSON.parse(String(init.body)) : null
@@ -269,17 +333,34 @@ test('3.2.3 non-normal startup types are rejected clearly', async () => {
 		if (pathname === '/api/startup' && body && !('id' in (body as object))) {
 			return createJsonResponse({
 				data: {
-					id: 42,
-					device: 7,
-					token: secretToken,
+					id: 99,
+					device: 1,
+					token: '12345678901234567890',
 					offset: 0,
-					type: 2,
+					type: '3',
 				},
 			})
 		}
-		throw new Error(`Unexpected fetch ${pathname}`)
+		if (pathname === '/api/startup' && body && 'otp' in body) {
+			authPosted = true
+			expect(body).toEqual({
+				id: '99',
+				pin: '246810',
+				otp: '312805',
+			})
+			return createJsonResponse({
+				data: {
+					session: 'session-token',
+					access: 'access-token',
+					refresh: 'refresh-token',
+				},
+			})
+		}
+		return createJsonResponse({ ok: true })
 	}
 	try {
+		vi.useFakeTimers()
+		vi.setSystemTime(new Date(0))
 		const adapter = createIslandRouterApiAdapter({
 			config: createConfig(':memory:'),
 			storage,
@@ -288,11 +369,10 @@ test('3.2.3 non-normal startup types are rejected clearly', async () => {
 		await adapter.setPin('246810')
 		await expect(
 			adapter.request({ method: 'GET', path: '/api/filters' }),
-		).rejects.toThrow(/startup type 2 is not supported/)
-		const status = await adapter.getStatus()
-		expect(status.lastAuthError).toMatch(/PIN-reset and first-device pairing/)
-		expect(status.lastAuthError).not.toContain(secretToken)
+		).resolves.toMatchObject({ status: 200 })
+		expect(authPosted).toBe(true)
 	} finally {
+		vi.useRealTimers()
 		await storage.close()
 	}
 })

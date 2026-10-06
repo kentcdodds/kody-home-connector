@@ -203,9 +203,9 @@ type IslandStartupChallenge =
 	| {
 			/**
 			 * Island Pro 3.2.3 challenge from POST /api/startup after GET
-			 * /api/startup/info. HOTP key is the token string's character codes
-			 * (not base32). Counter uses offset in 30-second blocks added before
-			 * dividing. Never log token values.
+			 * /api/startup/info. HOTP key = UTF-8(base32(token code-unit bytes));
+			 * counter uses offset in 30-second blocks added before dividing.
+			 * Never log token values.
 			 */
 			kind: 'token-offset'
 			id: string | number
@@ -215,13 +215,46 @@ type IslandStartupChallenge =
 	  }
 
 /**
- * Island 3.2.3 Flutter UI auth modes (decompiled main.dart.js). Only normal
- * login is supported by this connector.
+ * Island 3.2.3 Flutter startup type enum (`B.acd` / `DY`):
+ * 0 init, 1 reset, 2 unused (also parse-failure fallback), 3 base (normal).
+ * Only base is implemented.
  */
-const ISLAND_323_STARTUP_TYPE_NORMAL = 0
+const ISLAND_323_STARTUP_TYPE = {
+	init: 0,
+	reset: 1,
+	unused: 2,
+	base: 3,
+} as const
 
-function isIsland323NormalStartupType(type: number | string) {
-	return type === ISLAND_323_STARTUP_TYPE_NORMAL || type === '0'
+function normalizeIsland323StartupType(type: number | string): number | null {
+	if (typeof type === 'number' && Number.isInteger(type)) return type
+	if (typeof type === 'string' && /^-?\d+$/.test(type.trim())) {
+		return Number(type.trim())
+	}
+	return null
+}
+
+function island323UnsupportedStartupTypeError(type: number | string) {
+	const normalized = normalizeIsland323StartupType(type)
+	switch (normalized) {
+		case ISLAND_323_STARTUP_TYPE.init:
+			return new Error(
+				'Island Router 3.2.3 startup type is init: router needs first-device setup in the Island app.',
+			)
+		case ISLAND_323_STARTUP_TYPE.reset:
+			return new Error(
+				'Island Router 3.2.3 startup type is reset: PIN was reset, set a new PIN in the Island app.',
+			)
+		case ISLAND_323_STARTUP_TYPE.unused:
+			return new Error(
+				'Island Router 3.2.3 startup type is unused: unrecognized startup response.',
+			)
+		case null:
+		default:
+			return new Error(
+				`Island Router 3.2.3 startup type ${JSON.stringify(type)} is unrecognized startup response.`,
+			)
+	}
 }
 
 function getStartupData(payload: unknown): IslandStartupChallenge {
@@ -420,10 +453,9 @@ export function createIslandRouterApiAdapter(input: {
 			const startup = getStartupData(startupPayload)
 
 			if (startup.kind === 'token-offset') {
-				if (!isIsland323NormalStartupType(startup.type)) {
-					throw new Error(
-						`Island Router 3.2.3 startup type ${JSON.stringify(startup.type)} is not supported. Only the normal login type (${String(ISLAND_323_STARTUP_TYPE_NORMAL)}) is implemented; PIN-reset and first-device pairing are not.`,
-					)
+				const startupType = normalizeIsland323StartupType(startup.type)
+				if (startupType !== ISLAND_323_STARTUP_TYPE.base) {
+					throw island323UnsupportedStartupTypeError(startup.type)
 				}
 			}
 
@@ -458,7 +490,7 @@ export function createIslandRouterApiAdapter(input: {
 			if (!authResponse.ok) {
 				if (startup.kind === 'token-offset') {
 					throw new Error(
-						`Island Router 3.2.3 authentication failed with HTTP ${String(authResponse.status)} after GET /api/startup/info and token-bytes HOTP (token, PIN, and otp values not logged).`,
+						`Island Router 3.2.3 authentication failed with HTTP ${String(authResponse.status)} after GET /api/startup/info and utf8(base32(token)) HOTP (token, PIN, and otp values not logged).`,
 					)
 				}
 				throw new Error(
