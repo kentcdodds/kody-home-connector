@@ -333,7 +333,7 @@ test('vap LEVEL is preserved when injecting INTERVAL-STATS', async () => {
 		String(url).endsWith('/_cmdstat.jsp'),
 	)
 	expect(String(cmdCall?.[1]?.body ?? '')).toBe(
-		'<ajax-request action="getstat" comp="stamgr" enable-gzip="0" caller="SCI"><vap LEVEL="2" INTERVAL-STATS="no"/></ajax-request>',
+		'<ajax-request action="getstat" comp="stamgr" enable-gzip="0" caller="SCI"><vap INTERVAL-STATS="no" LEVEL="2"/></ajax-request>',
 	)
 })
 

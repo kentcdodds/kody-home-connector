@@ -122,20 +122,26 @@ function normalizeVapXmlBody(xmlBody: string) {
 	const trimmed = xmlBody.trim()
 	if (/\bINTERVAL-STATS\s*=/i.test(trimmed)) return trimmed
 
-	const match = /^<vap(\s[^>]*)?\s*(\/>|>)([\s\S]*)$/i.exec(trimmed)
-	if (!match) return trimmed
-	const existingAttrs = match[1] ?? ''
-	const closing = match[2] ?? '/>'
-	const rest = match[3] ?? ''
-	const levelAttr = /\bLEVEL\s*=/i.test(existingAttrs) ? '' : ' LEVEL="1"'
-	const attrs = `${existingAttrs} INTERVAL-STATS="no"${levelAttr}`.replace(
-		/^\s+/,
-		' ',
-	)
-	if (closing === '/>') {
-		return `<vap${attrs}/>`
+	const selfClosing = /^<vap([^>]*)\/>$/i.exec(trimmed)
+	if (selfClosing) {
+		return `<vap ${injectVapDefaultAttrs(selfClosing[1] ?? '')}/>`
 	}
-	return `<vap${attrs}>${rest}`
+
+	const open = /^<vap([^>]*)>([\s\S]*)$/i.exec(trimmed)
+	if (!open) return trimmed
+	return `<vap ${injectVapDefaultAttrs(open[1] ?? '')}>${open[2] ?? ''}`
+}
+
+function injectVapDefaultAttrs(existingAttrs: string) {
+	const existing = existingAttrs.trim()
+	const injections: Array<string> = []
+	if (!/\bINTERVAL-STATS\s*=/i.test(existing)) {
+		injections.push('INTERVAL-STATS="no"')
+	}
+	if (!/\bLEVEL\s*=/i.test(existing)) {
+		injections.push('LEVEL="1"')
+	}
+	return [...injections, existing].filter(Boolean).join(' ')
 }
 
 function resolveExplicitCaller(caller: string | undefined) {
