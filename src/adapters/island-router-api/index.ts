@@ -249,10 +249,19 @@ function island323UnsupportedStartupTypeError(type: number | string) {
 			return new Error(
 				'Island Router 3.2.3 startup type is unused: unrecognized startup response.',
 			)
-		case null:
-		default:
+		case ISLAND_323_STARTUP_TYPE.base:
+			// Caller only invokes this for non-base types; keep the message safe.
 			return new Error(
-				`Island Router 3.2.3 startup type ${JSON.stringify(type)} is unrecognized startup response.`,
+				'Island Router 3.2.3 startup type is unrecognized startup response.',
+			)
+		case null:
+			return new Error(
+				'Island Router 3.2.3 startup type is unrecognized startup response.',
+			)
+		default:
+			// Do not echo arbitrary router type text into lastAuthError.
+			return new Error(
+				'Island Router 3.2.3 startup type is unrecognized startup response.',
 			)
 	}
 }
