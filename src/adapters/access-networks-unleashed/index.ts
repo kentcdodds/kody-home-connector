@@ -48,7 +48,12 @@ export const accessNetworksUnleashedRequestConfirmation =
 	'I am highly certain making this raw Access Networks Unleashed AJAX request is necessary right now.'
 
 const validActions: ReadonlySet<AccessNetworksUnleashedAjaxAction> =
-	new Set<AccessNetworksUnleashedAjaxAction>(['getstat', 'setconf', 'docmd'])
+	new Set<AccessNetworksUnleashedAjaxAction>([
+		'getstat',
+		'getconf',
+		'setconf',
+		'docmd',
+	])
 
 function getConfigStatus(
 	config: HomeConnectorConfig,

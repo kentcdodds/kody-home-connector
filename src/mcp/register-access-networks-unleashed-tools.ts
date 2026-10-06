@@ -47,14 +47,14 @@ const requestDangerNotice =
 
 const requestDescription = `${requestDangerNotice}
 
-Posts an XML payload to the adopted controller's POST {host}/admin/_cmdstat.jsp endpoint using the stored credentials and the managed session (cookie + CSRF token). The session is reused across calls and re-established automatically when it expires.
+Posts an authenticated text/xml AJAX payload using the stored credentials and the managed session (cookie jar + X-CSRF-Token). getstat/docmd go to POST {host}/admin/_cmdstat.jsp; getconf/setconf go to POST {host}/admin/_conf.jsp. The session is reused across calls and re-established automatically when it expires.
 
 Inputs:
-- action: 'getstat' | 'setconf' | 'docmd'.
-- comp: Unleashed component name such as 'system', 'stamgr', 'apStat', 'eventd'.
-- xmlBody: inner XML appended inside <ajax-request action='...' comp='...' updater='...'>...</ajax-request>.
-- updater: optional updater string. When omitted the connector generates a "<comp>.<timestamp>.<rand>" updater.
-- allowInsecureTls: optional boolean. When omitted, falls back to the connector-wide ACCESS_NETWORKS_UNLEASHED_ALLOW_INSECURE_TLS setting (off unless explicitly enabled). Only applies to the actual _cmdstat.jsp post; the connector-wide setting also governs session establishment so concurrent callers cannot disagree about login-time TLS.
+- action: 'getstat' | 'getconf' | 'setconf' | 'docmd'.
+- comp: Unleashed component name such as 'system', 'stamgr', 'wlansvc-list', 'apStat', 'eventd'.
+- xmlBody: inner XML appended inside the <ajax-request> envelope (may be empty for getconf).
+- updater: optional updater string. Required by getconf/setconf/docmd when omitted the connector generates "<comp>.<timestamp>.<rand>"; getstat omits updater unless supplied.
+- allowInsecureTls: optional boolean. When omitted, falls back to the connector-wide ACCESS_NETWORKS_UNLEASHED_ALLOW_INSECURE_TLS setting (off unless explicitly enabled). Only applies to the actual AJAX post; the connector-wide setting also governs session establishment so concurrent callers cannot disagree about login-time TLS.
 
 Returns the raw XML response and a best-effort parsed object.`
 
@@ -227,27 +227,27 @@ export function registerAccessNetworksUnleashedHomeConnectorTools(input: {
 
 	const requestSchema = buildToolInputSchema({
 		action: z
-			.enum(['getstat', 'setconf', 'docmd'])
+			.enum(['getstat', 'getconf', 'setconf', 'docmd'])
 			.describe(
-				"Unleashed AJAX action: 'getstat' for reads, 'setconf' for object mutations (addobj/updobj/delobj should typically be expressed inside a higher-level package; this tool exposes the raw envelope), 'docmd' for command-style operations such as block client or restart AP.",
+				"Unleashed AJAX action: 'getstat' for status reads via _cmdstat.jsp, 'getconf' for config reads via _conf.jsp, 'setconf' for object mutations, 'docmd' for command-style operations such as block client or restart AP.",
 			),
 		comp: z
 			.string()
 			.min(1)
 			.describe(
-				"Unleashed component name to target (for example 'system', 'stamgr', 'apStat', 'eventd').",
+				"Unleashed component name to target (for example 'system', 'stamgr', 'wlansvc-list', 'apStat', 'eventd').",
 			),
 		xmlBody: z
 			.string()
 			.describe(
-				'Inner XML appended inside the <ajax-request> envelope. May be empty for actions that do not need a body.',
+				'Inner XML appended inside the <ajax-request> envelope. May be empty for getconf.',
 			),
 		updater: z
 			.string()
 			.min(1)
 			.optional()
 			.describe(
-				'Optional updater attribute. Defaults to a generated "<comp>.<timestamp>.<rand>" string.',
+				'Optional updater attribute. Defaults to a generated "<comp>.<timestamp>.<rand>" string for getconf/setconf/docmd; omitted on getstat unless supplied.',
 			),
 		allowInsecureTls: z
 			.boolean()
@@ -287,7 +287,7 @@ export function registerAccessNetworksUnleashedHomeConnectorTools(input: {
 		},
 		async (args) => {
 			const result = await accessNetworksUnleashed.request({
-				action: args['action'] as 'getstat' | 'setconf' | 'docmd',
+				action: args['action'] as 'getstat' | 'getconf' | 'setconf' | 'docmd',
 				comp: String(args['comp'] ?? ''),
 				xmlBody: String(args['xmlBody'] ?? ''),
 				updater: args['updater'] == null ? undefined : String(args['updater']),

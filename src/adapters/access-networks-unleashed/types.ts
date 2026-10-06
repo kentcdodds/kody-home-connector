@@ -66,7 +66,11 @@ export type AccessNetworksUnleashedConfigStatus = {
 	lastAuthError: string | null
 }
 
-export type AccessNetworksUnleashedAjaxAction = 'getstat' | 'setconf' | 'docmd'
+export type AccessNetworksUnleashedAjaxAction =
+	| 'getstat'
+	| 'getconf'
+	| 'setconf'
+	| 'docmd'
 
 export type AccessNetworksUnleashedRequestInput = {
 	action: AccessNetworksUnleashedAjaxAction

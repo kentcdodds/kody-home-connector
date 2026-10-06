@@ -161,7 +161,7 @@ test('request posts a fully formed ajax-request envelope to _cmdstat.jsp', async
 
 	expect(result.action).toBe('getstat')
 	expect(result.comp).toBe('system')
-	expect(result.updater).toMatch(/^system\.\d+\.[a-z0-9]+$/)
+	expect(result.updater).toBe('')
 	expect(result.xml).toContain('<system')
 	expect(result.parsed).toEqual({
 		'ajax-response': {
@@ -176,18 +176,236 @@ test('request posts a fully formed ajax-request envelope to _cmdstat.jsp', async
 		String(url).endsWith('/_cmdstat.jsp'),
 	)
 	const body = String(cmdCall?.[1]?.body ?? '')
-	expect(body.startsWith('request=')).toBe(true)
-	const decoded = decodeURIComponent(body.slice('request='.length))
-	expect(decoded).toContain("action='getstat'")
-	expect(decoded).toContain("comp='system'")
-	expect(decoded).toContain('<sysinfo/>')
-	expect(decoded).toMatch(/updater='system\.\d+\.[a-z0-9]+'/)
-	const cmdHeaders = new Headers(cmdCall?.[1]?.headers)
-	expect(cmdHeaders.get('Content-Type')).toBe(
-		'application/x-www-form-urlencoded',
+	expect(body).toBe(
+		'<ajax-request action="getstat" comp="system" enable-gzip="0"><sysinfo/></ajax-request>',
 	)
+	const cmdHeaders = new Headers(cmdCall?.[1]?.headers)
+	expect(cmdHeaders.get('Content-Type')).toBe('text/xml')
+	expect(cmdHeaders.get('Accept')).toBe('text/xml')
 	expect(cmdHeaders.get('Cookie')).toContain('JSESSIONID=abc')
 	expect(cmdHeaders.get('X-CSRF-Token')).toBe('csrf-token')
+})
+
+test('fw 200.18 curl ground-truth getstat system body is posted exactly', async () => {
+	const config = createConfig()
+	const fetchMock = installFetch(
+		loginHandler({
+			loginPath: '/admin/login.jsp',
+			sessionCookie: '-ejs-session-=sess; Path=/; HttpOnly; Secure',
+			dashboardPath: '/admin/dashboard.jsp',
+		}),
+		(href) => {
+			if (href.endsWith('/_cmdstat.jsp')) {
+				return response(
+					'<ajax-response><system name="Unleashed"/></ajax-response>',
+				)
+			}
+			return null
+		},
+	)
+
+	const client = createAccessNetworksUnleashedAjaxClient({
+		config,
+		controller: createController(),
+	})
+	await client.request({
+		action: 'getstat',
+		comp: 'system',
+		xmlBody: '<sysinfo/>',
+	})
+
+	const cmdCall = fetchMock.mock.calls.find(([url]) =>
+		String(url).endsWith('/_cmdstat.jsp'),
+	)
+	expect(String(cmdCall?.[1]?.body ?? '')).toBe(
+		'<ajax-request action="getstat" comp="system" enable-gzip="0"><sysinfo/></ajax-request>',
+	)
+	const headers = new Headers(cmdCall?.[1]?.headers)
+	expect(headers.get('Content-Type')).toBe('text/xml')
+	expect(headers.get('X-CSRF-Token')).toBe('csrf-token')
+	expect(headers.get('Cookie')).toContain('-ejs-session-=sess')
+})
+
+test('fw 200.18 curl ground-truth getstat stamgr ap body is posted exactly', async () => {
+	const config = createConfig()
+	const fetchMock = installFetch(loginHandler(), (href) => {
+		if (href.endsWith('/_cmdstat.jsp')) {
+			return response('<ajax-response><ap-list/></ajax-response>')
+		}
+		return null
+	})
+
+	const client = createAccessNetworksUnleashedAjaxClient({
+		config,
+		controller: createController(),
+	})
+	await client.request({
+		action: 'getstat',
+		comp: 'stamgr',
+		xmlBody: '<ap LEVEL="1"/>',
+	})
+
+	const cmdCall = fetchMock.mock.calls.find(([url]) =>
+		String(url).endsWith('/_cmdstat.jsp'),
+	)
+	expect(String(cmdCall?.[1]?.body ?? '')).toBe(
+		'<ajax-request action="getstat" comp="stamgr" enable-gzip="0"><ap LEVEL="1"/></ajax-request>',
+	)
+})
+
+test('fw 200.18 curl ground-truth getconf wlansvc-list body is posted to _conf.jsp exactly', async () => {
+	const config = createConfig()
+	const fetchMock = installFetch(loginHandler(), (href) => {
+		if (href.endsWith('/_conf.jsp')) {
+			return response('<ajax-response><wlansvc-list/></ajax-response>')
+		}
+		return null
+	})
+
+	const client = createAccessNetworksUnleashedAjaxClient({
+		config,
+		controller: createController(),
+	})
+	await client.request({
+		action: 'getconf',
+		comp: 'wlansvc-list',
+		xmlBody: '',
+		updater: 'wlansvc-list.0.5',
+	})
+
+	const confCall = fetchMock.mock.calls.find(([url]) =>
+		String(url).endsWith('/_conf.jsp'),
+	)
+	expect(confCall).toBeTruthy()
+	expect(String(confCall?.[1]?.body ?? '')).toBe(
+		'<ajax-request action="getconf" DECRYPT_X="false" updater="wlansvc-list.0.5" comp="wlansvc-list"/>',
+	)
+	const headers = new Headers(confCall?.[1]?.headers)
+	expect(headers.get('Content-Type')).toBe('text/xml')
+	expect(headers.get('X-CSRF-Token')).toBe('csrf-token')
+})
+
+test('empty AJAX response error includes status and content metadata without body values', async () => {
+	const config = createConfig()
+	installFetch(loginHandler(), (href) => {
+		if (href.endsWith('/_cmdstat.jsp')) {
+			return response('', {
+				status: 200,
+				headers: {
+					'content-length': '0',
+					'content-type': 'text/html',
+					'content-encoding': 'identity',
+				},
+			})
+		}
+		return null
+	})
+
+	const client = createAccessNetworksUnleashedAjaxClient({
+		config,
+		controller: createController(),
+	})
+	await expect(
+		client.request({
+			action: 'getstat',
+			comp: 'system',
+			xmlBody: '<sysinfo/>',
+		}),
+	).rejects.toThrow(
+		/empty response \(status=200, content-length=0, content-encoding=identity, content-type=text\/html\)/,
+	)
+})
+
+test('gzip-encoded AJAX responses are decoded', async () => {
+	const { gzipSync } = await import('node:zlib')
+	const config = createConfig()
+	const payload = '<ajax-response><system name="gzipped"/></ajax-response>'
+	installFetch(loginHandler(), (href) => {
+		if (href.endsWith('/_cmdstat.jsp')) {
+			return new Response(gzipSync(payload), {
+				status: 200,
+				headers: {
+					'content-encoding': 'gzip',
+					'content-type': 'text/xml',
+				},
+			})
+		}
+		return null
+	})
+
+	const client = createAccessNetworksUnleashedAjaxClient({
+		config,
+		controller: createController(),
+	})
+	const result = await client.request({
+		action: 'getstat',
+		comp: 'system',
+		xmlBody: '<sysinfo/>',
+	})
+	expect(result.xml).toBe(payload)
+	expect(result.parsed).toEqual({
+		'ajax-response': {
+			system: { '@name': 'gzipped' },
+		},
+	})
+})
+
+test('Content-Encoding gzip with already-decoded body is not gunzipped again', async () => {
+	const config = createConfig()
+	const payload =
+		'<ajax-response><system name="native-decoded"/></ajax-response>'
+	installFetch(loginHandler(), (href) => {
+		if (href.endsWith('/_cmdstat.jsp')) {
+			// Models native fetch: header still says gzip, body is plain XML.
+			return new Response(payload, {
+				status: 200,
+				headers: {
+					'content-encoding': 'gzip',
+					'content-type': 'text/xml',
+				},
+			})
+		}
+		return null
+	})
+
+	const client = createAccessNetworksUnleashedAjaxClient({
+		config,
+		controller: createController(),
+	})
+	const result = await client.request({
+		action: 'getstat',
+		comp: 'system',
+		xmlBody: '<sysinfo/>',
+	})
+	expect(result.xml).toBe(payload)
+})
+
+test('corrupt gzip bodies with gzip magic bytes still fail closed', async () => {
+	const config = createConfig()
+	installFetch(loginHandler(), (href) => {
+		if (href.endsWith('/_cmdstat.jsp')) {
+			return new Response(Uint8Array.of(0x1f, 0x8b, 0x08, 0x00, 0xff), {
+				status: 200,
+				headers: {
+					'content-encoding': 'gzip',
+					'content-type': 'text/xml',
+				},
+			})
+		}
+		return null
+	})
+
+	const client = createAccessNetworksUnleashedAjaxClient({
+		config,
+		controller: createController(),
+	})
+	await expect(
+		client.request({
+			action: 'getstat',
+			comp: 'system',
+			xmlBody: '<sysinfo/>',
+		}),
+	).rejects.toThrow(/gzip body that could not be decoded/)
 })
 
 test('login redirect back to the login page is reported as an auth error', async () => {
@@ -622,11 +840,12 @@ test('request honors a caller-supplied updater', async () => {
 	const cmdCall = fetchMock.mock.calls.find(([url]) =>
 		String(url).endsWith('/_cmdstat.jsp'),
 	)
-	const decoded = decodeURIComponent(
-		String(cmdCall?.[1]?.body ?? '').slice('request='.length),
+	const body = String(cmdCall?.[1]?.body ?? '')
+	expect(body).toContain('updater="reset.42"')
+	expect(body).toContain('action="docmd"')
+	expect(new Headers(cmdCall?.[1]?.headers).get('Content-Type')).toBe(
+		'text/xml',
 	)
-	expect(decoded).toContain("updater='reset.42'")
-	expect(decoded).toContain("action='docmd'")
 })
 
 test('request reauthenticates once on 302 for getstat actions', async () => {

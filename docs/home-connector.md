@@ -792,12 +792,16 @@ connector manages controllers locally through its SQLite database:
 Beyond controller lifecycle (scan/list/adopt/remove/credentials/authenticate),
 the adapter exposes a single generic capability:
 
-- `access_networks_unleashed_request` posts an authenticated XML payload to the
-  adopted controller's `POST {host}/admin/_cmdstat.jsp` endpoint. It accepts
-  `action` (`getstat` | `setconf` | `docmd`), `comp` (Unleashed component name
-  such as `system`, `stamgr`, `apStat`, `eventd`), `xmlBody` (inner XML appended
-  inside the `<ajax-request>` envelope), an optional `updater` string (defaults
-  to `<comp>.<timestamp>.<rand>`), and an optional `allowInsecureTls` override.
+- `access_networks_unleashed_request` posts an authenticated `text/xml`
+  `<ajax-request>` payload using the managed session cookie jar and
+  `X-CSRF-Token`. `getstat` / `docmd` go to `POST {host}/admin/_cmdstat.jsp`;
+  `getconf` / `setconf` go to `POST {host}/admin/_conf.jsp`. It accepts `action`
+  (`getstat` | `getconf` | `setconf` | `docmd`), `comp` (Unleashed component
+  name such as `system`, `stamgr`, `wlansvc-list`, `apStat`, `eventd`),
+  `xmlBody` (inner XML; empty for self-closing `getconf`), an optional `updater`
+  string (generated for `getconf`/`setconf`/`docmd`; omitted on `getstat` unless
+  supplied), and an optional `allowInsecureTls` override. `getstat` always sends
+  `enable-gzip="0"` and still gunzips a gzip body if the controller returns one.
   Responses are returned as both raw XML and a best-effort parsed object.
 
 The capability is deliberately warning-heavy because `setconf` and `docmd`
