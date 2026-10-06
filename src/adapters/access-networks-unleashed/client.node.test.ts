@@ -232,6 +232,48 @@ test('login redirect back to the login page is reported as an auth error', async
 	).rejects.toThrow(/authentication failed: login was rejected/)
 })
 
+test('login without any session cookie is reported as an auth error', async () => {
+	const config = createConfig()
+	installFetch((href, init) => {
+		if (init?.method === 'GET' && href === 'https://unleashed.local') {
+			return response(null, {
+				status: 302,
+				headers: { Location: '/admin/wsg/login.jsp' },
+				url: 'https://unleashed.local/',
+			})
+		}
+		if (init?.method === 'GET' && href.endsWith('/admin/wsg/login.jsp')) {
+			return response(null, {
+				status: 200,
+				url: 'https://unleashed.local/admin/wsg/login.jsp',
+			})
+		}
+		if (isLoginPost(href, init)) {
+			return response(null, {
+				status: 302,
+				headers: {
+					Location: '/admin/wsg/',
+					HTTP_X_CSRF_TOKEN: 'csrf-token',
+				},
+				url: href,
+			})
+		}
+		return null
+	})
+
+	const client = createAccessNetworksUnleashedAjaxClient({
+		config,
+		controller: createController(),
+	})
+	await expect(
+		client.request({
+			action: 'getstat',
+			comp: 'system',
+			xmlBody: '<sysinfo/>',
+		}),
+	).rejects.toThrow(/no session cookies were established/)
+})
+
 test('login without a CSRF token is reported as an auth error', async () => {
 	const config = createConfig()
 	installFetch((href, init) => {

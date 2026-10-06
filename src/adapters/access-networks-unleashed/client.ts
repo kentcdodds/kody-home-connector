@@ -252,6 +252,11 @@ export function createAccessNetworksUnleashedAjaxClient(input: {
 					'Access Networks Unleashed authentication failed: no CSRF token was returned after login.',
 				)
 			}
+			if (state.cookies.size === 0) {
+				throw new AccessNetworksUnleashedAuthError(
+					'Access Networks Unleashed authentication failed: no session cookies were established after login.',
+				)
+			}
 			state.loginUrl = loginUrl
 			state.baseUrl = baseUrl
 			state.csrfToken = csrfToken
