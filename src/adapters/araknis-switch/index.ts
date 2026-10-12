@@ -179,10 +179,11 @@ export function createAraknisSwitchAdapter(input: {
 	}
 
 	async function recordAuthFailure(error: unknown) {
+		const previous = await getAraknisSwitchAuthStatus(storage, connectorId)
 		await updateAraknisSwitchAuthStatus({
 			storage,
 			connectorId,
-			lastAuthenticatedAt: null,
+			lastAuthenticatedAt: previous?.lastAuthenticatedAt ?? null,
 			lastAuthError:
 				error instanceof Error ? error.message : 'Araknis switch login failed.',
 		})
