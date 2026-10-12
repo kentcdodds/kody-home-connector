@@ -6,11 +6,12 @@ import {
 } from './parsing.ts'
 import {
 	type AraknisSwitchClient,
+	type AraknisSwitchCredentials,
 	type AraknisSwitchLldpNeighbor,
 	type AraknisSwitchVlan,
 } from './types.ts'
 import {
-	assertAraknisSwitchConfigured,
+	assertAraknisSwitchCredentialsPresent,
 	resolveAraknisSwitchBaseUrl,
 } from './validation.ts'
 
@@ -63,13 +64,14 @@ export class AraknisSwitchAuthError extends AraknisSwitchRequestError {
 
 export function createAraknisSwitchOpenClient(input: {
 	config: HomeConnectorConfig
+	credentials: AraknisSwitchCredentials
 	fetchImpl?: typeof fetch
 }): AraknisSwitchClient {
-	assertAraknisSwitchConfigured(input.config)
+	const credentials = assertAraknisSwitchCredentialsPresent(input.credentials)
 	const config = input.config
 	const baseUrl = resolveAraknisSwitchBaseUrl(config)
-	const username = config.araknisSwitchUsername!
-	const password = config.araknisSwitchPassword!
+	const username = credentials.username
+	const password = credentials.password
 	const session: SessionState = { sidCookie: null }
 
 	async function rawFetch(path: string, init?: RequestInit) {
@@ -141,7 +143,7 @@ export function createAraknisSwitchOpenClient(input: {
 			extractSidFromSetCookie(setCookie) ?? extractSidFromPayload(payload)
 		if (!response.ok || !sidValue) {
 			throw new AraknisSwitchAuthError(
-				'Araknis switch login failed. Check ARAKNIS_SWITCH_USERNAME / ARAKNIS_SWITCH_PASSWORD and that HTTPS management is reachable from the connector host.',
+				'Araknis switch login failed. Check the credentials stored via /araknis-switch/setup (or araknis_set_credentials) and that HTTPS management is reachable from the connector host.',
 				{ path: '/open/v1/login' },
 			)
 		}

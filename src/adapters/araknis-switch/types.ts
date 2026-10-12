@@ -6,8 +6,10 @@ export type AraknisSwitchConfigStatus = {
 	allowInsecureTls: boolean
 	sshEnabled: boolean
 	sshPort: number
-	hasUsername: boolean
-	hasPassword: boolean
+	hasStoredCredentials: boolean
+	hasSharedSecret: boolean
+	lastAuthenticatedAt: string | null
+	lastAuthError: string | null
 }
 
 export type AraknisSwitchVlan = {
@@ -77,6 +79,11 @@ export type AraknisSwitchStatus = {
 	vlanCount: number
 	portCount: number
 	errors: Array<string>
+}
+
+export type AraknisSwitchCredentials = {
+	username: string
+	password: string
 }
 
 export type AraknisSwitchClient = {

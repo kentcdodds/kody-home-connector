@@ -23,16 +23,20 @@ export function resolveAraknisSwitchHost(baseUrl: string) {
 	}
 }
 
-export function getAraknisSwitchConfigStatus(
-	config: HomeConnectorConfig,
-): AraknisSwitchConfigStatus {
-	const baseUrl = resolveAraknisSwitchBaseUrl(config)
+export function getAraknisSwitchConfigStatus(input: {
+	config: HomeConnectorConfig
+	hasStoredCredentials: boolean
+	hasSharedSecret: boolean
+	lastAuthenticatedAt?: string | null
+	lastAuthError?: string | null
+}): AraknisSwitchConfigStatus {
+	const baseUrl = resolveAraknisSwitchBaseUrl(input.config)
 	const missingFields: Array<string> = []
-	if (!config.araknisSwitchUsername) {
-		missingFields.push('ARAKNIS_SWITCH_USERNAME')
+	if (!input.hasSharedSecret) {
+		missingFields.push('HOME_CONNECTOR_SHARED_SECRET')
 	}
-	if (!config.araknisSwitchPassword) {
-		missingFields.push('ARAKNIS_SWITCH_PASSWORD')
+	if (!input.hasStoredCredentials) {
+		missingFields.push('stored credentials')
 	}
 
 	return {
@@ -40,20 +44,23 @@ export function getAraknisSwitchConfigStatus(
 		baseUrl,
 		host: resolveAraknisSwitchHost(baseUrl),
 		missingFields,
-		allowInsecureTls: config.araknisSwitchAllowInsecureTls,
-		sshEnabled: config.araknisSwitchSshEnabled,
-		sshPort: config.araknisSwitchSshPort,
-		hasUsername: Boolean(config.araknisSwitchUsername),
-		hasPassword: Boolean(config.araknisSwitchPassword),
+		allowInsecureTls: input.config.araknisSwitchAllowInsecureTls,
+		sshEnabled: input.config.araknisSwitchSshEnabled,
+		sshPort: input.config.araknisSwitchSshPort,
+		hasStoredCredentials: input.hasStoredCredentials,
+		hasSharedSecret: input.hasSharedSecret,
+		lastAuthenticatedAt: input.lastAuthenticatedAt ?? null,
+		lastAuthError: input.lastAuthError ?? null,
 	}
 }
 
-export function assertAraknisSwitchConfigured(config: HomeConnectorConfig) {
-	const status = getAraknisSwitchConfigStatus(config)
-	if (!status.configured) {
+export function assertAraknisSwitchCredentialsPresent(
+	credentials: { username: string; password: string } | null,
+) {
+	if (!credentials?.username || !credentials.password) {
 		throw new Error(
-			`Araknis switch diagnostics are not configured. Missing: ${status.missingFields.join(', ')}.`,
+			'Araknis switch credentials are not configured. Open /araknis-switch/setup on the connector LAN UI or call araknis_set_credentials.',
 		)
 	}
-	return status
+	return credentials
 }

@@ -67,6 +67,7 @@ export async function createHomeConnectorApp() {
 	})
 	const araknisSwitch = createAraknisSwitchAdapter({
 		config,
+		storage,
 	})
 	const kasa = createKasaAdapter({
 		config,
@@ -136,6 +137,7 @@ export async function createHomeConnectorApp() {
 		jellyfish,
 		venstar,
 		accessNetworksUnleashed,
+		araknisSwitch,
 		kasa,
 		phone,
 		pjlink,

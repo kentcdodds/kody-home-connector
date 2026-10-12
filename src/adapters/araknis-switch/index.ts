@@ -1,12 +1,22 @@
 import { type HomeConnectorConfig } from '../../config.ts'
+import { type HomeConnectorStorage } from '../../storage/index.ts'
 import { createAraknisSwitchOpenClient } from './client.ts'
 import {
 	buildVlanMembership,
 	parseAraknisInterfacesPayload,
 } from './parsing.ts'
+import {
+	clearAraknisSwitchCredentials,
+	getAraknisSwitchAuthStatus,
+	getAraknisSwitchCredentials,
+	hasAraknisSwitchStoredCredentials,
+	saveAraknisSwitchCredentials,
+	updateAraknisSwitchAuthStatus,
+} from './repository.ts'
 import { fetchAraknisLldpNeighborsOverSsh } from './ssh-client.ts'
 import {
 	type AraknisSwitchClient,
+	type AraknisSwitchCredentials,
 	type AraknisSwitchLldpNeighbor,
 	type AraknisSwitchPort,
 	type AraknisSwitchStatus,
@@ -14,7 +24,7 @@ import {
 	type AraknisSwitchVlanMembership,
 } from './types.ts'
 import {
-	assertAraknisSwitchConfigured,
+	assertAraknisSwitchCredentialsPresent,
 	getAraknisSwitchConfigStatus,
 } from './validation.ts'
 
@@ -37,36 +47,71 @@ function asString(value: unknown): string | null {
 
 export function createAraknisSwitchAdapter(input: {
 	config: HomeConnectorConfig
-	clientFactory?: () => AraknisSwitchClient
-	sshLldpFetcher?: () => Promise<Array<AraknisSwitchLldpNeighbor>>
+	storage: HomeConnectorStorage
+	clientFactory?: (credentials: AraknisSwitchCredentials) => AraknisSwitchClient
+	sshLldpFetcher?: (
+		credentials: AraknisSwitchCredentials,
+	) => Promise<Array<AraknisSwitchLldpNeighbor>>
 }) {
-	const { config } = input
-	let cachedClient: AraknisSwitchClient | null = null
+	const { config, storage } = input
+	const connectorId = config.homeConnectorId
+	let cachedClient: {
+		credentialsKey: string
+		client: AraknisSwitchClient
+	} | null = null
 
-	function getClient() {
-		assertAraknisSwitchConfigured(config)
-		if (input.clientFactory) return input.clientFactory()
-		cachedClient ??= createAraknisSwitchOpenClient({ config })
-		return cachedClient
+	async function loadCredentials() {
+		if (!storage.sharedSecret) return null
+		return await getAraknisSwitchCredentials(storage, connectorId)
 	}
 
-	function getConfigStatus() {
-		return getAraknisSwitchConfigStatus(config)
+	async function getConfigStatus() {
+		const hasStoredCredentials = await hasAraknisSwitchStoredCredentials(
+			storage,
+			connectorId,
+		)
+		const authStatus = await getAraknisSwitchAuthStatus(storage, connectorId)
+		const credentials = storage.sharedSecret
+			? await getAraknisSwitchCredentials(storage, connectorId)
+			: null
+		return getAraknisSwitchConfigStatus({
+			config,
+			hasStoredCredentials: Boolean(hasStoredCredentials && credentials),
+			hasSharedSecret: Boolean(storage.sharedSecret),
+			lastAuthenticatedAt: authStatus?.lastAuthenticatedAt ?? null,
+			lastAuthError: authStatus?.lastAuthError ?? null,
+		})
+	}
+
+	async function requireCredentials() {
+		return assertAraknisSwitchCredentialsPresent(await loadCredentials())
+	}
+
+	async function getClient() {
+		const credentials = await requireCredentials()
+		if (input.clientFactory) return input.clientFactory(credentials)
+		const credentialsKey = `${credentials.username}\0${credentials.password}`
+		if (cachedClient?.credentialsKey === credentialsKey) {
+			return cachedClient.client
+		}
+		const client = createAraknisSwitchOpenClient({ config, credentials })
+		cachedClient = { credentialsKey, client }
+		return client
 	}
 
 	async function listVlans(): Promise<Array<AraknisSwitchVlan>> {
-		return await getClient().listVlans()
+		return await (await getClient()).listVlans()
 	}
 
 	async function listPorts(): Promise<Array<AraknisSwitchPort>> {
-		const interfaces = await getClient().listInterfaces()
+		const interfaces = await (await getClient()).listInterfaces()
 		return parseAraknisInterfacesPayload({ interfaces })
 	}
 
 	async function getVlanMembership(
 		vlanId: number,
 	): Promise<AraknisSwitchVlanMembership> {
-		const client = getClient()
+		const client = await getClient()
 		const [ports, vlanDetail] = await Promise.all([
 			listPorts(),
 			client.getVlan(vlanId),
@@ -85,7 +130,7 @@ export function createAraknisSwitchAdapter(input: {
 	}> {
 		const errors: Array<string> = []
 		try {
-			const neighbors = await getClient().listLldpNeighbors()
+			const neighbors = await (await getClient()).listLldpNeighbors()
 			if (neighbors.length > 0) {
 				return { neighbors, source: 'open-v1', errors }
 			}
@@ -107,9 +152,10 @@ export function createAraknisSwitchAdapter(input: {
 		}
 
 		try {
+			const credentials = await requireCredentials()
 			const neighbors = input.sshLldpFetcher
-				? await input.sshLldpFetcher()
-				: await fetchAraknisLldpNeighborsOverSsh({ config })
+				? await input.sshLldpFetcher(credentials)
+				: await fetchAraknisLldpNeighborsOverSsh({ config, credentials })
 			return {
 				neighbors,
 				source: neighbors.length > 0 ? 'ssh-cli' : 'unavailable',
@@ -123,10 +169,44 @@ export function createAraknisSwitchAdapter(input: {
 		}
 	}
 
+	async function recordAuthSuccess() {
+		await updateAraknisSwitchAuthStatus({
+			storage,
+			connectorId,
+			lastAuthenticatedAt: new Date().toISOString(),
+			lastAuthError: null,
+		})
+	}
+
+	async function recordAuthFailure(error: unknown) {
+		await updateAraknisSwitchAuthStatus({
+			storage,
+			connectorId,
+			lastAuthenticatedAt: null,
+			lastAuthError:
+				error instanceof Error ? error.message : 'Araknis switch login failed.',
+		})
+	}
+
 	return {
 		getConfigStatus,
+		async setCredentials(username: string, password: string) {
+			await saveAraknisSwitchCredentials({
+				storage,
+				connectorId,
+				username,
+				password,
+			})
+			cachedClient = null
+			return getConfigStatus()
+		},
+		async clearCredentials() {
+			await clearAraknisSwitchCredentials(storage, connectorId)
+			cachedClient = null
+			return getConfigStatus()
+		},
 		async getStatus(): Promise<AraknisSwitchStatus> {
-			const configStatus = getConfigStatus()
+			const configStatus = await getConfigStatus()
 			if (!configStatus.configured) {
 				return {
 					config: configStatus,
@@ -152,7 +232,7 @@ export function createAraknisSwitchAdapter(input: {
 			}
 
 			const errors: Array<string> = []
-			const client = getClient()
+			const client = await getClient()
 			let loginOk = false
 			let vlansReadable = false
 			let interfacesReadable = false
@@ -166,14 +246,16 @@ export function createAraknisSwitchAdapter(input: {
 			try {
 				await client.login()
 				loginOk = true
+				await recordAuthSuccess()
 			} catch (error) {
+				await recordAuthFailure(error)
 				errors.push(
 					error instanceof Error
 						? error.message
 						: 'Araknis switch login failed.',
 				)
 				return {
-					config: configStatus,
+					config: await getConfigStatus(),
 					connected: false,
 					api: {
 						kind: 'unavailable',
@@ -235,7 +317,7 @@ export function createAraknisSwitchAdapter(input: {
 			}
 
 			return {
-				config: configStatus,
+				config: await getConfigStatus(),
 				connected: loginOk && vlansReadable && interfacesReadable,
 				api: {
 					kind: loginOk ? 'open-v1' : 'unavailable',

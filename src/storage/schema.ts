@@ -255,6 +255,20 @@ export const islandRouterApiCredentials = table({
 	timestamps,
 })
 
+export const araknisSwitchCredentials = table({
+	name: 'araknis_switch_credentials',
+	columns: {
+		connector_id: c.text(),
+		username: c.text(),
+		password: c.text(),
+		last_authenticated_at: c.text().nullable(),
+		last_auth_error: c.text().nullable(),
+		updated_at: c.text(),
+	},
+	primaryKey: ['connector_id'],
+	timestamps,
+})
+
 export const phoneDeviceTokens = table({
 	name: 'phone_device_tokens',
 	columns: {

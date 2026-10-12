@@ -4,9 +4,12 @@ import os from 'node:os'
 import path from 'node:path'
 import { type HomeConnectorConfig } from '../../config.ts'
 import { parseLldpRemoteDeviceCli } from './parsing.ts'
-import { type AraknisSwitchLldpNeighbor } from './types.ts'
 import {
-	assertAraknisSwitchConfigured,
+	type AraknisSwitchCredentials,
+	type AraknisSwitchLldpNeighbor,
+} from './types.ts'
+import {
+	assertAraknisSwitchCredentialsPresent,
 	resolveAraknisSwitchBaseUrl,
 	resolveAraknisSwitchHost,
 } from './validation.ts'
@@ -87,14 +90,15 @@ async function runLocalCommand(input: {
  */
 export async function fetchAraknisLldpNeighborsOverSsh(input: {
 	config: HomeConnectorConfig
+	credentials: AraknisSwitchCredentials
 }): Promise<Array<AraknisSwitchLldpNeighbor>> {
-	assertAraknisSwitchConfigured(input.config)
+	const credentials = assertAraknisSwitchCredentialsPresent(input.credentials)
 	const config = input.config
 	const host =
 		resolveAraknisSwitchHost(resolveAraknisSwitchBaseUrl(config)) ??
 		'192.168.0.50'
-	const username = config.araknisSwitchUsername!
-	const password = config.araknisSwitchPassword!
+	const username = credentials.username
+	const password = credentials.password
 	const tempDir = await mkdtemp(path.join(os.tmpdir(), 'kody-araknis-ssh-'))
 	const askPassPath = path.join(tempDir, 'askpass.sh')
 

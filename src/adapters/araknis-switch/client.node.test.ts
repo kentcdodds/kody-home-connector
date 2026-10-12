@@ -41,8 +41,6 @@ function createConfig() {
 		WORKER_BASE_URL: 'http://localhost:3742',
 		HOME_CONNECTOR_DB_PATH: ':memory:',
 		ARAKNIS_SWITCH_BASE_URL: 'https://192.168.0.50',
-		ARAKNIS_SWITCH_USERNAME: 'araknis',
-		ARAKNIS_SWITCH_PASSWORD: 'test-password',
 		ARAKNIS_SWITCH_ALLOW_INSECURE_TLS: 'true',
 	})
 	return loadHomeConnectorConfig()
@@ -88,6 +86,7 @@ test('OpEN client logs in with SIDSSL cookie and reads VLANs/interfaces', async 
 
 	const client = createAraknisSwitchOpenClient({
 		config: createConfig(),
+		credentials: { username: 'araknis', password: 'test-password' },
 		fetchImpl: fetchMock as typeof fetch,
 	})
 

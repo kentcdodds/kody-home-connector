@@ -783,29 +783,42 @@ using Broadcom FASTPATH OpEN-style endpoints (`/open/v1/login`,
 `/open/v1/vlans`, `/open/v1/interfaces`). It is intentionally read-only: there
 are no write/config-change tools.
 
-Credentials are connector env vars that match the Kody user secret names
-`ARAKNIS_SWITCH_USERNAME` and `ARAKNIS_SWITCH_PASSWORD`. Agents researching the
-switch from Kody execute should use gateway placeholders
-(`{{secret:ARAKNIS_SWITCH_USERNAME}}` / `{{secret:ARAKNIS_SWITCH_PASSWORD}}`) so
-secret values never enter prompts, code, logs, or tool output. The home
-connector itself reads the already-filled env vars on the NAS host and must
-never log or return those values.
+Credentials are stored locally in the connector SQLite database, encrypted with
+`HOME_CONNECTOR_SHARED_SECRET` — the same pattern as Island Router API PIN /
+Kasa credentials. They must **not** come from Kody secrets, placeholders, or
+connector env vars. The connector never logs or returns username/password
+values.
 
-Configuration:
+Setup (preferred — no chat paste):
+
+1. On a machine on the home LAN, open the connector admin UI at
+   `http://192.168.1.234:4040/araknis-switch/setup` (or the NAS LAN listen host
+   / port your container uses).
+2. Enter the switch management username and password.
+3. Click **Save credentials**. The page confirms storage and never echoes the
+   values back.
+
+Alternative: call MCP `araknis_set_credentials` from an already-authenticated
+home MCP session (also never echoes values). Prefer the setup page so secrets
+never enter chat.
+
+Configuration (non-secret):
 
 - `ARAKNIS_SWITCH_BASE_URL` defaults to `https://192.168.0.50`
-- `ARAKNIS_SWITCH_USERNAME` / `ARAKNIS_SWITCH_PASSWORD` (required for tools)
 - `ARAKNIS_SWITCH_ALLOW_INSECURE_TLS=true` for the switch's self-signed HTTPS
   certificate (typical on LAN management)
 - `ARAKNIS_SWITCH_REQUEST_TIMEOUT_MS` defaults to `8000`
 - `ARAKNIS_SWITCH_SSH_ENABLED=true` optionally enables SSH
   `show lldp remote-device` when OpEN has no LLDP resource
 - `ARAKNIS_SWITCH_SSH_PORT` defaults to `22`
+- `HOME_CONNECTOR_SHARED_SECRET` required to encrypt stored credentials
 
 MCP tools (`kody.mcp["home"]`):
 
 - `araknis_get_status` — config readiness plus OpEN login / VLAN / port / LLDP
   availability
+- `araknis_set_credentials` — store username/password locally (encrypted)
+- `araknis_clear_credentials` — delete locally stored credentials
 - `araknis_list_vlans` — VLAN database (id/name/type)
 - `araknis_list_ports` — per-port description, link/admin state, PVID,
   tagged/untagged membership, derived switchport mode
@@ -815,9 +828,10 @@ MCP tools (`kody.mcp["home"]`):
 
 After a new image is published, the NAS container must be recreated (pull +
 `docker rm`/`docker run` via the start script) so the process loads the new tool
-registrations. Add the Araknis env vars to the live
-`start-kody-home-connector.sh` before recreate; OAuth tokens survive when the
-existing data volume stays mounted.
+registrations and applies the credentials-table migration. Enter credentials
+once via `/araknis-switch/setup` after recreate; OAuth tokens and the new
+encrypted Araknis credentials survive later recreates when the existing data
+volume stays mounted.
 
 ## Access Networks Unleashed WiFi integration
 
@@ -893,6 +907,8 @@ The connector stores a local SQLite database containing:
 - Kasa TP-Link account credentials encrypted locally with
   `HOME_CONNECTOR_SHARED_SECRET`
 - last Kasa authentication success/error details
+- Araknis AN-620 management username/password encrypted locally with
+  `HOME_CONNECTOR_SHARED_SECRET`
 - Android companion device token encrypted locally with
   `HOME_CONNECTOR_DATA_KEY`
 - discovered JellyFish controller metadata and latest connection status

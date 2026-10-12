@@ -1,4 +1,5 @@
 import { type CallToolResult } from '@modelcontextprotocol/sdk/types.js'
+import { markSecretInputFields } from '@kody-bot/connector-kit/schema'
 import { z } from 'zod'
 import { type createAraknisSwitchAdapter } from '../adapters/araknis-switch/index.ts'
 import {
@@ -66,6 +67,57 @@ export function registerAraknisSwitchHomeConnectorTools(input: {
 					: `Araknis switch diagnostics are not fully configured: ${status.config.missingFields.join(', ')}.`,
 				status,
 			)
+		},
+	)
+
+	const credentialsSchema = buildToolInputSchema({
+		username: z
+			.string()
+			.min(1)
+			.describe('Araknis switch management username to store locally.'),
+		password: z
+			.string()
+			.min(1)
+			.describe('Araknis switch management password to store locally.'),
+	})
+
+	registerTool(
+		{
+			name: 'araknis_set_credentials',
+			title: 'Set Araknis Switch Credentials',
+			description:
+				'Store Araknis AN-620 management username and password locally in the home connector SQLite database, encrypted with HOME_CONNECTOR_SHARED_SECRET. Prefer the LAN setup page at /araknis-switch/setup. Never logs or returns the values.',
+			inputSchema: markSecretInputFields(credentialsSchema.inputSchema, [
+				'username',
+				'password',
+			]) as Record<string, unknown>,
+			sdkInputSchema: credentialsSchema.sdkInputSchema,
+		},
+		async (args) => {
+			const status = await araknisSwitch.setCredentials(
+				String(args['username'] ?? ''),
+				String(args['password'] ?? ''),
+			)
+			return structuredTextResult(
+				'Stored Araknis switch credentials locally.',
+				{
+					status,
+				},
+			)
+		},
+	)
+
+	registerTool(
+		{
+			name: 'araknis_clear_credentials',
+			title: 'Clear Araknis Switch Credentials',
+			description:
+				'Delete the locally stored Araknis AN-620 management username and password from connector SQLite.',
+			inputSchema: {},
+		},
+		async () => {
+			const status = await araknisSwitch.clearCredentials()
+			return structuredTextResult('Cleared Araknis switch credentials.', status)
 		},
 	)
 

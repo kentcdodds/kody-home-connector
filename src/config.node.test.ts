@@ -404,8 +404,6 @@ test('Araknis switch env vars honor defaults and explicit overrides', () => {
 		using _env = createTemporaryEnv({
 			...requiredConfigEnv,
 			ARAKNIS_SWITCH_BASE_URL: undefined,
-			ARAKNIS_SWITCH_USERNAME: undefined,
-			ARAKNIS_SWITCH_PASSWORD: undefined,
 			ARAKNIS_SWITCH_ALLOW_INSECURE_TLS: undefined,
 			ARAKNIS_SWITCH_REQUEST_TIMEOUT_MS: undefined,
 			ARAKNIS_SWITCH_SSH_ENABLED: undefined,
@@ -414,21 +412,23 @@ test('Araknis switch env vars honor defaults and explicit overrides', () => {
 
 		expect(loadHomeConnectorConfig()).toMatchObject({
 			araknisSwitchBaseUrl: 'https://192.168.0.50',
-			araknisSwitchUsername: null,
-			araknisSwitchPassword: null,
 			araknisSwitchAllowInsecureTls: false,
 			araknisSwitchRequestTimeoutMs: 8000,
 			araknisSwitchSshEnabled: false,
 			araknisSwitchSshPort: 22,
 		})
+		expect(loadHomeConnectorConfig()).not.toHaveProperty(
+			'araknisSwitchUsername',
+		)
+		expect(loadHomeConnectorConfig()).not.toHaveProperty(
+			'araknisSwitchPassword',
+		)
 	}
 
 	{
 		using _env = createTemporaryEnv({
 			...requiredConfigEnv,
 			ARAKNIS_SWITCH_BASE_URL: 'https://192.168.0.50/',
-			ARAKNIS_SWITCH_USERNAME: 'araknis',
-			ARAKNIS_SWITCH_PASSWORD: 'env-password',
 			ARAKNIS_SWITCH_ALLOW_INSECURE_TLS: 'true',
 			ARAKNIS_SWITCH_REQUEST_TIMEOUT_MS: '12000',
 			ARAKNIS_SWITCH_SSH_ENABLED: 'true',
@@ -437,8 +437,6 @@ test('Araknis switch env vars honor defaults and explicit overrides', () => {
 
 		expect(loadHomeConnectorConfig()).toMatchObject({
 			araknisSwitchBaseUrl: 'https://192.168.0.50',
-			araknisSwitchUsername: 'araknis',
-			araknisSwitchPassword: 'env-password',
 			araknisSwitchAllowInsecureTls: true,
 			araknisSwitchRequestTimeoutMs: 12000,
 			araknisSwitchSshEnabled: true,

@@ -29,8 +29,6 @@ function createConfig(): HomeConnectorConfig {
 		islandRouterApiRequestTimeoutMs: 8000,
 		islandRouterApiAllowInsecureTls: false,
 		araknisSwitchBaseUrl: 'https://192.168.0.50',
-		araknisSwitchUsername: null,
-		araknisSwitchPassword: null,
 		araknisSwitchAllowInsecureTls: false,
 		araknisSwitchRequestTimeoutMs: 8000,
 		araknisSwitchSshEnabled: false,

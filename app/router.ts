@@ -13,6 +13,10 @@ import {
 	createSamsungTvStatusHandler,
 } from './handlers.ts'
 import {
+	createAraknisSwitchSetupHandler,
+	createAraknisSwitchStatusHandler,
+} from './araknis-switch-handlers.ts'
+import {
 	createIslandRouterApiSetupHandler,
 	createIslandRouterApiStatusHandler,
 } from './island-router-api-handlers.ts'
@@ -58,6 +62,7 @@ import { type createSamsungTvAdapter } from '../src/adapters/samsung-tv/index.ts
 import { type createVenstarAdapter } from '../src/adapters/venstar/index.ts'
 import { type HomeConnectorConfig } from '../src/config.ts'
 import { type HomeConnectorState } from '../src/state.ts'
+import { type createAraknisSwitchAdapter } from '../src/adapters/araknis-switch/index.ts'
 import { type createIslandRouterApiAdapter } from '../src/adapters/island-router-api/index.ts'
 import { type createIslandRouterAdapter } from '../src/adapters/island-router/index.ts'
 
@@ -73,6 +78,7 @@ export function createHomeConnectorRouter(
 	>,
 	islandRouter: ReturnType<typeof createIslandRouterAdapter>,
 	islandRouterApi: ReturnType<typeof createIslandRouterApiAdapter>,
+	araknisSwitch: ReturnType<typeof createAraknisSwitchAdapter>,
 	jellyfish: ReturnType<typeof createJellyfishAdapter>,
 	venstar: ReturnType<typeof createVenstarAdapter>,
 	kasa: ReturnType<typeof createKasaAdapter>,
@@ -153,6 +159,11 @@ export function createHomeConnectorRouter(
 				state,
 				islandRouterApi,
 			),
+			araknisSwitchStatus: createAraknisSwitchStatusHandler(
+				state,
+				araknisSwitch,
+			),
+			araknisSwitchSetup: createAraknisSwitchSetupHandler(state, araknisSwitch),
 			accessNetworksUnleashedStatus: createAccessNetworksUnleashedStatusHandler(
 				state,
 				accessNetworksUnleashed,

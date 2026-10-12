@@ -60,8 +60,6 @@ function createConfig() {
 	process.env.KASA_SCAN_CIDRS = '192.168.10.99/32'
 	process.env.PJLINK_SCAN_CIDRS = '192.168.0.128/32'
 	process.env.ARAKNIS_SWITCH_BASE_URL = 'https://192.168.0.50'
-	process.env.ARAKNIS_SWITCH_USERNAME = 'araknis'
-	process.env.ARAKNIS_SWITCH_PASSWORD = 'test-password'
 	process.env.ARAKNIS_SWITCH_ALLOW_INSECURE_TLS = 'true'
 	return loadHomeConnectorConfig()
 }
@@ -513,7 +511,7 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 		jellyfish,
 		venstar,
 		accessNetworksUnleashed,
-		araknisSwitch: createAraknisSwitchAdapter({ config }),
+		araknisSwitch: createAraknisSwitchAdapter({ config, storage }),
 		kasa,
 		phone: createPhoneAdapter({ config }),
 		pjlink: createPjlinkAdapter({ config, state, storage }),
@@ -1312,7 +1310,7 @@ test('mcp server exposes island router write tools when host verification is con
 		jellyfish,
 		venstar,
 		accessNetworksUnleashed,
-		araknisSwitch: createAraknisSwitchAdapter({ config }),
+		araknisSwitch: createAraknisSwitchAdapter({ config, storage }),
 		kasa,
 		phone: createPhoneAdapter({ config }),
 		pjlink: createPjlinkAdapter({ config, state, storage }),

@@ -110,13 +110,12 @@ export type HomeConnectorConfig = {
 	islandRouterApiRequestTimeoutMs: number
 	islandRouterApiAllowInsecureTls: boolean
 	/**
-	 * Araknis AN-620 managed switch (LAN management). Credentials come from
-	 * connector env matching Kody user secret names ARAKNIS_SWITCH_USERNAME /
-	 * ARAKNIS_SWITCH_PASSWORD. Never log the raw values.
+	 * Araknis AN-620 managed switch (LAN management). Username/password are
+	 * stored locally in encrypted SQLite via `/araknis-switch/setup` or
+	 * `araknis_set_credentials` — never via Kody secrets or connector env.
+	 * Never log or return the raw credential values.
 	 */
 	araknisSwitchBaseUrl: string
-	araknisSwitchUsername: string | null
-	araknisSwitchPassword: string | null
 	araknisSwitchAllowInsecureTls: boolean
 	araknisSwitchRequestTimeoutMs: number
 	araknisSwitchSshEnabled: boolean
@@ -543,8 +542,6 @@ export function loadHomeConnectorConfig(): HomeConnectorConfig {
 		araknisSwitchBaseUrl: trimTrailingSlash(
 			process.env.ARAKNIS_SWITCH_BASE_URL?.trim() || 'https://192.168.0.50',
 		),
-		araknisSwitchUsername: process.env.ARAKNIS_SWITCH_USERNAME?.trim() || null,
-		araknisSwitchPassword: process.env.ARAKNIS_SWITCH_PASSWORD?.trim() || null,
 		araknisSwitchAllowInsecureTls:
 			process.env.ARAKNIS_SWITCH_ALLOW_INSECURE_TLS === 'true',
 		araknisSwitchRequestTimeoutMs:

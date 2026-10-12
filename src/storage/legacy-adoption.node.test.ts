@@ -148,6 +148,7 @@ test('baseline migration adopts a database created by the previous release', asy
 				['pjlink_projectors', 'applied'],
 				['sony_ircc_players', 'applied'],
 				['roku_devices', 'applied'],
+				['araknis_switch_credentials', 'applied'],
 			])
 
 			expect(await listVenstarThermostats(storage, 'default')).toEqual([
@@ -183,6 +184,7 @@ test('baseline migration adopts a database created by the previous release', asy
 		expect(listSchemaObjects(dbPath)).toEqual(
 			[
 				...legacyObjects,
+				{ type: 'table', name: 'araknis_switch_credentials' },
 				{ type: 'table', name: 'data_table_migrations' },
 				{ type: 'table', name: 'pjlink_projectors' },
 				{ type: 'table', name: 'roku_devices' },
@@ -198,6 +200,7 @@ test('baseline migration adopts a database created by the previous release', asy
 				await loadHomeConnectorMigrations(),
 			)
 			expect(status.map((entry) => entry.status)).toEqual([
+				'applied',
 				'applied',
 				'applied',
 				'applied',
@@ -241,6 +244,7 @@ test('an empty database receives the full schema and a journaled baseline', asyn
 			).toEqual(
 				[
 					...listSchemaObjects(legacyDbPath),
+					{ type: 'table', name: 'araknis_switch_credentials' },
 					{ type: 'table', name: 'pjlink_projectors' },
 					{ type: 'table', name: 'roku_devices' },
 					{ type: 'table', name: 'sony_ircc_players' },

@@ -120,6 +120,7 @@ async function main() {
 		connector.accessNetworksUnleashed,
 		connector.islandRouter,
 		connector.islandRouterApi,
+		connector.araknisSwitch,
 		connector.jellyfish,
 		connector.venstar,
 		connector.kasa,

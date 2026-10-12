@@ -50,8 +50,6 @@ export function createTestHomeConnectorConfig(
 		islandRouterApiRequestTimeoutMs: 8_000,
 		islandRouterApiAllowInsecureTls: false,
 		araknisSwitchBaseUrl: 'https://192.168.0.50',
-		araknisSwitchUsername: null,
-		araknisSwitchPassword: null,
 		araknisSwitchAllowInsecureTls: false,
 		araknisSwitchRequestTimeoutMs: 8_000,
 		araknisSwitchSshEnabled: false,
