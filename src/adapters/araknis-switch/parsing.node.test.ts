@@ -89,3 +89,58 @@ test('parseLldpRemoteDeviceCli extracts remote systems without credentials', () 
 		},
 	])
 })
+
+test('parseLldpRemoteDeviceCli keeps table-style neighbor details', () => {
+	const neighbors = parseLldpRemoteDeviceCli(`
+Local Port   Remote ID     Chassis ID         Mgmt Addr
+---------    ---------     ----------         ---------
+0/5          RuckusAP-1    00:11:22:33:44:55  192.168.0.101
+0/24         Island        b4:a8:b9:38:7a:bf  192.168.0.1
+`)
+	expect(neighbors).toEqual([
+		{
+			localPort: '0/5',
+			remoteSystemName: 'RuckusAP-1',
+			remotePortId: null,
+			remotePortDescription: null,
+			remoteChassisId: null,
+			managementAddresses: ['192.168.0.101'],
+			rawLine: '0/5          RuckusAP-1    00:11:22:33:44:55  192.168.0.101',
+		},
+		{
+			localPort: '0/24',
+			remoteSystemName: 'Island',
+			remotePortId: null,
+			remotePortDescription: null,
+			remoteChassisId: null,
+			managementAddresses: ['192.168.0.1'],
+			rawLine: '0/24         Island        b4:a8:b9:38:7a:bf  192.168.0.1',
+		},
+	])
+})
+
+test('buildVlanMembership merges interface ports and excludes participation=exclude', () => {
+	const ports = parseAraknisInterfacesPayload(araknisInterfacesPayload)
+	const membership = buildVlanMembership({
+		vlan: { id: 20, name: 'AP', type: 'static' },
+		ports,
+		memberRows: [
+			{
+				interface: '0/5',
+				participation: 'include',
+				tagging: 'tagged',
+			},
+			{
+				interface: '0/99',
+				participation: 'exclude',
+				tagging: 'tagged',
+			},
+		],
+	})
+	expect(membership.taggedPorts).toContain('0/5')
+	expect(membership.taggedPorts).toContain('0/24')
+	expect(membership.taggedPorts).not.toContain('0/99')
+	expect(
+		membership.ports.find((port) => port.port === '0/99')?.participation,
+	).toBe('exclude')
+})

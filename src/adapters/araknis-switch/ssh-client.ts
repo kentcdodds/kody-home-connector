@@ -38,6 +38,8 @@ async function runLocalCommand(input: {
 	args: Array<string>
 	env?: NodeJS.ProcessEnv
 	timeoutMs: number
+	/** Optional stdin to drive interactive CLIs (for example FASTPATH SSH). */
+	stdinText?: string
 }) {
 	const child = spawn(input.command, input.args, {
 		stdio: 'pipe',
@@ -53,6 +55,9 @@ async function runLocalCommand(input: {
 	child.stderr?.on('data', (chunk: string | Buffer) => {
 		stderr += String(chunk)
 	})
+	if (input.stdinText != null) {
+		child.stdin?.write(input.stdinText)
+	}
 	child.stdin?.end()
 
 	let timedOut = false
@@ -111,10 +116,12 @@ export async function fetchAraknisLldpNeighborsOverSsh(input: {
 		)
 		await chmod(askPassPath, 0o700)
 
+		// Araknis/FASTPATH SSH is an interactive CLI, not a remote command
+		// executor. Force a PTY and drive `show lldp remote-device` over stdin.
 		const result = await runLocalCommand({
 			command: 'ssh',
 			args: [
-				'-T',
+				'-tt',
 				'-p',
 				String(config.araknisSwitchSshPort),
 				'-o',
@@ -134,8 +141,8 @@ export async function fetchAraknisLldpNeighborsOverSsh(input: {
 				'-o',
 				'LogLevel=ERROR',
 				`${username}@${host}`,
-				'show lldp remote-device',
 			],
+			stdinText: 'terminal length 0\nshow lldp remote-device\nexit\n',
 			env: {
 				...process.env,
 				DISPLAY: process.env.DISPLAY || ':0',

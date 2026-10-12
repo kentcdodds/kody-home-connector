@@ -109,9 +109,11 @@ export function parseAraknisInterfaceMembership(
 		}
 	} else if (typeof taggingRaw === 'string') {
 		const tagging = taggingRaw.trim().toLowerCase()
-		if (tagging === 'tagged' && pvid != null) {
-			taggedVlans = [pvid]
-		} else if (tagging === 'untagged' && pvid != null) {
+		// String tagging without a VLAN array cannot invent tagged membership
+		// from PVID — PVID is the native/untagged VLAN.
+		if (tagging === 'untagged' && pvid != null) {
+			untaggedVlans = [pvid]
+		} else if (tagging === 'tagged' && pvid != null) {
 			untaggedVlans = [pvid]
 		}
 	} else if (pvid != null) {
@@ -180,6 +182,8 @@ export function buildVlanMembership(input: {
 	const byPort = new Map(input.ports.map((port) => [port.port, port]))
 	const memberPorts: AraknisSwitchVlanMembership['ports'] = []
 
+	const seen = new Set<string>()
+
 	if (input.memberRows && input.memberRows.length > 0) {
 		for (const row of input.memberRows) {
 			const portName =
@@ -215,34 +219,42 @@ export function buildVlanMembership(input: {
 				description: port?.description ?? null,
 				linkState: port?.linkState ?? null,
 			})
+			seen.add(portName)
 		}
-	} else {
-		for (const port of input.ports) {
-			const isTagged = port.taggedVlans.includes(input.vlan.id)
-			const isUntagged = port.untaggedVlans.includes(input.vlan.id)
-			if (!isTagged && !isUntagged) continue
-			memberPorts.push({
-				port: port.port,
-				tagging: isTagged ? 'tagged' : 'untagged',
-				participation: 'include',
-				pvid: port.pvid,
-				description: port.description,
-				linkState: port.linkState,
-			})
-		}
+	}
+
+	// Always merge interface-derived membership so incomplete memberRows cannot
+	// hide tagged/untagged AP or uplink ports present on the interfaces list.
+	for (const port of input.ports) {
+		if (seen.has(port.port)) continue
+		const isTagged = port.taggedVlans.includes(input.vlan.id)
+		const isUntagged = port.untaggedVlans.includes(input.vlan.id)
+		if (!isTagged && !isUntagged) continue
+		memberPorts.push({
+			port: port.port,
+			tagging: isTagged ? 'tagged' : 'untagged',
+			participation: 'include',
+			pvid: port.pvid,
+			description: port.description,
+			linkState: port.linkState,
+		})
 	}
 
 	memberPorts.sort((a, b) =>
 		a.port.localeCompare(b.port, undefined, { numeric: true }),
 	)
 
+	const included = memberPorts.filter(
+		(port) => port.participation !== 'exclude',
+	)
+
 	return {
 		vlan: input.vlan,
 		ports: memberPorts,
-		taggedPorts: memberPorts
+		taggedPorts: included
 			.filter((port) => port.tagging === 'tagged')
 			.map((port) => port.port),
-		untaggedPorts: memberPorts
+		untaggedPorts: included
 			.filter((port) => port.tagging === 'untagged')
 			.map((port) => port.port),
 	}
@@ -273,10 +285,11 @@ export function parseLldpRemoteDeviceCli(
 	}
 
 	for (const line of lines) {
+		// Only treat labeled "Local Interface:" / "Interface:" / "Port:" blocks as
+		// detail-style neighbors. Bare "0/5 …" rows belong to the table fallback.
 		const localMatch =
-			/^(?:Local\s+Interface|Interface|Port)\s*[.:]\s*(\S+)/i.exec(line) ??
-			/^(\d+\/\d+)\s+/.exec(line.trim())
-		if (localMatch && /interface|port|^\d+\/\d+/i.test(line)) {
+			/^(?:Local\s+Interface|Interface|Port)\s*[.:]\s*(\S+)/i.exec(line)
+		if (localMatch) {
 			flush()
 			current = {
 				localPort: localMatch[1] ?? null,

@@ -8,7 +8,6 @@ import {
 	type AraknisSwitchClient,
 	type AraknisSwitchCredentials,
 	type AraknisSwitchLldpNeighbor,
-	type AraknisSwitchVlan,
 } from './types.ts'
 import {
 	assertAraknisSwitchCredentialsPresent,
@@ -160,6 +159,39 @@ export function createAraknisSwitchOpenClient(input: {
 		}
 	}
 
+	function assertOpenPayloadOk(path: string, payload: unknown) {
+		if (!isRecord(payload)) return
+		const status = payload['status']
+		if (!isRecord(status)) return
+		const errorCode = status['error_code'] ?? status['errorCode']
+		if (typeof errorCode === 'number' && errorCode !== 0) {
+			const message =
+				asString(status['msg'] ?? status['message'] ?? status['more_info']) ??
+				`OpEN error_code=${String(errorCode)}`
+			throw new AraknisSwitchRequestError(
+				`Araknis switch GET ${path} returned OpEN error: ${message}.`,
+				{ path, statusCode: asNumber(status['response_code']) },
+			)
+		}
+	}
+
+	function asString(value: unknown): string | null {
+		if (typeof value !== 'string') return null
+		const trimmed = value.trim()
+		return trimmed.length > 0 ? trimmed : null
+	}
+
+	function asNumber(value: unknown): number | null {
+		if (typeof value === 'number' && Number.isFinite(value)) {
+			return Math.trunc(value)
+		}
+		if (typeof value === 'string' && value.trim()) {
+			const parsed = Number(value)
+			if (Number.isFinite(parsed)) return Math.trunc(parsed)
+		}
+		return null
+	}
+
 	async function getJson(path: string) {
 		await ensureLogin()
 		const first = await readJson(path, { method: 'GET' })
@@ -173,6 +205,7 @@ export function createAraknisSwitchOpenClient(input: {
 					{ path, statusCode: retry.response.status },
 				)
 			}
+			assertOpenPayloadOk(path, retry.payload)
 			return retry.payload
 		}
 		if (!first.response.ok) {
@@ -181,6 +214,7 @@ export function createAraknisSwitchOpenClient(input: {
 				{ path, statusCode: first.response.status },
 			)
 		}
+		assertOpenPayloadOk(path, first.payload)
 		return first.payload
 	}
 
@@ -198,10 +232,12 @@ export function createAraknisSwitchOpenClient(input: {
 		async getVlan(vlanId: number) {
 			const payload = await getJson(`/open/v1/vlans?id=${vlanId}`)
 			const vlans = parseAraknisVlansPayload(payload)
-			const vlan: AraknisSwitchVlan = vlans[0] ?? {
-				id: vlanId,
-				name: null,
-				type: null,
+			const vlan = vlans.find((entry) => entry.id === vlanId) ?? null
+			if (!vlan) {
+				throw new AraknisSwitchRequestError(
+					`Araknis switch VLAN ${String(vlanId)} was not found.`,
+					{ path: `/open/v1/vlans?id=${vlanId}`, statusCode: 404 },
+				)
 			}
 			const members = isRecord(payload)
 				? Array.isArray(payload['interfaces'])
@@ -210,7 +246,9 @@ export function createAraknisSwitchOpenClient(input: {
 						? (payload['ports'] as Array<Record<string, unknown>>)
 						: Array.isArray(payload['vlanMembers'])
 							? (payload['vlanMembers'] as Array<Record<string, unknown>>)
-							: []
+							: Array.isArray(payload['port_element'])
+								? (payload['port_element'] as Array<Record<string, unknown>>)
+								: []
 				: []
 			return { vlan, members }
 		},
@@ -218,6 +256,9 @@ export function createAraknisSwitchOpenClient(input: {
 			const payload = await getJson('/open/v1/interfaces?limit=512')
 			if (isRecord(payload) && Array.isArray(payload['interfaces'])) {
 				return payload['interfaces'] as Array<Record<string, unknown>>
+			}
+			if (isRecord(payload) && Array.isArray(payload['port_element'])) {
+				return payload['port_element'] as Array<Record<string, unknown>>
 			}
 			if (Array.isArray(payload)) {
 				return payload as Array<Record<string, unknown>>
