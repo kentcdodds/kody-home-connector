@@ -109,6 +109,18 @@ export type HomeConnectorConfig = {
 	islandRouterApiBaseUrl: string
 	islandRouterApiRequestTimeoutMs: number
 	islandRouterApiAllowInsecureTls: boolean
+	/**
+	 * Araknis AN-620 managed switch (LAN management). Credentials come from
+	 * connector env matching Kody user secret names ARAKNIS_SWITCH_USERNAME /
+	 * ARAKNIS_SWITCH_PASSWORD. Never log the raw values.
+	 */
+	araknisSwitchBaseUrl: string
+	araknisSwitchUsername: string | null
+	araknisSwitchPassword: string | null
+	araknisSwitchAllowInsecureTls: boolean
+	araknisSwitchRequestTimeoutMs: number
+	araknisSwitchSshEnabled: boolean
+	araknisSwitchSshPort: number
 	rokuDiscoveryUrl: string
 	samsungTvDiscoveryUrl: string
 	lutronDiscoveryUrl: string
@@ -390,6 +402,13 @@ export function loadHomeConnectorConfig(): HomeConnectorConfig {
 		process.env.ISLAND_ROUTER_API_REQUEST_TIMEOUT_MS ?? '8000',
 		10,
 	)
+	const araknisSwitchRequestTimeoutMs = Number.parseInt(
+		process.env.ARAKNIS_SWITCH_REQUEST_TIMEOUT_MS ?? '8000',
+		10,
+	)
+	const araknisSwitchSshPort = parseStrictIntegerEnv(
+		process.env.ARAKNIS_SWITCH_SSH_PORT,
+	)
 	const audiobookImportTimeoutMs = Number.parseInt(
 		process.env.AUDIOBOOK_IMPORT_TIMEOUT_MS ??
 			String(defaultAudiobookImportTimeoutMs),
@@ -521,6 +540,25 @@ export function loadHomeConnectorConfig(): HomeConnectorConfig {
 				: 8000,
 		islandRouterApiAllowInsecureTls:
 			process.env.ISLAND_ROUTER_API_ALLOW_INSECURE_TLS === 'true',
+		araknisSwitchBaseUrl: trimTrailingSlash(
+			process.env.ARAKNIS_SWITCH_BASE_URL?.trim() || 'https://192.168.0.50',
+		),
+		araknisSwitchUsername: process.env.ARAKNIS_SWITCH_USERNAME?.trim() || null,
+		araknisSwitchPassword: process.env.ARAKNIS_SWITCH_PASSWORD?.trim() || null,
+		araknisSwitchAllowInsecureTls:
+			process.env.ARAKNIS_SWITCH_ALLOW_INSECURE_TLS === 'true',
+		araknisSwitchRequestTimeoutMs:
+			Number.isFinite(araknisSwitchRequestTimeoutMs) &&
+			araknisSwitchRequestTimeoutMs >= 1000
+				? araknisSwitchRequestTimeoutMs
+				: 8000,
+		araknisSwitchSshEnabled: process.env.ARAKNIS_SWITCH_SSH_ENABLED === 'true',
+		araknisSwitchSshPort:
+			araknisSwitchSshPort != null &&
+			araknisSwitchSshPort >= 1 &&
+			araknisSwitchSshPort <= 65535
+				? araknisSwitchSshPort
+				: 22,
 		rokuDiscoveryUrl:
 			process.env.ROKU_DISCOVERY_URL?.trim() || 'ssdp://239.255.255.250:1900',
 		samsungTvDiscoveryUrl:

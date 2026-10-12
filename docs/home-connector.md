@@ -775,6 +775,50 @@ SSH transport is conservative:
 - the Docker image includes the OpenSSH client utilities needed for `ssh`,
   `ssh-keyscan`, and fingerprint verification
 
+## Araknis AN-620 switch (read-only)
+
+The Araknis adapter lives under `src/adapters/araknis-switch/` and talks to the
+LAN management interface of Kent's AN-620 (`192.168.0.50` by default) over HTTPS
+using Broadcom FASTPATH OpEN-style endpoints (`/open/v1/login`,
+`/open/v1/vlans`, `/open/v1/interfaces`). It is intentionally read-only: there
+are no write/config-change tools.
+
+Credentials are connector env vars that match the Kody user secret names
+`ARAKNIS_SWITCH_USERNAME` and `ARAKNIS_SWITCH_PASSWORD`. Agents researching the
+switch from Kody execute should use gateway placeholders
+(`{{secret:ARAKNIS_SWITCH_USERNAME}}` / `{{secret:ARAKNIS_SWITCH_PASSWORD}}`) so
+secret values never enter prompts, code, logs, or tool output. The home
+connector itself reads the already-filled env vars on the NAS host and must
+never log or return those values.
+
+Configuration:
+
+- `ARAKNIS_SWITCH_BASE_URL` defaults to `https://192.168.0.50`
+- `ARAKNIS_SWITCH_USERNAME` / `ARAKNIS_SWITCH_PASSWORD` (required for tools)
+- `ARAKNIS_SWITCH_ALLOW_INSECURE_TLS=true` for the switch's self-signed HTTPS
+  certificate (typical on LAN management)
+- `ARAKNIS_SWITCH_REQUEST_TIMEOUT_MS` defaults to `8000`
+- `ARAKNIS_SWITCH_SSH_ENABLED=true` optionally enables SSH
+  `show lldp remote-device` when OpEN has no LLDP resource
+- `ARAKNIS_SWITCH_SSH_PORT` defaults to `22`
+
+MCP tools (`kody.mcp["home"]`):
+
+- `araknis_get_status` — config readiness plus OpEN login / VLAN / port / LLDP
+  availability
+- `araknis_list_vlans` — VLAN database (id/name/type)
+- `araknis_list_ports` — per-port description, link/admin state, PVID,
+  tagged/untagged membership, derived switchport mode
+- `araknis_get_vlan_membership` — tagged/untagged ports for one VLAN id (use
+  `vlanId: 20` to verify AP and Island uplink tagging)
+- `araknis_list_lldp_neighbors` — LLDP remotes when OpEN or SSH can provide them
+
+After a new image is published, the NAS container must be recreated (pull +
+`docker rm`/`docker run` via the start script) so the process loads the new tool
+registrations. Add the Araknis env vars to the live
+`start-kody-home-connector.sh` before recreate; OAuth tokens survive when the
+existing data volume stays mounted.
+
 ## Access Networks Unleashed WiFi integration
 
 The Access Networks Unleashed adapter lives under

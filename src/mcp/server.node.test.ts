@@ -2,6 +2,7 @@ import { expect, test } from 'vitest'
 import { installHomeConnectorMockServer } from '../../mocks/test-server.ts'
 import { createAccessNetworksUnleashedAdapter } from '../adapters/access-networks-unleashed/index.ts'
 import { type AccessNetworksUnleashedClient } from '../adapters/access-networks-unleashed/types.ts'
+import { createAraknisSwitchAdapter } from '../adapters/araknis-switch/index.ts'
 import { createBondAdapter } from '../adapters/bond/index.ts'
 import { createIslandRouterApiAdapter } from '../adapters/island-router-api/index.ts'
 import { renderIslandRouterCommand } from '../adapters/island-router/command-catalog.ts'
@@ -58,6 +59,10 @@ function createConfig() {
 	process.env.ACCESS_NETWORKS_UNLEASHED_SCAN_CIDRS = '192.168.10.88/32'
 	process.env.KASA_SCAN_CIDRS = '192.168.10.99/32'
 	process.env.PJLINK_SCAN_CIDRS = '192.168.0.128/32'
+	process.env.ARAKNIS_SWITCH_BASE_URL = 'https://192.168.0.50'
+	process.env.ARAKNIS_SWITCH_USERNAME = 'araknis'
+	process.env.ARAKNIS_SWITCH_PASSWORD = 'test-password'
+	process.env.ARAKNIS_SWITCH_ALLOW_INSECURE_TLS = 'true'
 	return loadHomeConnectorConfig()
 }
 
@@ -508,6 +513,7 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 		jellyfish,
 		venstar,
 		accessNetworksUnleashed,
+		araknisSwitch: createAraknisSwitchAdapter({ config }),
 		kasa,
 		phone: createPhoneAdapter({ config }),
 		pjlink: createPjlinkAdapter({ config, state, storage }),
@@ -1306,6 +1312,7 @@ test('mcp server exposes island router write tools when host verification is con
 		jellyfish,
 		venstar,
 		accessNetworksUnleashed,
+		araknisSwitch: createAraknisSwitchAdapter({ config }),
 		kasa,
 		phone: createPhoneAdapter({ config }),
 		pjlink: createPjlinkAdapter({ config, state, storage }),

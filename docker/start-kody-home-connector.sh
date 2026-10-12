@@ -22,12 +22,21 @@ docker pull "${IMAGE}"
 docker stop "${CONTAINER_NAME}" >/dev/null 2>&1 || true
 docker rm "${CONTAINER_NAME}" >/dev/null 2>&1 || true
 
+# Optional Araknis AN-620 read-only diagnostics (LAN 192.168.0.50).
+# Set ARAKNIS_SWITCH_USERNAME / ARAKNIS_SWITCH_PASSWORD from the matching Kody
+# user secrets on the NAS host env — never commit secret values.
+# ARAKNIS_SWITCH_ALLOW_INSECURE_TLS=true is typically required for self-signed HTTPS.
 docker run -d --name "${CONTAINER_NAME}" --network host --restart unless-stopped \
 	-e "HOME_CONNECTOR_ID=${HOME_CONNECTOR_ID:-default}" \
 	-e "HOME_CONNECTOR_SHARED_SECRET=${HOME_CONNECTOR_SHARED_SECRET:-}" \
 	-e "HOME_CONNECTOR_DATA_KEY=${HOME_CONNECTOR_DATA_KEY:-}" \
 	-e "HOME_CONNECTOR_DATA_PATH=/data/home-connector" \
 	-e "AUDIOBOOK_LIBRARY_PATH=${AUDIOBOOK_LIBRARY_PATH}" \
+	-e "ARAKNIS_SWITCH_BASE_URL=${ARAKNIS_SWITCH_BASE_URL:-https://192.168.0.50}" \
+	-e "ARAKNIS_SWITCH_USERNAME=${ARAKNIS_SWITCH_USERNAME:-}" \
+	-e "ARAKNIS_SWITCH_PASSWORD=${ARAKNIS_SWITCH_PASSWORD:-}" \
+	-e "ARAKNIS_SWITCH_ALLOW_INSECURE_TLS=${ARAKNIS_SWITCH_ALLOW_INSECURE_TLS:-true}" \
+	-e "ARAKNIS_SWITCH_SSH_ENABLED=${ARAKNIS_SWITCH_SSH_ENABLED:-false}" \
 	-v "${HOST_DATA_PATH}:/data/home-connector" \
 	-v "${HOST_AUDIOBOOK_LIBRARY_PATH}:${AUDIOBOOK_LIBRARY_PATH}" \
 	"${IMAGE}"

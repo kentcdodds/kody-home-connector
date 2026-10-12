@@ -1,4 +1,5 @@
 import { createAccessNetworksUnleashedAdapter } from './adapters/access-networks-unleashed/index.ts'
+import { createAraknisSwitchAdapter } from './adapters/araknis-switch/index.ts'
 import { createBondAdapter } from './adapters/bond/index.ts'
 import { createIslandRouterApiAdapter } from './adapters/island-router-api/index.ts'
 import { createIslandRouterAdapter } from './adapters/island-router/index.ts'
@@ -64,6 +65,9 @@ export async function createHomeConnectorApp() {
 		state,
 		storage,
 	})
+	const araknisSwitch = createAraknisSwitchAdapter({
+		config,
+	})
 	const kasa = createKasaAdapter({
 		config,
 		state,
@@ -102,6 +106,7 @@ export async function createHomeConnectorApp() {
 		jellyfish,
 		venstar,
 		accessNetworksUnleashed,
+		araknisSwitch,
 		kasa,
 		phone,
 		pjlink,
