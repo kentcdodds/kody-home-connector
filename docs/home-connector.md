@@ -57,19 +57,64 @@ shared-secret handshake. Each Kody account adds the same public MCP URL at
 `/account/mcp-servers`. After authorize, tools are
 `kody.mcp["<server-name>"].tool_name(...)` (use `home` as the server name).
 
-Core env vars:
+### Bootstrap-only env vars (must stay env)
+
+These are required before the local SQLite store can be opened, or they change
+OAuth audience / volume mounts and need a container recreate:
 
 - `HOME_MCP_PUBLIC_BASE_URL` - public origin, default
-  `https://kody-home.doddsfamily.us`
+  `https://kody-home.doddsfamily.us`. Changing it invalidates existing access
+  tokens (audience must match).
 - `HOME_CONNECTOR_ID` - local SQLite namespace for adopted devices, default
   `default`. Keep an existing id so device rows stay visible. This is not the
   Kody MCP server name.
-- `HOME_CONNECTOR_DATA_KEY` / `HOME_CONNECTOR_SHARED_SECRET` - optional local
-  SQLite encryption key. Not used for MCP or Kody auth. Required to save the
-  Android companion token from `/phone/setup`.
-- `PHONE_DEVICE_TOKEN` - optional env fallback for the Android companion token
-  on `/phone/ws`. Prefer the encrypted token saved from `/phone/setup`. Never
-  log the raw value.
+- `HOME_CONNECTOR_DATA_KEY` / `HOME_CONNECTOR_SHARED_SECRET` - local SQLite
+  encryption key for stored secrets. Not used for MCP or Kody auth. Required to
+  save credentials / the Android companion token.
+- `HOME_CONNECTOR_DATA_PATH` / `HOME_CONNECTOR_DB_PATH` - data directory /
+  SQLite file path (Docker defaults under `/data/home-connector`).
+- `PORT` - listen port (default `4040`).
+- `HOST_DATA_PATH` - Synology host bind-mount for the data volume (start script
+  only; not read by Node).
+- `AUDIOBOOK_LIBRARY_PATH` / `HOST_AUDIOBOOK_LIBRARY_PATH` - in-container and
+  host paths for the audiobook share (volume mount).
+- `FFMPEG_PATH` - ffmpeg binary path inside the image.
+- `ISLAND_ROUTER_PRIVATE_KEY_PATH` / `ISLAND_ROUTER_KNOWN_HOSTS_PATH` - SSH key
+  / known_hosts file paths mounted into the container.
+- `NODE_ENV` / `MOCKS` / `SENTRY_*` / `APP_COMMIT_SHA` - process mode and
+  observability bootstrap.
+
+### Runtime config (prefer tools; env is a fallback seed)
+
+Most integration knobs that used to be docker `-e` flags are persisted in
+`connector_runtime_settings` inside the same SQLite file under `HOST_DATA_PATH`.
+Agents change them with per-integration MCP tools without a container restart:
+
+- `*_get_config` — effective values plus source (`stored` | `env` | `default`)
+- `*_set_config` — validate + persist + apply immediately
+- `*_clear_config` — delete stored overrides (optional `fields` subset)
+
+Examples: `araknis_set_config`, `access_networks_unleashed_set_config`,
+`kasa_set_config`, `island_router_set_config`, `island_router_api_set_config`,
+`global_cache_set_config`, `court_set_config`, `pjlink_set_config`,
+`bluray_set_config`, `bond_set_config`, `venstar_set_config`,
+`jellyfish_set_config`, `discovery_set_config`, `audiobook_set_config`.
+
+**Precedence (pick one rule, keep it forever):** stored runtime setting > env
+var > built-in default. If Kent still has an env var on the NAS start script, it
+keeps working until a stored value exists for that key. After `*_set_config`,
+the stored value wins and the start-script `-e` line can be removed.
+`*_clear_config` falls back to env (if set) then the default. Secrets
+(credentials, PINs, device tokens) stay in their encrypted credential tables /
+setup pages and are never returned by `*_get_config`.
+
+Credential env fallbacks that already have encrypted stores (prefer tools /
+setup pages; do not put secrets in runtime settings):
+
+- `PHONE_DEVICE_TOKEN` — prefer `/phone/setup`
+- `KASA_USERNAME` / `KASA_PASSWORD` — prefer `kasa_set_credentials`
+- `COURT_BLURAY_AUTH_COOKIE` / `COURT_BLURAY_PSK` — prefer Blu-ray adopt /
+  pairing storage
 
 Cloudflare (KCD account, zone `doddsfamily.us`) already publishes this origin:
 
@@ -815,19 +860,21 @@ Alternative: call MCP `araknis_set_credentials` from an already-authenticated
 home MCP session (also never echoes values). Prefer the setup page so secrets
 never enter chat.
 
-Configuration (non-secret):
+Configuration (non-secret) — prefer runtime tools; env still seeds:
 
-- `ARAKNIS_SWITCH_BASE_URL` defaults to `https://192.168.0.50`
-- `ARAKNIS_SWITCH_ALLOW_INSECURE_TLS=true` for the switch's self-signed HTTPS
-  certificate (typical on LAN management)
-- `ARAKNIS_SWITCH_REQUEST_TIMEOUT_MS` defaults to `8000`
-- `ARAKNIS_SWITCH_SSH_ENABLED=true` optionally enables SSH
-  `show lldp remote-device` / `show power inline` when OpEN lacks LLDP/PoE
-- `ARAKNIS_SWITCH_SSH_PORT` defaults to `22`
+- `araknis_get_config` / `araknis_set_config` / `araknis_clear_config` — persist
+  `baseUrl`, `allowInsecureTls`, `requestTimeoutMs`, `sshEnabled`, `sshPort` in
+  SQLite (overrides env until cleared)
+- Env fallbacks (same names as before): `ARAKNIS_SWITCH_BASE_URL` (default
+  `https://192.168.0.50`), `ARAKNIS_SWITCH_ALLOW_INSECURE_TLS`,
+  `ARAKNIS_SWITCH_REQUEST_TIMEOUT_MS` (default `8000`),
+  `ARAKNIS_SWITCH_SSH_ENABLED`, `ARAKNIS_SWITCH_SSH_PORT` (default `22`)
 - `HOME_CONNECTOR_SHARED_SECRET` required to encrypt stored credentials
 
 MCP tools (`kody.mcp["home"]`):
 
+- `araknis_get_config` / `araknis_set_config` / `araknis_clear_config` —
+  non-secret runtime settings (no restart; see precedence above)
 - `araknis_get_status` — config readiness plus OpEN login / system / VLAN / port
   / PoE / LLDP availability
 - `araknis_set_credentials` / `araknis_clear_credentials` — store or delete
@@ -857,16 +904,17 @@ the local connector host through the Unleashed AJAX management interface. The
 connector manages controllers locally through its SQLite database:
 
 - `access_networks_unleashed_scan_controllers` probes local private `/24`
-  networks derived from the connector host's IPv4 interfaces, unless
-  `ACCESS_NETWORKS_UNLEASHED_SCAN_CIDRS` overrides the scan list
+  networks derived from the connector host's IPv4 interfaces, unless scan CIDRs
+  are set via `access_networks_unleashed_set_config` (or env
+  `ACCESS_NETWORKS_UNLEASHED_SCAN_CIDRS`)
 - `access_networks_unleashed_adopt_controller` marks one discovered controller
   as the active controller for reads and writes
 - `access_networks_unleashed_set_credentials` stores controller credentials
   locally, encrypted with `HOME_CONNECTOR_SHARED_SECRET`
-- `ACCESS_NETWORKS_UNLEASHED_ALLOW_INSECURE_TLS=true` allows connections when
-  the controller uses a self-signed LAN certificate
-- `ACCESS_NETWORKS_UNLEASHED_REQUEST_TIMEOUT_MS` can raise the default 8s
-  request timeout for slower controllers or networks
+- `access_networks_unleashed_get_config` / `_set_config` / `_clear_config`
+  persist `scanCidrs`, `allowInsecureTls`, and `requestTimeoutMs` (env
+  fallbacks: `ACCESS_NETWORKS_UNLEASHED_ALLOW_INSECURE_TLS`,
+  `ACCESS_NETWORKS_UNLEASHED_REQUEST_TIMEOUT_MS`)
 
 Beyond controller lifecycle (scan/list/adopt/remove/credentials/authenticate),
 the adapter exposes a single generic capability:

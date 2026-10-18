@@ -22,19 +22,24 @@ docker pull "${IMAGE}"
 docker stop "${CONTAINER_NAME}" >/dev/null 2>&1 || true
 docker rm "${CONTAINER_NAME}" >/dev/null 2>&1 || true
 
-# Optional Araknis AN-620 read-only diagnostics (LAN 192.168.0.50).
-# Username/password are NOT env vars — store them via the LAN admin UI at
-# /araknis-switch/setup (encrypted SQLite, same pattern as Island PIN / Kasa).
-# ARAKNIS_SWITCH_ALLOW_INSECURE_TLS=true is typically required for self-signed HTTPS.
+# Araknis / Unleashed / Island / court / discovery knobs that used to live as
+# docker -e flags are now runtime config in SQLite under HOST_DATA_PATH.
+# Prefer MCP tools (araknis_set_config, access_networks_unleashed_set_config,
+# …) so changing them does not require editing this script or recreating the
+# container. Env vars still work as a fallback seed (precedence: stored >
+# env > default) but you should not need to add new -e lines for those
+# settings. Username/password are NEVER env vars — use /araknis-switch/setup
+# (or araknis_set_credentials), same pattern as Island PIN / Kasa.
+#
+# Bootstrap-only env that must stay here: HOME_CONNECTOR_ID, data key/secret,
+# HOME_CONNECTOR_DATA_PATH, volume mounts (HOST_DATA_PATH, audiobook library),
+# and optionally HOME_MCP_PUBLIC_BASE_URL / PORT.
 docker run -d --name "${CONTAINER_NAME}" --network host --restart unless-stopped \
 	-e "HOME_CONNECTOR_ID=${HOME_CONNECTOR_ID:-default}" \
 	-e "HOME_CONNECTOR_SHARED_SECRET=${HOME_CONNECTOR_SHARED_SECRET:-}" \
 	-e "HOME_CONNECTOR_DATA_KEY=${HOME_CONNECTOR_DATA_KEY:-}" \
 	-e "HOME_CONNECTOR_DATA_PATH=/data/home-connector" \
 	-e "AUDIOBOOK_LIBRARY_PATH=${AUDIOBOOK_LIBRARY_PATH}" \
-	-e "ARAKNIS_SWITCH_BASE_URL=${ARAKNIS_SWITCH_BASE_URL:-https://192.168.0.50}" \
-	-e "ARAKNIS_SWITCH_ALLOW_INSECURE_TLS=${ARAKNIS_SWITCH_ALLOW_INSECURE_TLS:-true}" \
-	-e "ARAKNIS_SWITCH_SSH_ENABLED=${ARAKNIS_SWITCH_SSH_ENABLED:-false}" \
 	-v "${HOST_DATA_PATH}:/data/home-connector" \
 	-v "${HOST_AUDIOBOOK_LIBRARY_PATH}:${AUDIOBOOK_LIBRARY_PATH}" \
 	"${IMAGE}"

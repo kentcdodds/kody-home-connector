@@ -15,7 +15,7 @@ export function resolveAraknisSwitchBaseUrl(config: HomeConnectorConfig) {
 	)
 	if (/^http:\/\//i.test(baseUrl) && !config.araknisSwitchAllowInsecureTls) {
 		throw new Error(
-			'ARAKNIS_SWITCH_BASE_URL must use https:// (cleartext HTTP would send the switch password unencrypted). Set ARAKNIS_SWITCH_ALLOW_INSECURE_TLS=true only for a deliberate LAN exception.',
+			'Araknis base URL must use https:// (cleartext HTTP would send the switch password unencrypted). Set allowInsecureTls via araknis_set_config (or ARAKNIS_SWITCH_ALLOW_INSECURE_TLS) only for a deliberate LAN exception.',
 		)
 	}
 	return baseUrl

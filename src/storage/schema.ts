@@ -269,6 +269,23 @@ export const araknisSwitchCredentials = table({
 	timestamps,
 })
 
+/**
+ * Non-secret (and encrypted-secret) connector settings that used to live only
+ * in process env. Precedence: stored row > env var > built-in default.
+ * Secrets use `enc:v1:` payloads and are never returned by get-config tools.
+ */
+export const connectorRuntimeSettings = table({
+	name: 'connector_runtime_settings',
+	columns: {
+		connector_id: c.text(),
+		setting_key: c.text(),
+		value_json: c.text(),
+		updated_at: c.text(),
+	},
+	primaryKey: ['connector_id', 'setting_key'],
+	timestamps,
+})
+
 export const phoneDeviceTokens = table({
 	name: 'phone_device_tokens',
 	columns: {
