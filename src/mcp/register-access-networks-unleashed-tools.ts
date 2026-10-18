@@ -3,6 +3,7 @@ import { markSecretInputFields } from '@kody-bot/connector-kit/schema'
 import { z } from 'zod'
 import {
 	accessNetworksUnleashedRequestConfirmation,
+	accessNetworksUnleashedWlanWriteConfirmation,
 	type createAccessNetworksUnleashedAdapter,
 } from '../adapters/access-networks-unleashed/index.ts'
 import {
@@ -49,6 +50,8 @@ const requestDescription = `${requestDangerNotice}
 
 Posts an authenticated text/xml AJAX payload using the stored credentials and the managed session (cookie jar + X-CSRF-Token). getstat/docmd go to POST {host}/admin/_cmdstat.jsp; getconf/setconf go to POST {host}/admin/_conf.jsp. The session is reused across calls and re-established automatically when it expires.
 
+WLAN WRITES: do NOT use this tool to create/update WLANs or to setconf a whole wlansvc-list. Whole-list / position-based setconf can overwrite the first WLAN and duplicate ids (Oct 12 incident). Use access_networks_unleashed_get_wlan, access_networks_unleashed_update_wlan, and access_networks_unleashed_clone_wlan instead. This raw tool rejects setconf bodies that wrap <wlansvc-list> or contain multiple <wlansvc> elements.
+
 Inputs:
 - action: 'getstat' | 'getconf' | 'setconf' | 'docmd'.
 - comp: Unleashed component name such as 'system', 'stamgr', 'wlansvc-list', 'apStat', 'eventd'.
@@ -58,6 +61,9 @@ Inputs:
 - allowInsecureTls: optional boolean. When omitted, falls back to the connector-wide ACCESS_NETWORKS_UNLEASHED_ALLOW_INSECURE_TLS setting (off unless explicitly enabled). Only applies to the actual AJAX post; the connector-wide setting also governs session establishment so concurrent callers cannot disagree about login-time TLS.
 
 Returns the raw XML response and a best-effort parsed object.`
+
+const wlanWriteDangerNotice =
+	'HIGH RISK: mutates live Unleashed WLAN configuration on the adopted controller. Every write snapshots the full wlansvc-list first, re-reads after the write, and automatically rolls back if any other WLAN changed, ids are duplicated/missing, or the target id does not match.'
 
 export function registerAccessNetworksUnleashedHomeConnectorTools(input: {
 	registerTool: (
@@ -311,6 +317,287 @@ export function registerAccessNetworksUnleashedHomeConnectorTools(input: {
 			return structuredTextResult(
 				`Completed Access Networks Unleashed ${result.action} on ${result.comp}.`,
 				result,
+			)
+		},
+	)
+
+	registerTool(
+		{
+			name: 'access_networks_unleashed_list_wlans',
+			title: 'List Access Networks Unleashed WLANs',
+			description:
+				'Read-only getconf of wlansvc-list. Returns every WLAN with its stable wlansvc id, name, ssid, attributes, and raw XML. Prefer this (or get_wlan) before any WLAN write so you target by id, never by list position.',
+			inputSchema: {},
+			annotations: {
+				readOnlyHint: true,
+				idempotentHint: true,
+			},
+		},
+		async () => {
+			const result = await accessNetworksUnleashed.listWlans()
+			return structuredTextResult(
+				result.wlans.length === 0
+					? 'No WLANs were returned from wlansvc-list.'
+					: `Listed ${String(result.wlans.length)} WLAN(s) from wlansvc-list.`,
+				result,
+			)
+		},
+	)
+
+	const getWlanSchema = buildToolInputSchema({
+		id: z
+			.string()
+			.min(1)
+			.describe(
+				'Stable wlansvc id from list_wlans / getconf wlansvc-list (for example "5" for friendlyguest). Never target by list index.',
+			),
+	})
+
+	registerTool(
+		{
+			name: 'access_networks_unleashed_get_wlan',
+			title: 'Get Access Networks Unleashed WLAN By Id',
+			description:
+				'Read one WLAN from getconf wlansvc-list by its stable wlansvc id. Returns name, ssid, attributes (including vlan-id, client-isolation, guest/portal fields when present), and the raw <wlansvc> XML. Use this before update_wlan or clone_wlan.',
+			inputSchema: getWlanSchema.inputSchema,
+			sdkInputSchema: getWlanSchema.sdkInputSchema,
+			annotations: {
+				readOnlyHint: true,
+				idempotentHint: true,
+			},
+		},
+		async (args) => {
+			const result = await accessNetworksUnleashed.getWlan({
+				id: String(args['id'] ?? ''),
+			})
+			return structuredTextResult(
+				`Read WLAN id ${result.wlan.id}` +
+					(result.wlan.name ? ` (${result.wlan.name})` : '') +
+					'.',
+				result,
+			)
+		},
+	)
+
+	const updateWlanSchema = buildToolInputSchema({
+		id: z
+			.string()
+			.min(1)
+			.describe('Stable wlansvc id to update (from list_wlans / get_wlan).'),
+		attributes: z
+			.record(z.string(), z.string())
+			.describe(
+				'Only the Unleashed attributes to change (exact names). Example: { "vlan-id": "20" }. Sent as a single-id IS_PARTIAL setconf on wlansvc-list — never a full list rewrite.',
+			),
+		acknowledgeHighRisk: z
+			.literal(true)
+			.describe(
+				'Must be true. Confirms you intend a live per-WLAN mutation with automatic snapshot/diff/rollback.',
+			),
+		reason: z
+			.string()
+			.min(20)
+			.max(500)
+			.describe(
+				'Operator justification (≥20 chars). Name the WLAN id and the intended attribute change.',
+			),
+		confirmation: z
+			.literal(accessNetworksUnleashedWlanWriteConfirmation)
+			.describe(
+				'Exact confirmation phrase required by the tool. The tool rejects any other value.',
+			),
+	})
+
+	registerTool(
+		{
+			name: 'access_networks_unleashed_update_wlan',
+			title: 'Update Access Networks Unleashed WLAN By Id',
+			description: `${wlanWriteDangerNotice}
+
+Updates one WLAN by wlansvc id. Sends only the changed attributes as IS_PARTIAL setconf on comp=wlansvc-list (id is required on the wire). Before writing: snapshots the full wlansvc-list. After writing: re-reads, verifies the target id still matches, verifies each requested attribute, and verifies no other WLAN changed and ids are not duplicated/missing. On any safety failure, restores the snapshot and returns a clear error.
+
+Do not pass the whole WLAN object or a wlansvc-list. Prefer get_wlan first.`,
+			inputSchema: updateWlanSchema.inputSchema,
+			sdkInputSchema: updateWlanSchema.sdkInputSchema,
+			annotations: {
+				destructiveHint: true,
+			},
+		},
+		async (args) => {
+			const attributesRaw = args['attributes']
+			if (
+				attributesRaw == null ||
+				typeof attributesRaw !== 'object' ||
+				Array.isArray(attributesRaw)
+			) {
+				throw new Error(
+					'attributes must be an object of string→string Unleashed attribute names.',
+				)
+			}
+			const attributes: Record<string, string> = {}
+			for (const [key, value] of Object.entries(
+				attributesRaw as Record<string, unknown>,
+			)) {
+				attributes[key] = String(value)
+			}
+			const result = await accessNetworksUnleashed.updateWlan({
+				id: String(args['id'] ?? ''),
+				attributes,
+				acknowledgeHighRisk: args['acknowledgeHighRisk'] === true,
+				reason: String(args['reason'] ?? ''),
+				confirmation: String(args['confirmation'] ?? ''),
+			})
+			return structuredTextResult(
+				`Updated WLAN id ${result.id}; safety check passed (no rollback).`,
+				{
+					id: result.id,
+					before: {
+						id: result.before.id,
+						name: result.before.name,
+						ssid: result.before.ssid,
+						attributes: result.before.attributes,
+					},
+					after: {
+						id: result.after.id,
+						name: result.after.name,
+						ssid: result.after.ssid,
+						attributes: result.after.attributes,
+					},
+					appliedAttributes: result.appliedAttributes,
+					safety: result.safety,
+					setconfXml: result.setconfXml,
+				},
+			)
+		},
+	)
+
+	const cloneWlanSchema = buildToolInputSchema({
+		sourceId: z
+			.string()
+			.min(1)
+			.describe(
+				'Existing wlansvc id to clone (copies guest portal, client isolation, access VLAN, and all other settings).',
+			),
+		overrides: z
+			.object({
+				name: z.string().min(1).optional(),
+				ssid: z.string().min(1).optional(),
+				description: z.string().optional(),
+				vlanId: z.union([z.string(), z.number()]).optional(),
+				clientIsolation: z.string().optional(),
+				radioBand: z
+					.enum(['all', '2.4ghz', '5ghz', '6ghz'])
+					.optional()
+					.describe(
+						'Convenience mapping onto the wlansvc `radio` attribute (Both / 2.4G / 5G / 6G). For other radio-related attrs, use attributes.',
+					),
+				attributes: z
+					.record(z.string(), z.string())
+					.optional()
+					.describe(
+						'Exact Unleashed attribute overrides merged on top of the cloned XML (id is stripped before create).',
+					),
+			})
+			.optional()
+			.describe(
+				'Optional overrides applied after cloning the full source XML (id removed). Typical: name/ssid and radioBand for a 2.4 GHz-only copy.',
+			),
+		acknowledgeHighRisk: z.literal(true),
+		reason: z.string().min(20).max(500),
+		confirmation: z.literal(accessNetworksUnleashedWlanWriteConfirmation),
+	})
+
+	registerTool(
+		{
+			name: 'access_networks_unleashed_clone_wlan',
+			title: 'Clone Access Networks Unleashed WLAN By Id',
+			description: `${wlanWriteDangerNotice}
+
+Creates a new WLAN by cloning an existing one by wlansvc id. Copies the full source <wlansvc> (guest portal, client isolation, access VLAN, WPA, schedule, etc.), strips the id, applies optional overrides, and setconfs a single create payload on wlansvc-list. Snapshots before write; after write verifies exactly one new id appeared, the source is unchanged, and no other WLAN moved. Rolls back automatically on failure.`,
+			inputSchema: cloneWlanSchema.inputSchema,
+			sdkInputSchema: cloneWlanSchema.sdkInputSchema,
+			annotations: {
+				destructiveHint: true,
+			},
+		},
+		async (args) => {
+			const overridesRaw = args['overrides']
+			let overrides:
+				| {
+						name?: string
+						ssid?: string
+						description?: string
+						vlanId?: string | number
+						clientIsolation?: string
+						radioBand?: 'all' | '2.4ghz' | '5ghz' | '6ghz'
+						attributes?: Record<string, string>
+				  }
+				| undefined
+			if (overridesRaw != null && typeof overridesRaw === 'object') {
+				const record = overridesRaw as Record<string, unknown>
+				const attributesValue = record['attributes']
+				const attributes =
+					attributesValue != null &&
+					typeof attributesValue === 'object' &&
+					!Array.isArray(attributesValue)
+						? Object.fromEntries(
+								Object.entries(attributesValue as Record<string, unknown>).map(
+									([key, value]) => [key, String(value)],
+								),
+							)
+						: undefined
+				const radioBand = record['radioBand']
+				overrides = {
+					name: record['name'] == null ? undefined : String(record['name']),
+					ssid: record['ssid'] == null ? undefined : String(record['ssid']),
+					description:
+						record['description'] == null
+							? undefined
+							: String(record['description']),
+					vlanId:
+						record['vlanId'] == null
+							? undefined
+							: (record['vlanId'] as string | number),
+					clientIsolation:
+						record['clientIsolation'] == null
+							? undefined
+							: String(record['clientIsolation']),
+					radioBand:
+						radioBand === 'all' ||
+						radioBand === '2.4ghz' ||
+						radioBand === '5ghz' ||
+						radioBand === '6ghz'
+							? radioBand
+							: undefined,
+					attributes,
+				}
+			}
+			const result = await accessNetworksUnleashed.cloneWlan({
+				sourceId: String(args['sourceId'] ?? ''),
+				overrides,
+				acknowledgeHighRisk: args['acknowledgeHighRisk'] === true,
+				reason: String(args['reason'] ?? ''),
+				confirmation: String(args['confirmation'] ?? ''),
+			})
+			return structuredTextResult(
+				`Cloned WLAN id ${result.sourceId} → new id ${result.created.id}; safety check passed (no rollback).`,
+				{
+					sourceId: result.sourceId,
+					source: {
+						id: result.source.id,
+						name: result.source.name,
+						ssid: result.source.ssid,
+					},
+					created: {
+						id: result.created.id,
+						name: result.created.name,
+						ssid: result.created.ssid,
+						attributes: result.created.attributes,
+					},
+					overridesApplied: result.overridesApplied,
+					safety: result.safety,
+					setconfXml: result.setconfXml,
+				},
 			)
 		},
 	)

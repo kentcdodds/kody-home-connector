@@ -24,6 +24,18 @@ import {
 	type AccessNetworksUnleashedRequestInput,
 	type AccessNetworksUnleashedRequestResult,
 } from './types.ts'
+import {
+	cloneWlanById,
+	fetchWlanSnapshot,
+	getWlanById,
+	updateWlanById,
+	type WlanAttributeOverrides,
+} from './wlan-ops.ts'
+import {
+	redactWlanSecrets,
+	xmlBodyLooksLikeFullObjectWlanWrite,
+	xmlBodyLooksLikeFullWlanListWrite,
+} from './wlan-xml.ts'
 
 type ControllerCredentialsRequest = {
 	controllerId: string
@@ -47,6 +59,9 @@ type RequestCapabilityRequest = WriteOperationRequest &
 export const accessNetworksUnleashedRequestConfirmation =
 	'I am highly certain making this raw Access Networks Unleashed AJAX request is necessary right now.'
 
+export const accessNetworksUnleashedWlanWriteConfirmation =
+	'I am highly certain this Access Networks Unleashed per-WLAN write is necessary right now.'
+
 const validActions: ReadonlySet<AccessNetworksUnleashedAjaxAction> =
 	new Set<AccessNetworksUnleashedAjaxAction>([
 		'getstat',
@@ -54,6 +69,31 @@ const validActions: ReadonlySet<AccessNetworksUnleashedAjaxAction> =
 		'setconf',
 		'docmd',
 	])
+
+function assertSafeRawWlanWrite(input: {
+	action: AccessNetworksUnleashedAjaxAction
+	comp: string
+	xmlBody: string
+}) {
+	if (input.action !== 'setconf') return
+	if (xmlBodyLooksLikeFullWlanListWrite(input.xmlBody)) {
+		throw new Error(
+			'Refusing to setconf a whole WLAN list (wlansvc-list wrapper or multiple <wlansvc> elements). ' +
+				'That pattern can overwrite the first WLAN by list position and duplicate ids ' +
+				'(Oct 12 friendlyguest/friendlyfamily incident). ' +
+				'Use access_networks_unleashed_update_wlan or access_networks_unleashed_clone_wlan, ' +
+				'which target a single wlansvc id, snapshot first, and roll back on unexpected diffs.',
+		)
+	}
+	if (xmlBodyLooksLikeFullObjectWlanWrite(input.xmlBody)) {
+		throw new Error(
+			'Refusing raw setconf of a full <wlansvc> object without IS_PARTIAL. ' +
+				'Full-object writes can be applied by list position and duplicate ids. ' +
+				'Use access_networks_unleashed_update_wlan (partial by id) or ' +
+				'access_networks_unleashed_clone_wlan (create by cloning).',
+		)
+	}
+}
 
 function getConfigStatus(
 	config: HomeConnectorConfig,
@@ -176,6 +216,17 @@ export function createAccessNetworksUnleashedAdapter(input: {
 
 	let cachedClientKey: string | null = null
 	let cachedClient: AccessNetworksUnleashedClient | null = null
+	/** Serialize WLAN mutations so concurrent writes cannot clobber each other's snapshots. */
+	let wlanWriteChain: Promise<unknown> = Promise.resolve()
+
+	async function withWlanWriteLock<T>(operation: () => Promise<T>): Promise<T> {
+		const run = wlanWriteChain.then(operation, operation)
+		wlanWriteChain = run.then(
+			() => undefined,
+			() => undefined,
+		)
+		return await run
+	}
 
 	async function createClient() {
 		const controller = await requireControllerWithCredentials()
@@ -330,6 +381,11 @@ export function createAccessNetworksUnleashedAdapter(input: {
 			if (typeof xmlBody !== 'string') {
 				throw new Error('xmlBody must be a string of inner ajax-request XML.')
 			}
+			assertSafeRawWlanWrite({
+				action: request.action,
+				comp,
+				xmlBody,
+			})
 			const client = await createClient()
 			const adoptedController = await requireControllerWithCredentials()
 			try {
@@ -367,5 +423,77 @@ export function createAccessNetworksUnleashedAdapter(input: {
 				throw error
 			}
 		},
+		async listWlans() {
+			const client = await createClient()
+			const snapshot = await fetchWlanSnapshot(client)
+			return {
+				wlans: snapshot.entries.map((entry) => {
+					const redacted = redactWlanSecrets(entry)
+					return {
+						id: redacted.id,
+						name: redacted.name,
+						ssid: redacted.ssid,
+						attributes: redacted.attributes,
+						rawXml: redacted.rawXml,
+					}
+				}),
+				// Full list xml is omitted from the tool response to avoid leaking
+				// WPA secrets; use get_wlan for a single redacted entry.
+				wlanCount: snapshot.entries.length,
+			}
+		},
+		async getWlan(input: { id: string }) {
+			const client = await createClient()
+			const { wlan, snapshot } = await getWlanById(client, input.id)
+			const redacted = redactWlanSecrets(wlan)
+			return {
+				wlan: {
+					id: redacted.id,
+					name: redacted.name,
+					ssid: redacted.ssid,
+					attributes: redacted.attributes,
+					rawXml: redacted.rawXml,
+				},
+				wlanCount: snapshot.entries.length,
+			}
+		},
+		async updateWlan(
+			request: WriteOperationRequest & {
+				id: string
+				attributes: Record<string, string>
+			},
+		) {
+			assertWriteAllowed(request, accessNetworksUnleashedWlanWriteConfirmation)
+			return await withWlanWriteLock(async () => {
+				const client = await createClient()
+				return await updateWlanById({
+					client,
+					id: request.id,
+					attributes: request.attributes,
+				})
+			})
+		},
+		async cloneWlan(
+			request: WriteOperationRequest & {
+				sourceId: string
+				overrides?: WlanAttributeOverrides
+			},
+		) {
+			assertWriteAllowed(request, accessNetworksUnleashedWlanWriteConfirmation)
+			return await withWlanWriteLock(async () => {
+				const client = await createClient()
+				return await cloneWlanById({
+					client,
+					sourceId: request.sourceId,
+					overrides: request.overrides,
+				})
+			})
+		},
 	}
 }
+
+export {
+	AccessNetworksUnleashedWlanSafetyError,
+	type WlanAttributeOverrides,
+	type WlanRadioBand,
+} from './wlan-ops.ts'

@@ -244,6 +244,63 @@ test('request rejects without acknowledgement, confirmation, or sufficient reaso
 	}
 })
 
+test('request refuses whole-list WLAN setconf payloads', async () => {
+	const config = createConfig()
+	const state = createAppState()
+	const storage = await createHomeConnectorStorage(config)
+	const adapter = createAccessNetworksUnleashedAdapter({
+		config,
+		state,
+		storage,
+		clientFactory: () => ({
+			async request() {
+				throw new Error(
+					'client should not be invoked for whole-list WLAN writes',
+				)
+			},
+		}),
+	})
+	using _server = installLoginAndCmdstat(() =>
+		response('<ajax-response><ok/></ajax-response>'),
+	)
+
+	try {
+		await adapter.scan()
+		await adapter.adoptController({ controllerId: '192.168.10.60' })
+		await adapter.setCredentials({
+			controllerId: '192.168.10.60',
+			username: 'admin',
+			password: 'secret-password',
+		})
+
+		await expect(
+			adapter.request({
+				action: 'setconf',
+				comp: 'wlansvc-list',
+				xmlBody:
+					"<wlansvc id='1' name='friendlyfamily'/><wlansvc id='5' name='friendlyguest' vlan-id='20'/>",
+				acknowledgeHighRisk: true,
+				reason: validReason,
+				confirmation: accessNetworksUnleashedRequestConfirmation,
+			}),
+		).rejects.toThrow(/whole WLAN list|update_wlan|clone_wlan/i)
+
+		await expect(
+			adapter.request({
+				action: 'setconf',
+				comp: 'wlansvc-list',
+				xmlBody:
+					"<wlansvc id='5' name='friendlyguest' ssid='friendlyguest' vlan-id='20'></wlansvc>",
+				acknowledgeHighRisk: true,
+				reason: validReason,
+				confirmation: accessNetworksUnleashedRequestConfirmation,
+			}),
+		).rejects.toThrow(/full <wlansvc> object without IS_PARTIAL|update_wlan/i)
+	} finally {
+		await storage.close()
+	}
+})
+
 test('request rejects unknown actions and empty comp', async () => {
 	const config = createConfig()
 	const state = createAppState()
