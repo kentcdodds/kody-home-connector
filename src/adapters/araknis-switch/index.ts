@@ -182,18 +182,18 @@ export function createAraknisSwitchAdapter(input: {
 				])
 			const results = [system1213, systemMisc, registry, dot1dBase]
 			if (results.every((result) => result.status === 'rejected')) {
+				const authFailure = results.find(
+					(result) =>
+						result.status === 'rejected' &&
+						result.reason instanceof AraknisSwitchAuthError,
+				)
+				if (authFailure && authFailure.status === 'rejected') {
+					throw authFailure.reason
+				}
 				const first = results[0]
 				throw first.status === 'rejected'
 					? first.reason
 					: new Error('Araknis switch system info reads all failed.')
-			}
-			const authFailure = results.find(
-				(result) =>
-					result.status === 'rejected' &&
-					result.reason instanceof AraknisSwitchAuthError,
-			)
-			if (authFailure && authFailure.status === 'rejected') {
-				throw authFailure.reason
 			}
 			const system = parseAraknisSystemInfo({
 				system1213: system1213.status === 'fulfilled' ? system1213.value : null,
@@ -211,6 +211,14 @@ export function createAraknisSwitchAdapter(input: {
 				system.baseNumPorts != null,
 			)
 			if (!hasUsefulField) {
+				const authFailure = results.find(
+					(result) =>
+						result.status === 'rejected' &&
+						result.reason instanceof AraknisSwitchAuthError,
+				)
+				if (authFailure && authFailure.status === 'rejected') {
+					throw authFailure.reason
+				}
 				throw new Error(
 					'Araknis switch system info reads returned no usable fields.',
 				)
@@ -408,12 +416,11 @@ export function createAraknisSwitchAdapter(input: {
 
 			// Reuse an existing OpEN session when present (keepalive). Only force
 			// a fresh login via araknis_authenticate. Do not treat a missing
-			// individual OpEN resource as a total outage. Do not record auth
-			// success until a real authenticated GET succeeds (ensureSession
-			// alone may only reuse a cached cookie).
+			// individual OpEN resource as a total outage. Do not set loginOk
+			// until a real authenticated GET succeeds (ensureSession alone may
+			// only reuse a cached cookie).
 			try {
 				await client.ensureSession()
-				loginOk = true
 			} catch (error) {
 				if (error instanceof AraknisSwitchAuthError) {
 					await recordAuthFailure(error)
@@ -444,10 +451,10 @@ export function createAraknisSwitchAdapter(input: {
 			try {
 				system = await getSystemInfo()
 				systemReadable = true
+				loginOk = true
 			} catch (error) {
 				if (error instanceof AraknisSwitchAuthError) {
 					await recordAuthFailure(error)
-					loginOk = false
 				}
 				errors.push(errorMessage(error, 'Failed to read system info.'))
 			}
@@ -455,14 +462,22 @@ export function createAraknisSwitchAdapter(input: {
 			try {
 				vlanCount = (await client.listVlans()).length
 				vlansReadable = true
+				loginOk = true
 			} catch (error) {
+				if (error instanceof AraknisSwitchAuthError) {
+					await recordAuthFailure(error)
+				}
 				errors.push(errorMessage(error, 'Failed to list VLANs.'))
 			}
 
 			try {
 				portCount = (await listPortsWithoutAuthRecording(client)).length
 				interfacesReadable = true
+				loginOk = true
 			} catch (error) {
+				if (error instanceof AraknisSwitchAuthError) {
+					await recordAuthFailure(error)
+				}
 				errors.push(errorMessage(error, 'Failed to list interfaces.'))
 			}
 

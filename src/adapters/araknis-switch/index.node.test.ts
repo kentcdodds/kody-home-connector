@@ -231,6 +231,71 @@ test('adapter reports missing credentials without attempting login', async () =>
 	}
 })
 
+test('getStatus keeps loginOk when system auth fails but VLAN/port reads succeed', async () => {
+	const fetchMock = vi.fn(async (url: string | URL) => {
+		const href = String(url)
+		if (href.endsWith('/open/v1/login')) {
+			return Response.json(araknisLoginSuccess, {
+				headers: {
+					'set-cookie': 'SIDSSL=test-session-id-not-a-secret; Path=/',
+				},
+			})
+		}
+		if (
+			href.includes('/open/v1/system1213') ||
+			href.includes('/open/v1/systemmisc') ||
+			href.includes('/open/v1/registry') ||
+			href.includes('/open/v1/dot1dbaseconfig')
+		) {
+			return new Response('unauthorized', { status: 401 })
+		}
+		if (href.includes('/open/v1/vlans')) {
+			return Response.json(araknisVlansPayload)
+		}
+		if (href.includes('/open/v1/interfaces')) {
+			return Response.json(araknisInterfacesPayload)
+		}
+		if (href.toLowerCase().includes('/open/v1/poe')) {
+			return new Response('not found', { status: 404 })
+		}
+		if (href.includes('/open/v1/lldp')) {
+			return new Response('not found', { status: 404 })
+		}
+		if (href.endsWith('/open/v1/logout')) {
+			return new Response(null, { status: 200 })
+		}
+		throw new Error(`Unexpected URL ${href}`)
+	})
+	const config = createConfig()
+	const storage = await createHomeConnectorStorage(config)
+	try {
+		const adapter = createAraknisSwitchAdapter({
+			config,
+			storage,
+			clientFactory: (credentials) =>
+				createAraknisSwitchOpenClient({
+					config,
+					credentials,
+					fetchImpl: fetchMock as typeof fetch,
+				}),
+		})
+		await adapter.setCredentials('araknis', 'test-password')
+
+		const status = await adapter.getStatus()
+		expect(status.api.loginOk).toBe(true)
+		expect(status.api.systemReadable).toBe(false)
+		expect(status.api.vlansReadable).toBe(true)
+		expect(status.api.interfacesReadable).toBe(true)
+		expect(status.connected).toBe(true)
+		expect(status.vlanCount).toBe(3)
+		expect(status.portCount).toBe(9)
+		expect(status.api.kind).toBe('open-v1')
+		expect(JSON.stringify(status)).not.toContain('test-password')
+	} finally {
+		await storage.close()
+	}
+})
+
 test('set and clear credentials never return secret values', async () => {
 	const config = createConfig()
 	const storage = await createHomeConnectorStorage(config)
