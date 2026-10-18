@@ -122,6 +122,8 @@ The connector exposes these local-device families:
   catalog
 - Access Networks Unleashed / RUCKUS Unleashed WiFi controller reads and typed
   high-risk writes over the local AJAX management interface
+- Araknis AN-620 switch read-only OpEN diagnostics (local encrypted credentials,
+  session keepalive, system/VLAN/port/PoE/LLDP, config snapshots; no writes yet)
 - JellyFish Lighting controller discovery, zones, patterns, and daily/calendar
   schedules over the controller's local WebSocket API
 - PJLink Class 1 projectors over TCP 4352 (scan/adopt, power, INPT, AVMT, LAMP)
@@ -775,6 +777,78 @@ SSH transport is conservative:
 - the Docker image includes the OpenSSH client utilities needed for `ssh`,
   `ssh-keyscan`, and fingerprint verification
 
+## Araknis AN-620 switch (read-only + snapshots)
+
+The Araknis adapter lives under `src/adapters/araknis-switch/` and talks to the
+LAN management interface of Kent's AN-620 (`192.168.0.50` by default) over HTTPS
+using Broadcom FASTPATH **OpEN** endpoints (`POST /open/v1/login` → `SIDSSL`
+cookie, then `GET /open/v1/...`). Session cookies are reused across tools
+(keepalive) and refreshed automatically on HTTP 401/403.
+
+It is intentionally **read-only plus config snapshots**. There are no write /
+config-change tools yet: OpEN `PUT` for interfaces / VLANs / PoE is high-risk
+and not verified against this AN-620. When writes land later they must follow
+the Unleashed PR #75 rules (snapshot → single-id target → re-read/diff →
+automatic rollback; refuse broad writes).
+
+Credentials are stored locally in the connector SQLite database, encrypted with
+`HOME_CONNECTOR_SHARED_SECRET` — the same pattern as Island Router API PIN /
+Kasa / Unleashed credentials. They must **not** come from Kody secrets,
+placeholders, or connector env vars. The connector never logs or returns
+username/password values.
+
+Setup (preferred — no chat paste):
+
+1. Recreate the NAS container with the new image (pull + `docker rm` /
+   `docker run` via the start script) so tools + the credentials migration load.
+   Keep the existing data volume mounted.
+2. On a machine on the home LAN, open the connector admin UI at
+   `http://192.168.1.234:4040/araknis-switch/setup` (or the NAS LAN listen host
+   / port your container uses).
+3. Enter the switch management username and password.
+4. Click **Save credentials**. The page confirms storage and never echoes the
+   values back.
+5. Optional: call `araknis_authenticate` once to verify OpEN login and warm the
+   session.
+
+Alternative: call MCP `araknis_set_credentials` from an already-authenticated
+home MCP session (also never echoes values). Prefer the setup page so secrets
+never enter chat.
+
+Configuration (non-secret):
+
+- `ARAKNIS_SWITCH_BASE_URL` defaults to `https://192.168.0.50`
+- `ARAKNIS_SWITCH_ALLOW_INSECURE_TLS=true` for the switch's self-signed HTTPS
+  certificate (typical on LAN management)
+- `ARAKNIS_SWITCH_REQUEST_TIMEOUT_MS` defaults to `8000`
+- `ARAKNIS_SWITCH_SSH_ENABLED=true` optionally enables SSH
+  `show lldp remote-device` / `show power inline` when OpEN lacks LLDP/PoE
+- `ARAKNIS_SWITCH_SSH_PORT` defaults to `22`
+- `HOME_CONNECTOR_SHARED_SECRET` required to encrypt stored credentials
+
+MCP tools (`kody.mcp["home"]`):
+
+- `araknis_get_status` — config readiness plus OpEN login / system / VLAN / port
+  / PoE / LLDP availability
+- `araknis_set_credentials` / `araknis_clear_credentials` — store or delete
+  local encrypted credentials
+- `araknis_authenticate` — establish/refresh OpEN session (keepalive)
+- `araknis_get_system_info` — sysName/descr/location, hostname, uptime, model,
+  MAC, bridge address, port count
+- `araknis_list_vlans` — VLAN database (id/name/type)
+- `araknis_list_ports` — per-port description, link/admin state, PVID,
+  tagged/untagged membership, derived switchport mode
+- `araknis_get_vlan_membership` — tagged/untagged ports for one VLAN id (use
+  `vlanId: 20` to verify AP and Island uplink tagging)
+- `araknis_list_poe_status` — PoE admin/oper/class/power when OpEN or SSH can
+  provide it
+- `araknis_list_lldp_neighbors` — LLDP remotes when OpEN or SSH can provide them
+- `araknis_get_config_snapshot` — composite running view (system + VLANs +
+  ports + PoE) for diagnostics / future safe-write baselines
+
+Encrypted Araknis credentials survive later recreates when the existing data
+volume stays mounted.
+
 ## Access Networks Unleashed WiFi integration
 
 The Access Networks Unleashed adapter lives under
@@ -820,25 +894,11 @@ otherwise disrupt local connectivity. Each call requires:
 - an operator reason of at least 20 characters
 - the exact confirmation phrase rejected for any other value
 
-Whole-list WLAN `setconf` bodies (`<wlansvc-list>` wrappers or multiple
-`<wlansvc>` elements) are rejected: that pattern can overwrite the first WLAN by
-list position and duplicate ids (Oct 12 friendlyguest → friendlyfamily
-incident).
-
-Safe per-WLAN tools (prefer these over the raw request for WLAN changes):
-
-- `access_networks_unleashed_list_wlans` / `access_networks_unleashed_get_wlan`
-  — `getconf` of `wlansvc-list`, keyed by stable wlansvc `id`
-- `access_networks_unleashed_update_wlan` — partial `IS_PARTIAL` update by id;
-  snapshots the full list first, re-reads after write, rolls back on unexpected
-  diffs / duplicate or missing ids
-- `access_networks_unleashed_clone_wlan` — clone by source id (copies guest
-  portal, client isolation, access VLAN, etc.) with optional name/ssid/radio
-  overrides; same snapshot/diff/rollback
-
-Other higher-level Unleashed flows (list APs, list clients, block clients,
-restart APs, etc.) may still live in saved Kody packages that wrap
-`home_access_networks_unleashed_request` through `kody:runtime`.
+Higher-level Unleashed flows (list APs, list clients, edit WLANs, block clients,
+restart APs, etc.) are intended to live in saved Kody packages that wrap
+`home_access_networks_unleashed_request` through `kody:runtime`. The home
+connector itself does not expose any typed Unleashed CLI or per-operation
+capabilities.
 
 ## Local persistence
 
@@ -863,6 +923,8 @@ The connector stores a local SQLite database containing:
 - Kasa TP-Link account credentials encrypted locally with
   `HOME_CONNECTOR_SHARED_SECRET`
 - last Kasa authentication success/error details
+- Araknis AN-620 management username/password encrypted locally with
+  `HOME_CONNECTOR_SHARED_SECRET`
 - Android companion device token encrypted locally with
   `HOME_CONNECTOR_DATA_KEY`
 - discovered JellyFish controller metadata and latest connection status

@@ -5,6 +5,7 @@ import { expect, test } from 'vitest'
 import { installHomeConnectorMockServer } from '../mocks/test-server.ts'
 import { createBondAdapter } from '../src/adapters/bond/index.ts'
 import { createAccessNetworksUnleashedAdapter } from '../src/adapters/access-networks-unleashed/index.ts'
+import { createAraknisSwitchAdapter } from '../src/adapters/araknis-switch/index.ts'
 import { createIslandRouterApiAdapter } from '../src/adapters/island-router-api/index.ts'
 import { createIslandRouterAdapter } from '../src/adapters/island-router/index.ts'
 import { createJellyfishAdapter } from '../src/adapters/jellyfish/index.ts'
@@ -39,6 +40,11 @@ function createConfig(dataPath = '/tmp'): HomeConnectorConfig {
 		islandRouterApiBaseUrl: 'https://my.islandrouter.com',
 		islandRouterApiRequestTimeoutMs: 8000,
 		islandRouterApiAllowInsecureTls: false,
+		araknisSwitchBaseUrl: 'https://192.168.0.50',
+		araknisSwitchAllowInsecureTls: false,
+		araknisSwitchRequestTimeoutMs: 8000,
+		araknisSwitchSshEnabled: false,
+		araknisSwitchSshPort: 22,
 		rokuDiscoveryUrl: 'http://roku.mock.local/discovery',
 		lutronDiscoveryUrl: 'http://lutron.mock.local/discovery',
 		sonosDiscoveryUrl: 'http://sonos.mock.local/discovery',
@@ -120,6 +126,10 @@ async function createAdapters(config: HomeConnectorConfig) {
 			config,
 		}),
 		islandRouterApi: createIslandRouterApiAdapter({
+			config,
+			storage,
+		}),
+		araknisSwitch: createAraknisSwitchAdapter({
 			config,
 			storage,
 		}),
@@ -208,6 +218,7 @@ test('home route toggles worker snapshot link by connector id', async () => {
 		accessNetworksUnleashed,
 		islandRouter,
 		islandRouterApi,
+		araknisSwitch,
 		jellyfish,
 		venstar,
 		kasa,
@@ -227,6 +238,7 @@ test('home route toggles worker snapshot link by connector id', async () => {
 			accessNetworksUnleashed,
 			islandRouter,
 			islandRouterApi,
+			araknisSwitch,
 			jellyfish,
 			venstar,
 			kasa,
@@ -262,6 +274,7 @@ test('read-only routes serve HEAD and reject other methods with 405', async () =
 		accessNetworksUnleashed,
 		islandRouter,
 		islandRouterApi,
+		araknisSwitch,
 		jellyfish,
 		venstar,
 		kasa,
@@ -278,6 +291,7 @@ test('read-only routes serve HEAD and reject other methods with 405', async () =
 			accessNetworksUnleashed,
 			islandRouter,
 			islandRouterApi,
+			araknisSwitch,
 			jellyfish,
 			venstar,
 			kasa,
@@ -317,6 +331,7 @@ test('venstar status scan shows discovered thermostats', async () => {
 		accessNetworksUnleashed,
 		islandRouter,
 		islandRouterApi,
+		araknisSwitch,
 		jellyfish,
 		venstar,
 		kasa,
@@ -333,6 +348,7 @@ test('venstar status scan shows discovered thermostats', async () => {
 			accessNetworksUnleashed,
 			islandRouter,
 			islandRouterApi,
+			araknisSwitch,
 			jellyfish,
 			venstar,
 			kasa,
@@ -373,6 +389,7 @@ test('venstar status can adopt a discovered thermostat', async () => {
 		accessNetworksUnleashed,
 		islandRouter,
 		islandRouterApi,
+		araknisSwitch,
 		jellyfish,
 		venstar,
 		kasa,
@@ -389,6 +406,7 @@ test('venstar status can adopt a discovered thermostat', async () => {
 			accessNetworksUnleashed,
 			islandRouter,
 			islandRouterApi,
+			araknisSwitch,
 			jellyfish,
 			venstar,
 			kasa,
@@ -448,6 +466,7 @@ test('venstar setup can save and remove thermostats directly', async () => {
 		accessNetworksUnleashed,
 		islandRouter,
 		islandRouterApi,
+		araknisSwitch,
 		jellyfish,
 		venstar,
 		kasa,
@@ -465,6 +484,7 @@ test('venstar setup can save and remove thermostats directly', async () => {
 			accessNetworksUnleashed,
 			islandRouter,
 			islandRouterApi,
+			araknisSwitch,
 			jellyfish,
 			venstar,
 			kasa,
@@ -525,6 +545,7 @@ test('access networks unleashed setup can adopt a controller and save auth infor
 		accessNetworksUnleashed,
 		islandRouter,
 		islandRouterApi,
+		araknisSwitch,
 		jellyfish,
 		venstar,
 		kasa,
@@ -556,6 +577,7 @@ test('access networks unleashed setup can adopt a controller and save auth infor
 			accessNetworksUnleashed,
 			islandRouter,
 			islandRouterApi,
+			araknisSwitch,
 			jellyfish,
 			venstar,
 			kasa,
@@ -625,6 +647,7 @@ test('kasa setup saves credentials without echoing the password', async () => {
 		accessNetworksUnleashed,
 		islandRouter,
 		islandRouterApi,
+		araknisSwitch,
 		jellyfish,
 		venstar,
 		kasa,
@@ -641,6 +664,7 @@ test('kasa setup saves credentials without echoing the password', async () => {
 			accessNetworksUnleashed,
 			islandRouter,
 			islandRouterApi,
+			araknisSwitch,
 			jellyfish,
 			venstar,
 			kasa,
@@ -715,6 +739,7 @@ test('kasa setup accepts LAN host origin when request URL is localhost', async (
 		accessNetworksUnleashed,
 		islandRouter,
 		islandRouterApi,
+		araknisSwitch,
 		jellyfish,
 		venstar,
 		kasa,
@@ -731,6 +756,7 @@ test('kasa setup accepts LAN host origin when request URL is localhost', async (
 			accessNetworksUnleashed,
 			islandRouter,
 			islandRouterApi,
+			araknisSwitch,
 			jellyfish,
 			venstar,
 			kasa,
@@ -779,6 +805,7 @@ test('kasa setup accepts LAN origin with explicit port when Host omits port', as
 		accessNetworksUnleashed,
 		islandRouter,
 		islandRouterApi,
+		araknisSwitch,
 		jellyfish,
 		venstar,
 		kasa,
@@ -795,6 +822,7 @@ test('kasa setup accepts LAN origin with explicit port when Host omits port', as
 			accessNetworksUnleashed,
 			islandRouter,
 			islandRouterApi,
+			araknisSwitch,
 			jellyfish,
 			venstar,
 			kasa,
@@ -839,6 +867,7 @@ test('kasa status reflects credential state and known plugs', async () => {
 		accessNetworksUnleashed,
 		islandRouter,
 		islandRouterApi,
+		araknisSwitch,
 		jellyfish,
 		venstar,
 		kasa,
@@ -876,6 +905,7 @@ test('kasa status reflects credential state and known plugs', async () => {
 			accessNetworksUnleashed,
 			islandRouter,
 			islandRouterApi,
+			araknisSwitch,
 			jellyfish,
 			venstar,
 			kasa,
@@ -908,6 +938,7 @@ test('island router api setup can save and clear the local pin', async () => {
 		accessNetworksUnleashed,
 		islandRouter,
 		islandRouterApi,
+		araknisSwitch,
 		jellyfish,
 		venstar,
 		kasa,
@@ -924,6 +955,7 @@ test('island router api setup can save and clear the local pin', async () => {
 			accessNetworksUnleashed,
 			islandRouter,
 			islandRouterApi,
+			araknisSwitch,
 			jellyfish,
 			venstar,
 			kasa,
@@ -995,7 +1027,7 @@ test('island router api setup can save and clear the local pin', async () => {
 	}
 })
 
-test('health route returns ok json', async () => {
+test('araknis switch setup can save and clear credentials without echoing secrets', async () => {
 	const config = createConfig()
 	const {
 		state,
@@ -1007,6 +1039,7 @@ test('health route returns ok json', async () => {
 		accessNetworksUnleashed,
 		islandRouter,
 		islandRouterApi,
+		araknisSwitch,
 		jellyfish,
 		venstar,
 		kasa,
@@ -1023,6 +1056,113 @@ test('health route returns ok json', async () => {
 			accessNetworksUnleashed,
 			islandRouter,
 			islandRouterApi,
+			araknisSwitch,
+			jellyfish,
+			venstar,
+			kasa,
+			phone,
+		)
+
+		const setupResponse = await router.fetch(
+			'http://example.test/araknis-switch/setup',
+		)
+		expect(setupResponse.status).toBe(200)
+		const setupHtml = await setupResponse.text()
+		expect(setupHtml).toContain('Araknis switch setup')
+		expect(setupHtml).toContain(
+			'No Araknis switch credentials are stored locally.',
+		)
+
+		const saveResponse = await router.fetch(
+			'http://example.test/araknis-switch/setup',
+			{
+				method: 'POST',
+				headers: {
+					'content-type': 'application/x-www-form-urlencoded',
+				},
+				body: new URLSearchParams({
+					intent: 'save-credentials',
+					username: 'araknis-admin',
+					password: 'super-secret-araknis-password',
+				}).toString(),
+			},
+		)
+		expect(saveResponse.status).toBe(200)
+		const saveHtml = await saveResponse.text()
+		expect(saveHtml).toContain('Saved Araknis switch credentials.')
+		expect(saveHtml).toContain('Credentials stored')
+		expect(saveHtml).toContain('yes')
+		expect(saveHtml).not.toContain('super-secret-araknis-password')
+		expect(saveHtml).not.toContain('araknis-admin')
+		expect(await araknisSwitch.getConfigStatus()).toMatchObject({
+			configured: true,
+			hasStoredCredentials: true,
+		})
+
+		const statusResponse = await router.fetch(
+			'http://example.test/araknis-switch/status',
+		)
+		expect(statusResponse.status).toBe(200)
+		const statusHtml = await statusResponse.text()
+		expect(statusHtml).toContain('Araknis switch status')
+		expect(statusHtml).toContain('https://192.168.0.50')
+		expect(statusHtml).not.toContain('super-secret-araknis-password')
+
+		const clearResponse = await router.fetch(
+			'http://example.test/araknis-switch/setup',
+			{
+				method: 'POST',
+				headers: {
+					'content-type': 'application/x-www-form-urlencoded',
+				},
+				body: new URLSearchParams({
+					intent: 'clear-credentials',
+				}).toString(),
+			},
+		)
+		expect(clearResponse.status).toBe(200)
+		expect(await clearResponse.text()).toContain(
+			'Cleared Araknis switch credentials.',
+		)
+		expect(await araknisSwitch.getConfigStatus()).toMatchObject({
+			configured: false,
+			hasStoredCredentials: false,
+		})
+	} finally {
+		await storage.close()
+	}
+})
+
+test('health route returns ok json', async () => {
+	const config = createConfig()
+	const {
+		state,
+		storage,
+		lutron,
+		sonos,
+		samsungTv,
+		bond,
+		accessNetworksUnleashed,
+		islandRouter,
+		islandRouterApi,
+		araknisSwitch,
+		jellyfish,
+		venstar,
+		kasa,
+		phone,
+	} = await createAdapters(config)
+	try {
+		const router = createHomeConnectorRouter(
+			state,
+			config,
+			lutron,
+			samsungTv,
+			sonos,
+			bond,
+			accessNetworksUnleashed,
+			islandRouter,
+			islandRouterApi,
+			araknisSwitch,
 			jellyfish,
 			venstar,
 			kasa,
@@ -1069,6 +1209,7 @@ test('system and diagnostics routes render aggregated admin surfaces', async () 
 		accessNetworksUnleashed,
 		islandRouter,
 		islandRouterApi,
+		araknisSwitch,
 		jellyfish,
 		venstar,
 		kasa,
@@ -1089,6 +1230,7 @@ test('system and diagnostics routes render aggregated admin surfaces', async () 
 			accessNetworksUnleashed,
 			islandRouter,
 			islandRouterApi,
+			araknisSwitch,
 			jellyfish,
 			venstar,
 			kasa,
@@ -1135,6 +1277,7 @@ test('dashboard starts Venstar and router reads in parallel', async () => {
 		accessNetworksUnleashed,
 		islandRouter,
 		islandRouterApi,
+		araknisSwitch,
 		jellyfish,
 		venstar,
 		kasa,
@@ -1179,6 +1322,7 @@ test('dashboard starts Venstar and router reads in parallel', async () => {
 			accessNetworksUnleashed,
 			islandRouter,
 			islandRouterApi,
+			araknisSwitch,
 			jellyfish,
 			venstar,
 			kasa,
@@ -1210,6 +1354,7 @@ test('island router status route renders configuration details', async () => {
 		accessNetworksUnleashed,
 		islandRouter,
 		islandRouterApi,
+		araknisSwitch,
 		jellyfish,
 		venstar,
 		kasa,
@@ -1226,6 +1371,7 @@ test('island router status route renders configuration details', async () => {
 			accessNetworksUnleashed,
 			islandRouter,
 			islandRouterApi,
+			araknisSwitch,
 			jellyfish,
 			venstar,
 			kasa,
@@ -1257,6 +1403,7 @@ test('phone status and setup pages never render the device token', async () => {
 		accessNetworksUnleashed,
 		islandRouter,
 		islandRouterApi,
+		araknisSwitch,
 		jellyfish,
 		venstar,
 		kasa,
@@ -1273,6 +1420,7 @@ test('phone status and setup pages never render the device token', async () => {
 			accessNetworksUnleashed,
 			islandRouter,
 			islandRouterApi,
+			araknisSwitch,
 			jellyfish,
 			venstar,
 			kasa,

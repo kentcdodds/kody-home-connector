@@ -43,6 +43,12 @@ const navigationSections: Array<{
 				matchPaths: [routes.islandRouterApiSetup.href()],
 			},
 			{
+				href: routes.araknisSwitchStatus.href(),
+				label: 'Araknis switch',
+				description: 'AN-620 VLAN/port/LLDP diagnostics',
+				matchPaths: [routes.araknisSwitchSetup.href()],
+			},
+			{
 				href: routes.health.href(),
 				label: 'Health JSON',
 				description: 'Machine-readable local health endpoint',
