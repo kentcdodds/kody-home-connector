@@ -348,7 +348,7 @@ const anyAttributeRegex = /(\s)([:\w-]+)(\s*=\s*)(["'])(.*?)\4/gs
  * distinguishable from "secret present" in diagnostics.
  */
 export function redactSecretsInXmlText(xml: string): string {
-	return xml.replace(
+	const redactedAttrs = xml.replace(
 		anyAttributeRegex,
 		(
 			match,
@@ -361,6 +361,14 @@ export function redactSecretsInXmlText(xml: string): string {
 			if (!isSecretWlanAttributeName(name)) return match
 			const replacement = value.length === 0 ? '' : '[redacted]'
 			return `${space}${name}${eq}${quote}${replacement}${quote}`
+		},
+	)
+	// Also redact element-text secrets (rare on Unleashed; seen in other AJAX).
+	return redactedAttrs.replace(
+		/<(passphrase|sae-passphrase|guest-pass|psk|shared-secret|radius-secret|secret)\b([^>]*)>([\s\S]*?)<\/\1>/gi,
+		(_match, name: string, attrs: string, value: string) => {
+			const replacement = value.length === 0 ? '' : '[redacted]'
+			return `<${name}${attrs}>${replacement}</${name}>`
 		},
 	)
 }
@@ -447,11 +455,15 @@ function parseCanonicalElement(xml: string): CanonicalElement | null {
 
 function stableSerialize(
 	element: CanonicalElement,
-	ignore: (name: string, depth: number) => boolean,
+	ignore: (
+		name: string,
+		depth: number,
+		attrs: Record<string, string>,
+	) => boolean,
 	depth = 0,
 ): string {
 	const attrs = Object.keys(element.attributes)
-		.filter((name) => !ignore(name, depth))
+		.filter((name) => !ignore(name, depth, element.attributes))
 		.sort()
 		.map((name) => `${name}=${JSON.stringify(element.attributes[name])}`)
 	const children = Object.keys(element.children)
@@ -481,9 +493,19 @@ export function canonicalWlanFingerprint(
 	const ignoredRoot = new Set(
 		(options?.ignoreRootAttributes ?? []).map((name) => name.toLowerCase()),
 	)
-	return stableSerialize(element, (name, depth) => {
+	return stableSerialize(element, (name, depth, attrs) => {
 		const lower = name.toLowerCase()
-		if (lower.startsWith('x-')) return true
+		if (lower.startsWith('x-')) {
+			// Ignore the obfuscated twin only when the plaintext twin is also
+			// present (compared instead). If x-passphrase is the only captured
+			// secret, keep it in the fingerprint so passphrase changes are
+			// detected (Devin review on PR #78).
+			const twin = lower.slice(2)
+			const hasPlaintext = Object.keys(attrs).some(
+				(key) => key.toLowerCase() === twin,
+			)
+			return hasPlaintext
+		}
 		return depth === 0 && ignoredRoot.has(lower)
 	})
 }

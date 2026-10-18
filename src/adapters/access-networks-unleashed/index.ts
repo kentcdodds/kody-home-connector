@@ -118,6 +118,10 @@ function assertSafeRawWlanWrite(input: {
 		input.action === 'updobj' ||
 		input.action === 'delobj'
 	) {
+		if (comp === 'guestservice-list') {
+			assertWlanWritesEnabled(input.config)
+			return
+		}
 		if (
 			comp === 'wlansvc-list' ||
 			countTopLevelWlansvcElements(input.xmlBody) > 0
@@ -474,42 +478,64 @@ export function createAccessNetworksUnleashedAdapter(input: {
 				dangerousListSetconfConfirmation:
 					request.dangerousListSetconfConfirmation,
 			})
-			const client = await createClient()
-			const adoptedController = await requireControllerWithCredentials()
-			try {
-				const result = await client.request({
+			const runRawRequest = async () => {
+				// Re-check gates under the WLAN write lock so a queued raw write
+				// cannot race a typed write or a gate disable.
+				assertSafeRawWlanWrite({
 					action: request.action,
 					comp,
 					xmlBody,
-					updater: request.updater,
-					caller: request.caller,
-					allowInsecureTls: request.allowInsecureTls,
+					config,
+					allowDangerousPositionalListSetconf:
+						request.allowDangerousPositionalListSetconf,
+					dangerousListSetconfConfirmation:
+						request.dangerousListSetconfConfirmation,
 				})
-				await updateAccessNetworksUnleashedAuthStatus({
-					storage,
-					connectorId,
-					controllerId: adoptedController.controllerId,
-					lastAuthenticatedAt: new Date().toISOString(),
-					lastAuthError: null,
-				})
-				return redactRequestResult(result)
-			} catch (error) {
-				// Only record authentication errors against the controller. Generic
-				// raw-request failures (malformed payload, unsupported component,
-				// device-side command rejection) should not appear later as bad
-				// credentials or a stale session.
-				if (isAuthFailure(error)) {
+				const client = await createClient()
+				const adoptedController = await requireControllerWithCredentials()
+				try {
+					const result = await client.request({
+						action: request.action,
+						comp,
+						xmlBody,
+						updater: request.updater,
+						caller: request.caller,
+						allowInsecureTls: request.allowInsecureTls,
+					})
 					await updateAccessNetworksUnleashedAuthStatus({
 						storage,
 						connectorId,
 						controllerId: adoptedController.controllerId,
-						lastAuthenticatedAt: adoptedController.lastAuthenticatedAt,
-						lastAuthError:
-							error instanceof Error ? error.message : String(error),
+						lastAuthenticatedAt: new Date().toISOString(),
+						lastAuthError: null,
 					})
+					return redactRequestResult(result)
+				} catch (error) {
+					// Only record authentication errors against the controller. Generic
+					// raw-request failures (malformed payload, unsupported component,
+					// device-side command rejection) should not appear later as bad
+					// credentials or a stale session.
+					if (isAuthFailure(error)) {
+						await updateAccessNetworksUnleashedAuthStatus({
+							storage,
+							connectorId,
+							controllerId: adoptedController.controllerId,
+							lastAuthenticatedAt: adoptedController.lastAuthenticatedAt,
+							lastAuthError:
+								error instanceof Error ? error.message : String(error),
+						})
+					}
+					throw error
 				}
-				throw error
 			}
+			const touchesWlan =
+				comp.trim().toLowerCase() === 'wlansvc-list' ||
+				comp.trim().toLowerCase() === 'guestservice-list' ||
+				countTopLevelWlansvcElements(xmlBody) > 0
+			if (touchesWlan) {
+				return await withWlanWriteLock(runRawRequest)
+			}
+			return await runRawRequest()
 		},
 		async listWlans() {
 			const client = await createClient()
@@ -577,6 +603,9 @@ export function createAccessNetworksUnleashedAdapter(input: {
 				assertWlanWritesEnabled(config)
 			}
 			return await withWlanWriteLock(async () => {
+				// Re-check after waiting on the lock so disabling the gate
+				// cancels queued writes (Devin review on PR #78).
+				if (!dryRun) assertWlanWritesEnabled(config)
 				const client = await createClient()
 				return await updateWlanById({
 					client,
@@ -604,6 +633,7 @@ export function createAccessNetworksUnleashedAdapter(input: {
 				assertWlanWritesEnabled(config)
 			}
 			return await withWlanWriteLock(async () => {
+				if (!dryRun) assertWlanWritesEnabled(config)
 				const client = await createClient()
 				return await cloneWlanById({
 					client,
@@ -631,6 +661,7 @@ export function createAccessNetworksUnleashedAdapter(input: {
 				assertWlanWritesEnabled(config)
 			}
 			return await withWlanWriteLock(async () => {
+				if (!dryRun) assertWlanWritesEnabled(config)
 				const client = await createClient()
 				return await deleteWlanById({
 					client,

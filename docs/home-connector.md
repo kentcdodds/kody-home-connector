@@ -981,10 +981,13 @@ re-creates them. Clone always refuses when the _source_ passphrase is missing.
 - `access_networks_unleashed_check_wlan_write_readiness` (read-only). Reports
   whether a write could be fully snapshotted and rolled back right now.
 - `access_networks_unleashed_update_wlan`: `updobj` + `id` + `IS_PARTIAL`.
-- `access_networks_unleashed_clone_wlan`: `addobj` with no `id`. The controller
-  assigns the id.
-- `access_networks_unleashed_delete_wlan`: `delobj` with `<wlansvc id='N'/>`,
-  guarded by `expectedName`.
+- `access_networks_unleashed_clone_wlan`: when the source has a
+  `guestservice-id`, first `addobj` a dedicated copy on `guestservice-list`
+  (Unleashed UI / 200.15 guest-WLAN create is two-step), then `addobj` the WLAN
+  with that new id. Never share the source guestservice (cascade-on-WLAN- delete
+  is unverified on 200.18; aioruckus only deletes the wlansvc).
+- `access_networks_unleashed_delete_wlan`: `delobj` the WLAN, then only `delobj`
+  its guestservice if no remaining WLAN still references that id.
 
 Each write tool accepts `dryRun: true`: it still takes the restorable snapshot
 and builds the exact object request(s), then returns them (secrets redacted)

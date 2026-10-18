@@ -10,6 +10,7 @@ import {
 	deleteWlanById,
 	getWlanById,
 	mergeWlanOntoTemplate,
+	parseGuestserviceList,
 	readWlanList,
 	resolveWlanAttributeOverrides,
 	updateWlanById,
@@ -110,12 +111,16 @@ function createFakeController(options: FakeOptions = {}) {
 		rawXml: withTestSecrets(row.rawXml, row.id),
 	}))
 	let nextId = 6
+	let nextGuestserviceId = 10
 	let addobjSurpriseUsed = false
-	const writes: Array<{ action: string; xmlBody: string }> = []
+	const writes: Array<{ action: string; xmlBody: string; comp: string }> = []
 	const templateReads: Array<boolean> = []
+	const guestserviceSlots: Array<Slot> = parseGuestserviceList(
+		fixture('guestservice-list.xml'),
+	).entries.map((entry) => ({ rawXml: entry.rawXml }))
 
-	const idOf = (rawXml: string) => {
-		const open = /^<wlansvc[^>]*>/i.exec(rawXml)?.[0] ?? ''
+	const idOf = (rawXml: string, tag = 'wlansvc') => {
+		const open = new RegExp(`^<${tag}[^>]*>`, 'i').exec(rawXml)?.[0] ?? ''
 		return getAttributeValue(open, 'id')
 	}
 	const listXml = (decrypt: boolean) =>
@@ -147,7 +152,37 @@ function createFakeController(options: FakeOptions = {}) {
 		return updated
 	}
 
-	const apply = (action: string, body: string) => {
+	const guestListXml = () =>
+		'<?xml version="1.0" encoding="utf-8"?><!DOCTYPE ajax-response><ajax-response><response type="object" id="guestservice-list.test"><guestservice-list>' +
+		guestserviceSlots.map((slot) => slot.rawXml).join('') +
+		'</guestservice-list></response></ajax-response>'
+
+	const apply = (action: string, body: string, comp: string) => {
+		if (comp === 'guestservice-list') {
+			const id = idOf(body, 'guestservice')
+			if (action === 'addobj') {
+				const newId = String(nextGuestserviceId++)
+				const created = body.replace(
+					/^<guestservice/i,
+					`<guestservice id="${newId}"`,
+				)
+				guestserviceSlots.push({ rawXml: created })
+				return {
+					...ok(action),
+					comp: 'guestservice-list',
+					xml: `<?xml version="1.0"?><ajax-response><response type="object">${created}</response></ajax-response>`,
+				}
+			}
+			if (action === 'delobj') {
+				if (!id) throw new Error('fake: guestservice delobj needs id')
+				const index = guestserviceSlots.findIndex(
+					(slot) => idOf(slot.rawXml, 'guestservice') === id,
+				)
+				if (index >= 0) guestserviceSlots.splice(index, 1)
+				return { ...ok(action), comp: 'guestservice-list' }
+			}
+			throw new Error(`fake: unsupported guestservice action ${action}`)
+		}
 		const id = idOf(body)
 		switch (action) {
 			case 'setconf': {
@@ -229,19 +264,34 @@ function createFakeController(options: FakeOptions = {}) {
 					xml: fixture('wlansvc-standard-template.xml'),
 				}
 			}
-			if (request.comp !== 'wlansvc-list') {
+			if (
+				request.action === 'getconf' &&
+				request.comp === 'guestservice-list'
+			) {
+				return {
+					...ok('getconf'),
+					comp: 'guestservice-list',
+					xml: guestListXml(),
+				}
+			}
+			if (
+				request.comp !== 'wlansvc-list' &&
+				request.comp !== 'guestservice-list'
+			) {
 				throw new Error(`fake: unexpected comp ${request.comp}`)
 			}
-			if (request.action === 'getconf') {
+			if (request.action === 'getconf' && request.comp === 'wlansvc-list') {
 				return {
 					...ok('getconf'),
 					xml: listXml(request.decryptSecrets === true),
 				}
 			}
 			const body = normalizeBody(request.xmlBody)
-			writes.push({ action: request.action, xmlBody: body })
-			const result = apply(request.action, body)
-			if (throwOnce) {
+			writes.push({ action: request.action, xmlBody: body, comp: request.comp })
+			const result = apply(request.action, body, request.comp)
+			// Only the WLAN write throws after apply; guestservice setup must
+			// complete so the regression covers the wlansvc path.
+			if (throwOnce && request.comp === 'wlansvc-list') {
 				throwOnce = false
 				throw new Error(
 					`Access Networks Unleashed rejected the command: <xmsg error="1"/> echo ${body}`,
@@ -255,6 +305,7 @@ function createFakeController(options: FakeOptions = {}) {
 		writes,
 		templateReads,
 		list: () => parseWlansvcList(listXml(true)),
+		guestservices: () => parseGuestserviceList(guestListXml()),
 		rawStoredXml: () => listXml(true),
 	}
 }
@@ -384,15 +435,19 @@ test('clone uses addobj with no id, correct radio flags, and leaves siblings unt
 			radioBand: '2.4ghz',
 		},
 	})
-	expect(fake.writes.map((write) => write.action)).toEqual(['addobj'])
+	expect(fake.writes.map((write) => [write.comp, write.action])).toEqual([
+		['guestservice-list', 'addobj'],
+		['wlansvc-list', 'addobj'],
+	])
 	// Started from wlansvc-standard-template (aioruckus do_clone_wlan).
 	expect(fake.templateReads).toEqual([true])
-	expect(fake.writes[0]!.xmlBody).not.toContain('Ruckus-Wireless 1')
+	const wlanWrite = fake.writes.find((write) => write.comp === 'wlansvc-list')!
+	expect(wlanWrite.xmlBody).not.toContain('Ruckus-Wireless 1')
 	// Source values win over template defaults (template is wpa23-mixed).
-	expect(getAttributeValue(fake.writes[0]!.xmlBody, 'encryption')).toBe('wpa2')
-	expect(fake.writes[0]!.xmlBody).not.toMatch(/\sid\s*=/)
-	expect(fake.writes[0]!.xmlBody).not.toMatch(/create-time/)
-	expect(fake.writes[0]!.xmlBody).not.toMatch(/\sradio\s*=/)
+	expect(getAttributeValue(wlanWrite.xmlBody, 'encryption')).toBe('wpa2')
+	expect(wlanWrite.xmlBody).not.toMatch(/\sid\s*=/)
+	expect(wlanWrite.xmlBody).not.toMatch(/create-time/)
+	expect(wlanWrite.xmlBody).not.toMatch(/\sradio\s*=/)
 	expect(result.created).not.toBeNull()
 	expect(result.safety).not.toBeNull()
 	expect(result.created!.id).toBe('6')
@@ -402,12 +457,15 @@ test('clone uses addobj with no id, correct radio flags, and leaves siblings unt
 	expect(result.created!.attributes['vlan-id']).toBe('20')
 	expect(result.created!.attributes['client-isolation']).toBe('enabled')
 	expect(result.created!.attributes['web-auth']).toBe('enabled')
+	// Dedicated guestservice — never shares friendlyguest's id 5.
+	expect(result.created!.attributes['guestservice-id']).toBe('10')
+	expect(result.created!.attributes['guestservice-id']).not.toBe('5')
 	// Passphrase carried into the clone so it is a working copy.
 	expect(result.created!.rawXml).toContain('passphrase="TEST-ONLY-guest-psk"')
 	expect(result.safety!.rolledBack).toBe(false)
 	// Secrets never appear in what the tool returns as the request.
 	expect(result.requestXml).not.toMatch(ALL_TEST_SECRETS)
-	expect(result.warnings.join(' ')).toMatch(/guestservice-id "5"/)
+	expect(result.warnings.join(' ')).toMatch(/dedicated guestservice/)
 	expect(namesById(fake)).toEqual([
 		['1', 'friendlyfamily'],
 		['2', 'g'],
@@ -452,9 +510,11 @@ test('regression (Oct 17): positional overwrite with an id-less entry rolls back
 	// The id-less slot cannot be targeted by any action: reported, not guessed.
 	expect(safety.restore!.status).toBe('partial')
 	expect(safety.restore!.unresolved.join(' ')).toMatch(/no id/)
-	expect(safety.rolledBack).toBe(false)
-	// Writes sent: the addobj, then only id-targeted restore actions.
-	for (const write of fake.writes.slice(1)) {
+	// partial restore still counts as rolledBack (content restored; old ids may
+	// have been reassigned and need manual follow-up).
+	expect(safety.rolledBack).toBe(true)
+	// Writes sent: guestservice+wlan addobj, then only id-targeted restore.
+	for (const write of fake.writes.slice(2)) {
 		expect(['updobj', 'addobj', 'delobj']).toContain(write.action)
 	}
 	expect(fake.writes.some((write) => write.action === 'setconf')).toBe(false)
@@ -472,13 +532,16 @@ test('if every addobj were positional, rollback reports failure for manual repai
 	}).catch((caught: unknown) => caught)
 	expect(error).toBeInstanceOf(AccessNetworksUnleashedWlanSafetyError)
 	const safety = (error as AccessNetworksUnleashedWlanSafetyError).safety
-	expect(safety.rolledBack).toBe(false)
+	expect(safety.rolledBack).toBe(true)
 	expect(['partial', 'failed']).toContain(safety.restore?.status)
 	expect((error as Error).message).toMatch(/manual repair needed/)
-	// Exactly one restore attempt per missing WLAN; no retry loop.
-	expect(fake.writes.filter((write) => write.action === 'addobj')).toHaveLength(
-		2,
-	)
+	// guestservice addobj + one wlansvc addobj create + one restore addobj;
+	// no retry loop on the restore.
+	expect(
+		fake.writes.filter(
+			(write) => write.comp === 'wlansvc-list' && write.action === 'addobj',
+		),
+	).toHaveLength(2)
 })
 
 test('clone that disturbs a sibling is fully rolled back with updobj + delobj', async () => {
@@ -506,10 +569,12 @@ test('clone that disturbs a sibling is fully rolled back with updobj + delobj', 
 	expect(
 		after.entries.find((entry) => entry.id === '2')!.attributes['vlan-id'],
 	).toBe('1')
-	expect(fake.writes.map((write) => write.action)).toEqual([
-		'addobj',
-		'delobj',
-		'updobj',
+	expect(fake.writes.map((write) => [write.comp, write.action])).toEqual([
+		['guestservice-list', 'addobj'],
+		['wlansvc-list', 'addobj'],
+		['wlansvc-list', 'delobj'],
+		['wlansvc-list', 'updobj'],
+		['guestservice-list', 'delobj'],
 	])
 })
 
@@ -546,7 +611,7 @@ test('update uses updobj IS_PARTIAL by id and verifies only the target changed',
 		"<wlansvc id='5' IS_PARTIAL='true' max-clients-per-radio='50'/>",
 	)
 	expect(fake.writes).toEqual([
-		{ action: 'updobj', xmlBody: result.requestXml },
+		{ action: 'updobj', comp: 'wlansvc-list', xmlBody: result.requestXml },
 	])
 	expect(result.after).not.toBeNull()
 	expect(result.safety).not.toBeNull()
@@ -680,7 +745,12 @@ test('delete uses delobj by id after an expectedName check', async () => {
 		expectedName: 'kody-test',
 	})
 	expect(deleted.requestXml).toBe(`<wlansvc id='${created.created!.id}'/>`)
-	expect(fake.writes.map((write) => write.action)).toEqual(['addobj', 'delobj'])
+	expect(fake.writes.map((write) => [write.comp, write.action])).toEqual([
+		['guestservice-list', 'addobj'],
+		['wlansvc-list', 'addobj'],
+		['wlansvc-list', 'delobj'],
+		['guestservice-list', 'delobj'],
+	])
 	expect(namesById(fake)).toEqual([
 		['1', 'friendlyfamily'],
 		['2', 'g'],
@@ -756,7 +826,7 @@ test('clone refuses even with acceptUnrestorablePassphrases when the source PSK 
 	expect(fake.writes).toEqual([])
 })
 
-test('dryRun clone of id 5 as friendlyguest-2.4 2.4GHz-only returns the exact addobj and sends nothing', async () => {
+test('dryRun clone of id 5 as friendlyguest-2.4 2.4GHz-only returns guestservice+wlan addobj and sends nothing', async () => {
 	const fake = createFakeController()
 	const before = namesById(fake)
 	const result = await cloneWlanById({
@@ -776,13 +846,18 @@ test('dryRun clone of id 5 as friendlyguest-2.4 2.4GHz-only returns the exact ad
 	expect(fake.writes).toEqual([])
 	expect(namesById(fake)).toEqual(before)
 	expect(result.requestAction).toBe('addobj')
-	expect(result.requests).toEqual([
-		{
-			action: 'addobj',
-			comp: 'wlansvc-list',
-			xmlBody: result.requestXml,
-		},
-	])
+	expect(result.requests).toHaveLength(2)
+	expect(result.requests[0]).toMatchObject({
+		action: 'addobj',
+		comp: 'guestservice-list',
+	})
+	expect(result.requests[0]!.xmlBody).toMatch(/^<guestservice\b/)
+	expect(result.requests[0]!.xmlBody).not.toMatch(/\sid\s*=/)
+	expect(result.requests[1]).toEqual({
+		action: 'addobj',
+		comp: 'wlansvc-list',
+		xmlBody: result.requestXml,
+	})
 	expect(result.requestXml).toMatch(/^<wlansvc\b/)
 	expect(result.requestXml).not.toMatch(/\sid\s*=/)
 	expect(result.requestXml).not.toMatch(/create-time/)
@@ -792,8 +867,78 @@ test('dryRun clone of id 5 as friendlyguest-2.4 2.4GHz-only returns the exact ad
 	expect(getAttributeValue(result.requestXml, 'wlan-bind-5g')).toBe('false')
 	expect(getAttributeValue(result.requestXml, 'wlan-bind-6g')).toBe('false')
 	expect(getAttributeValue(result.requestXml, 'vlan-id')).toBe('20')
+	expect(getAttributeValue(result.requestXml, 'guestservice-id')).toBe(
+		'__NEW_GUESTSERVICE_ID__',
+	)
 	expect(result.requestXml).not.toMatch(ALL_TEST_SECRETS)
 	expect(result.requestXml).toMatch(/passphrase="\[redacted\]"/)
+})
+
+test('clone of g (id 2) gets its own guestservice; deleting the clone does not remove g guestservice 2', async () => {
+	const fake = createFakeController()
+	expect(fake.guestservices().entries.map((entry) => entry.id)).toContain('2')
+	const created = await cloneWlanById({
+		client: fake.client,
+		sourceId: '2',
+		overrides: {
+			name: 'kody-test-delete-me',
+			ssid: 'kody-test-delete-me',
+			radioBand: '2.4ghz',
+			attributes: { 'enable-type': '1' },
+		},
+	})
+	expect(created.created).not.toBeNull()
+	const newGuestId = created.created!.attributes['guestservice-id']
+	expect(newGuestId).toBeTruthy()
+	expect(newGuestId).not.toBe('2')
+	expect(fake.guestservices().entries.map((entry) => entry.id)).toContain('2')
+	expect(fake.guestservices().entries.map((entry) => entry.id)).toContain(
+		newGuestId,
+	)
+	await deleteWlanById({
+		client: fake.client,
+		id: created.created!.id,
+		expectedName: 'kody-test-delete-me',
+	})
+	expect(fake.guestservices().entries.map((entry) => entry.id)).toContain('2')
+	expect(fake.guestservices().entries.map((entry) => entry.id)).not.toContain(
+		newGuestId,
+	)
+	expect(namesById(fake)).toEqual([
+		['1', 'friendlyfamily'],
+		['2', 'g'],
+		['3', 'friendlyfamily-2.4'],
+		['5', 'friendlyguest'],
+	])
+})
+
+test('delete never removes a guestservice still referenced by another WLAN', async () => {
+	const fake = createFakeController()
+	await fake.client.request({
+		action: 'updobj',
+		comp: 'wlansvc-list',
+		xmlBody: `<wlansvc id='5' IS_PARTIAL='true' guestservice-id='2'/>`,
+	})
+	expect(
+		fake.list().entries.find((entry) => entry.id === '5')!.attributes[
+			'guestservice-id'
+		],
+	).toBe('2')
+	const deleted = await deleteWlanById({
+		client: fake.client,
+		id: '5',
+		expectedName: 'friendlyguest',
+	})
+	expect(deleted.warnings.join(' ')).toMatch(/still referenced|shared/)
+	expect(fake.guestservices().entries.map((entry) => entry.id)).toContain('2')
+	expect(
+		fake.writes.some(
+			(write) =>
+				write.comp === 'guestservice-list' &&
+				write.action === 'delobj' &&
+				/id=['"]2['"]/.test(write.xmlBody),
+		),
+	).toBe(false)
 })
 
 test('dryRun update and delete build the wire request without sending', async () => {
@@ -824,6 +969,11 @@ test('dryRun update and delete build the wire request without sending', async ()
 			action: 'delobj',
 			comp: 'wlansvc-list',
 			xmlBody: "<wlansvc id='2'/>",
+		},
+		{
+			action: 'delobj',
+			comp: 'guestservice-list',
+			xmlBody: "<guestservice id='2'/>",
 		},
 	])
 	expect(fake.writes).toEqual([])

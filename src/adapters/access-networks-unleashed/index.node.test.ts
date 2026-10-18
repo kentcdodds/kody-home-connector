@@ -838,6 +838,10 @@ test('dryRun clone works while wlanWritesEnabled is off and sends nothing', asyn
 		new URL('./fixtures/wlansvc-standard-template.xml', import.meta.url),
 		'utf8',
 	)
+	const guestserviceXml = readFileSync(
+		new URL('./fixtures/guestservice-list.xml', import.meta.url),
+		'utf8',
+	)
 	const hydrateDecrypt = (xml: string) =>
 		xml.replace(
 			/<wpa cipher="aes"/g,
@@ -848,6 +852,7 @@ test('dryRun clone works while wlanWritesEnabled is off and sends nothing', asyn
 			if (input.comp === 'wlansvc-standard-template') {
 				return input.decryptSecrets ? hydrateDecrypt(templateXml) : templateXml
 			}
+			if (input.comp === 'guestservice-list') return guestserviceXml
 			return input.decryptSecrets ? hydrateDecrypt(beforeXml) : beforeXml
 		},
 	)
@@ -869,9 +874,11 @@ test('dryRun clone works while wlanWritesEnabled is off and sends nothing', asyn
 			confirmation: '',
 		})
 		expect(result.dryRun).toBe(true)
-		expect(result.requests).toHaveLength(1)
+		expect(result.requests).toHaveLength(2)
 		expect(result.requests[0]?.action).toBe('addobj')
-		expect(result.requests[0]?.comp).toBe('wlansvc-list')
+		expect(result.requests[0]?.comp).toBe('guestservice-list')
+		expect(result.requests[1]?.action).toBe('addobj')
+		expect(result.requests[1]?.comp).toBe('wlansvc-list')
 		expect(result.requestXml).not.toMatch(/\sid\s*=/)
 		expect(result.requestXml).not.toMatch(/TEST-ONLY/)
 		expect(calls.every((call) => call.action === 'getconf')).toBe(true)

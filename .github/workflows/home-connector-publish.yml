@@ -6,6 +6,14 @@ on:
       - main
   pull_request:
   workflow_dispatch:
+    inputs:
+      extra_tag:
+        description: >-
+          Optional extra Docker Hub tag that never becomes latest (e.g. pr-78).
+          Always also publishes sha-<short>. latest is only written on main.
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -127,6 +135,7 @@ jobs:
           tags: |
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
             type=sha,format=short,prefix=sha-
+            type=raw,value=${{ inputs.extra_tag }},enable=${{ github.event_name == 'workflow_dispatch' && inputs.extra_tag != '' }}
 
       - name: 🚀 Build and push image
         uses: docker/build-push-action@v7

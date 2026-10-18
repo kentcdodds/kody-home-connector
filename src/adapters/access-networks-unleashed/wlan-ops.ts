@@ -14,6 +14,7 @@ import {
 	parseWlansvcList,
 	redactSecretsInXmlText,
 	removeRootAttributes,
+	setOrAddAttribute,
 	wlanXmlContainsExpected,
 	type WlanListAnomaly,
 	type WlanSvcEntry,
@@ -83,11 +84,20 @@ export type WlanWriteOptions = {
 	dryRun?: boolean
 }
 
+export const guestserviceListComp = 'guestservice-list'
+
 /** One planned `_conf.jsp` object request (secrets already redacted). */
 export type WlanPlannedRequest = {
 	action: 'addobj' | 'updobj' | 'delobj'
-	comp: typeof wlanListComp
+	comp: typeof wlanListComp | typeof guestserviceListComp
 	xmlBody: string
+}
+
+export type GuestserviceEntry = {
+	id: string
+	name: string | null
+	attributes: Record<string, string>
+	rawXml: string
 }
 
 export type WlanRestoreAction = {
@@ -299,6 +309,128 @@ async function sendWlanWrite(
 		// Controller error text can echo the payload (including secrets).
 		const message = error instanceof Error ? error.message : String(error)
 		throw new Error(redactSecretsInXmlText(message), { cause: error })
+	}
+}
+
+async function sendGuestserviceWrite(
+	client: AccessNetworksUnleashedClient,
+	action: 'addobj' | 'delobj',
+	xmlBody: string,
+) {
+	try {
+		return await client.request({
+			action,
+			comp: guestserviceListComp,
+			xmlBody,
+		})
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error)
+		throw new Error(redactSecretsInXmlText(message), { cause: error })
+	}
+}
+
+/**
+ * Parse guestservice-list the same way we parse wlansvc-list (lenient on
+ * damage). Unleashed guest WLAN creation is a two-step addobj on
+ * guestservice-list then wlansvc-list (tichaonax ruckus-wlan-creation-api.md,
+ * fw 200.15 UI capture); every live WLAN in Kent's fixtures carries a
+ * guestservice-id, including non-guest SSIDs.
+ */
+export function parseGuestserviceList(xml: string): {
+	entries: Array<GuestserviceEntry>
+} {
+	const entries: Array<GuestserviceEntry> = []
+	const elementRegex =
+		/<guestservice(?=[\s>/])(?<attrs>[^>]*)\/>|<guestservice(?=[\s>/])(?<openAttrs>[^>]*)>(?<body>[\s\S]*?)<\/guestservice>/gi
+	for (const match of xml.matchAll(elementRegex)) {
+		const rawXml = match[0]
+		const attrText = match.groups?.attrs ?? match.groups?.openAttrs ?? ''
+		const attributes: Record<string, string> = {}
+		for (const attr of attrText.matchAll(/([:\w-]+)\s*=\s*(["'])(.*?)\2/gs)) {
+			attributes[attr[1] ?? ''] = decodeXmlEntities(attr[3] ?? '')
+		}
+		const id = attributes['id']?.trim() ?? ''
+		if (!id) continue
+		entries.push({
+			id,
+			name: attributes['name'] ?? null,
+			attributes,
+			rawXml,
+		})
+	}
+	return { entries }
+}
+
+async function readGuestserviceList(
+	client: AccessNetworksUnleashedClient,
+): Promise<{ entries: Array<GuestserviceEntry>; xml: string }> {
+	const result = await client.request({
+		action: 'getconf',
+		comp: guestserviceListComp,
+		xmlBody: '',
+	})
+	return { xml: result.xml, ...parseGuestserviceList(result.xml) }
+}
+
+function extractCreatedGuestserviceId(xml: string): string | null {
+	const parsed = parseGuestserviceList(xml)
+	if (parsed.entries.length === 1) return parsed.entries[0]?.id ?? null
+	// Some controllers echo only the new object; others echo the whole list.
+	// Prefer the highest numeric id as a last resort when the response embeds
+	// multiple entries (test fake returns the created element alone).
+	const numeric = parsed.entries
+		.map((entry) => ({ entry, n: Number.parseInt(entry.id, 10) }))
+		.filter((row) => Number.isFinite(row.n))
+		.sort((a, b) => b.n - a.n)
+	return numeric[0]?.entry.id ?? parsed.entries[0]?.id ?? null
+}
+
+/**
+ * Build an addobj payload for a dedicated guestservice copy. The Unleashed UI
+ * creates one guestservice per WLAN; sharing the source id is unsafe because
+ * whether delobj on wlansvc cascades to guestservice is unverified on 200.18
+ * (aioruckus only deletes the wlansvc; the UI path is two-object).
+ */
+function buildGuestserviceCloneXml(input: {
+	source: GuestserviceEntry
+	name: string | null
+}): string {
+	let xml = removeRootAttributes(input.source.rawXml, [
+		'id',
+		'create-time',
+	] as const)
+	if (input.name) {
+		xml = setOrAddAttribute(xml, 'name', input.name)
+	}
+	if (getAttributeValue(/^<guestservice[^>]*>/i.exec(xml)?.[0] ?? '', 'id')) {
+		throw new AccessNetworksUnleashedWlanWriteRefusedError(
+			'Refusing guestservice clone: the create payload still carries an id.',
+		)
+	}
+	return xml
+}
+
+async function deleteGuestserviceIfUnreferenced(input: {
+	client: AccessNetworksUnleashedClient
+	guestserviceId: string
+	wlanEntries: Array<WlanSvcEntry>
+	warnings: Array<string>
+}): Promise<WlanPlannedRequest | null> {
+	const stillReferenced = input.wlanEntries.some(
+		(entry) => entry.attributes['guestservice-id'] === input.guestserviceId,
+	)
+	if (stillReferenced) {
+		input.warnings.push(
+			`guestservice-id "${input.guestserviceId}" is still referenced by another WLAN; not deleting it.`,
+		)
+		return null
+	}
+	const requestXml = `<guestservice id='${escapeXmlAttribute(input.guestserviceId)}'/>`
+	await sendGuestserviceWrite(input.client, 'delobj', requestXml)
+	return {
+		action: 'delobj',
+		comp: guestserviceListComp,
+		xmlBody: requestXml,
 	}
 }
 
@@ -689,6 +821,11 @@ export async function restoreWlanSnapshot(
 		if (recreated) {
 			claimed.add(recreated.id)
 			reassignedIds[entry.id] = recreated.id
+			// Re-created under a new controller-assigned id: content may match,
+			// but anything referring to the old id is still broken.
+			unresolved.push(
+				`WLAN id "${entry.id}" (${entry.name ?? '?'}) was re-created as id "${recreated.id}"; the old id is gone and needs manual follow-up`,
+			)
 			continue
 		}
 		unresolved.push(
@@ -838,8 +975,12 @@ async function verifyOrRollback(input: {
 
 	const restore = await restoreWlanSnapshot(input.client, input.snapshot)
 	const safety: WlanWriteSafetyResult = {
+		// partial still means we attempted restore (possibly with reassigned
+		// ids that need manual follow-up).
 		rolledBack:
-			restore.status === 'restored' || restore.status === 'not-needed',
+			restore.status === 'restored' ||
+			restore.status === 'not-needed' ||
+			restore.status === 'partial',
 		problems,
 		snapshotEntryCount: input.snapshot.entries.length,
 		afterEntryCount: after
@@ -849,14 +990,16 @@ async function verifyOrRollback(input: {
 	}
 	const restoreSummary =
 		restore.status === 'restored' || restore.status === 'not-needed'
-			? `Automatically rolled back to the pre-write WLAN snapshot${
-					Object.keys(restore.reassignedIds).length
-						? ` (re-created ids: ${Object.entries(restore.reassignedIds)
-								.map(([from, to]) => `${from}→${to}`)
-								.join(', ')})`
-						: ''
-				}.`
-			: `Automatic rollback was ${restore.status.toUpperCase()}; manual repair needed: ${restore.unresolved.join('; ')}.`
+			? `Automatically rolled back to the pre-write WLAN snapshot.`
+			: restore.status === 'partial'
+				? `Automatic rollback was PARTIAL${
+						Object.keys(restore.reassignedIds).length
+							? ` (re-created ids: ${Object.entries(restore.reassignedIds)
+									.map(([from, to]) => `${from}→${to}`)
+									.join(', ')})`
+							: ''
+					}; manual repair needed: ${restore.unresolved.join('; ')}.`
+				: `Automatic rollback was ${restore.status.toUpperCase()}; manual repair needed: ${restore.unresolved.join('; ')}.`
 	throw new AccessNetworksUnleashedWlanSafetyError(
 		`WLAN write safety check failed: ${problems.join('; ')}. ${restoreSummary}`,
 		safety,
@@ -1180,19 +1323,18 @@ export async function cloneWlanById(
 	}
 
 	const warnings: Array<string> = []
-	const guestServiceId = source.attributes['guestservice-id']
-	if (guestServiceId) {
-		warnings.push(
-			`The clone references the source's guestservice-id "${guestServiceId}". The Unleashed UI creates a dedicated guest service per WLAN; whether deleting either WLAN later also removes that shared guest service is unverified.`,
-		)
-	}
+	const sourceGuestserviceId = (
+		source.attributes['guestservice-id'] ?? ''
+	).trim()
+	const shouldCloneGuestservice =
+		sourceGuestserviceId !== '' && sourceGuestserviceId !== '0'
 
 	// Unleashed web UI / CommScope Postman / aioruckus / ruckus-go create via
 	// addobj on wlansvc-list with no id; the controller assigns one. Like
 	// aioruckus do_clone_wlan, start from wlansvc-standard-template and lay
 	// the source WLAN on top so template-only defaults are present.
 	const template = await fetchStandardWlanTemplate(input.client)
-	const createXml = applyWlanAttributeOverrides(
+	let createXml = applyWlanAttributeOverrides(
 		mergeWlanOntoTemplate({
 			templateXml: template,
 			sourceXml: removeRootAttributes(
@@ -1210,10 +1352,52 @@ export async function cloneWlanById(
 			'Refusing clone: the create payload still carries an id.',
 		)
 	}
+
+	let guestserviceCreateXml: string | null = null
+	if (shouldCloneGuestservice) {
+		let guestList: { entries: Array<GuestserviceEntry> }
+		try {
+			guestList = await readGuestserviceList(input.client)
+		} catch (error) {
+			throw new AccessNetworksUnleashedWlanWriteRefusedError(
+				`Refusing clone: could not read guestservice-list (${errorText(error)}). Nothing was sent.`,
+			)
+		}
+		const sourceGuest = guestList.entries.find(
+			(entry) => entry.id === sourceGuestserviceId,
+		)
+		if (!sourceGuest) {
+			throw new AccessNetworksUnleashedWlanWriteRefusedError(
+				`Refusing clone: source WLAN guestservice-id "${sourceGuestserviceId}" was not found in guestservice-list. Nothing was sent.`,
+			)
+		}
+		guestserviceCreateXml = buildGuestserviceCloneXml({
+			source: sourceGuest,
+			name: newName,
+		})
+		warnings.push(
+			`Clone will addobj a dedicated guestservice (copy of id "${sourceGuestserviceId}") before the WLAN so the new WLAN never shares the source guest service.`,
+		)
+	}
+
+	const requests: Array<WlanPlannedRequest> = []
+	if (guestserviceCreateXml) {
+		requests.push({
+			action: 'addobj',
+			comp: guestserviceListComp,
+			xmlBody: redactSecretsInXmlText(guestserviceCreateXml),
+		})
+		// Dry-run / planned WLAN body uses a clear placeholder; the live path
+		// replaces it with the id returned by the guestservice addobj.
+		createXml = setOrAddAttribute(
+			createXml,
+			'guestservice-id',
+			'__NEW_GUESTSERVICE_ID__',
+		)
+	}
 	const requestXml = redactSecretsInXmlText(createXml)
-	const requests: Array<WlanPlannedRequest> = [
-		{ action: 'addobj', comp: wlanListComp, xmlBody: requestXml },
-	]
+	requests.push({ action: 'addobj', comp: wlanListComp, xmlBody: requestXml })
+
 	if (input.dryRun === true) {
 		return {
 			sourceId,
@@ -1229,59 +1413,128 @@ export async function cloneWlanById(
 		}
 	}
 
+	let createdGuestserviceId: string | null = null
 	let writeError: unknown = null
 	try {
+		if (guestserviceCreateXml) {
+			const guestResponse = await sendGuestserviceWrite(
+				input.client,
+				'addobj',
+				guestserviceCreateXml,
+			)
+			createdGuestserviceId = extractCreatedGuestserviceId(guestResponse.xml)
+			if (!createdGuestserviceId) {
+				throw new Error(
+					'guestservice addobj did not return a new guestservice id',
+				)
+			}
+			createXml = setOrAddAttribute(
+				createXml,
+				'guestservice-id',
+				createdGuestserviceId,
+			)
+			// Refresh the planned WLAN body now that the real id is known.
+			requests[requests.length - 1] = {
+				action: 'addobj',
+				comp: wlanListComp,
+				xmlBody: redactSecretsInXmlText(createXml),
+			}
+		}
 		await sendWlanWrite(input.client, 'addobj', createXml)
 	} catch (error) {
 		if (error instanceof AccessNetworksUnleashedWlanWriteRefusedError)
 			throw error
 		writeError = error
+		if (createdGuestserviceId) {
+			await sendGuestserviceWrite(
+				input.client,
+				'delobj',
+				`<guestservice id='${escapeXmlAttribute(createdGuestserviceId)}'/>`,
+			).catch(() => undefined)
+			createdGuestserviceId = null
+		}
 	}
 
-	const {
-		after: afterList,
-		addedIds,
-		safety,
-	} = await verifyOrRollback({
-		client: input.client,
-		snapshot,
-		writeError,
-		expectation: {
-			allowedChangedIds: new Set(),
-			expectedRemovedIds: new Set(),
-			expectedAddedCount: 1,
-			check: (after, added) => {
-				const created = indexWlansById(after.entries).get(added[0] ?? '')
-				if (!created) return ['cloned WLAN could not be located after create']
-				const contains = wlanXmlContainsExpected({
-					expectedXml: createXml,
-					actualXml: created.rawXml,
-					ignoreRootAttributes: controllerOwnedRootAttributes,
-				})
-				return contains.ok
-					? []
-					: [
+	try {
+		const {
+			after: afterList,
+			addedIds,
+			safety,
+		} = await verifyOrRollback({
+			client: input.client,
+			snapshot,
+			writeError,
+			expectation: {
+				allowedChangedIds: new Set(),
+				expectedRemovedIds: new Set(),
+				expectedAddedCount: 1,
+				check: (after, added) => {
+					const created = indexWlansById(after.entries).get(added[0] ?? '')
+					if (!created) return ['cloned WLAN could not be located after create']
+					const contains = wlanXmlContainsExpected({
+						expectedXml: createXml,
+						actualXml: created.rawXml,
+						ignoreRootAttributes: controllerOwnedRootAttributes,
+					})
+					const problems: Array<string> = []
+					if (!contains.ok) {
+						problems.push(
 							`cloned WLAN id "${created.id}" does not match the create payload: ${contains.mismatch}`,
-						]
+						)
+					}
+					if (
+						createdGuestserviceId &&
+						created.attributes['guestservice-id'] !== createdGuestserviceId
+					) {
+						problems.push(
+							`cloned WLAN guestservice-id expected "${createdGuestserviceId}" but found "${created.attributes['guestservice-id'] ?? '(missing)'}"`,
+						)
+					}
+					if (
+						shouldCloneGuestservice &&
+						created.attributes['guestservice-id'] === sourceGuestserviceId
+					) {
+						problems.push(
+							`cloned WLAN still shares source guestservice-id "${sourceGuestserviceId}"`,
+						)
+					}
+					return problems
+				},
 			},
-		},
-	})
+		})
 
-	const created = indexWlansById(afterList.entries).get(addedIds[0] ?? '')
-	if (!created) {
-		throw new Error('Cloned WLAN missing after a successful safety check.')
-	}
-	return {
-		sourceId,
-		source,
-		created,
-		overridesApplied,
-		safety,
-		requestAction: 'addobj',
-		requestXml,
-		requests,
-		warnings,
-		dryRun: false,
+		const created = indexWlansById(afterList.entries).get(addedIds[0] ?? '')
+		if (!created) {
+			throw new Error('Cloned WLAN missing after a successful safety check.')
+		}
+		return {
+			sourceId,
+			source,
+			created,
+			overridesApplied,
+			safety,
+			requestAction: 'addobj',
+			requestXml: redactSecretsInXmlText(createXml),
+			requests,
+			warnings,
+			dryRun: false,
+		}
+	} catch (error) {
+		if (createdGuestserviceId) {
+			const after = await readWlanList(input.client).catch(() => null)
+			const stillReferenced = after?.entries.some(
+				(entry) =>
+					entry.attributes['guestservice-id'] === createdGuestserviceId,
+			)
+			if (!stillReferenced) {
+				await sendGuestserviceWrite(
+					input.client,
+					'delobj',
+					`<guestservice id='${escapeXmlAttribute(createdGuestserviceId)}'/>`,
+				).catch(() => undefined)
+			}
+		}
+		throw error
 	}
 }
 
@@ -1317,16 +1570,18 @@ export async function deleteWlanById(
 		)
 	}
 	const warnings: Array<string> = []
-	const guestServiceId = target.attributes['guestservice-id']
+	const guestServiceId = (target.attributes['guestservice-id'] ?? '').trim()
 	const sharers = snapshot.entries.filter(
 		(entry) =>
 			entry.id !== targetId &&
 			guestServiceId &&
 			entry.attributes['guestservice-id'] === guestServiceId,
 	)
+	const mayDeleteGuestservice =
+		guestServiceId !== '' && guestServiceId !== '0' && sharers.length === 0
 	if (sharers.length > 0) {
 		warnings.push(
-			`guestservice-id "${guestServiceId}" is shared with WLAN id(s) ${sharers.map((entry) => entry.id).join(', ')}; check guestservice-list after delete.`,
+			`guestservice-id "${guestServiceId}" is shared with WLAN id(s) ${sharers.map((entry) => entry.id).join(', ')}; delete will NOT remove that guestservice.`,
 		)
 	}
 
@@ -1335,6 +1590,13 @@ export async function deleteWlanById(
 	const requests: Array<WlanPlannedRequest> = [
 		{ action: 'delobj', comp: wlanListComp, xmlBody: requestXml },
 	]
+	if (mayDeleteGuestservice) {
+		requests.push({
+			action: 'delobj',
+			comp: guestserviceListComp,
+			xmlBody: `<guestservice id='${escapeXmlAttribute(guestServiceId)}'/>`,
+		})
+	}
 	if (input.dryRun === true) {
 		return {
 			id: targetId,
@@ -1356,7 +1618,7 @@ export async function deleteWlanById(
 			throw error
 		writeError = error
 	}
-	const { safety } = await verifyOrRollback({
+	const { after: afterList, safety } = await verifyOrRollback({
 		client: input.client,
 		snapshot,
 		writeError,
@@ -1366,6 +1628,34 @@ export async function deleteWlanById(
 			expectedAddedCount: 0,
 		},
 	})
+
+	// Never remove a guestservice still referenced by another WLAN. When this
+	// WLAN owned a dedicated guestservice, clean it up after a successful
+	// delete (aioruckus only deletes the wlansvc; orphaned guestservices
+	// otherwise accumulate). Cascade-on-WLAN-delete is unverified on 200.18.
+	if (mayDeleteGuestservice) {
+		const guestDelete = await deleteGuestserviceIfUnreferenced({
+			client: input.client,
+			guestserviceId: guestServiceId,
+			wlanEntries: afterList.entries,
+			warnings,
+		}).catch((error: unknown) => {
+			warnings.push(
+				`WLAN deleted but guestservice-id "${guestServiceId}" cleanup failed: ${errorText(error)}`,
+			)
+			return null
+		})
+		if (
+			guestDelete &&
+			!requests.some(
+				(request) =>
+					request.comp === guestserviceListComp && request.action === 'delobj',
+			)
+		) {
+			requests.push(guestDelete)
+		}
+	}
+
 	return {
 		id: targetId,
 		deleted: target,
