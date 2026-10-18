@@ -14,6 +14,7 @@ import {
 import {
 	assertRunningImageMatchesService,
 	buildPreservedConfigPlan,
+	mountsFromInspect,
 	parseCommitFromHealthBody,
 	pickOciRevision,
 	pickRepoDigest,
@@ -412,12 +413,17 @@ export function createNasContainerAdapter(input: {
 				'kody.nas-container-update.helper': '1',
 				'kody.nas-container-update.operation-id': input.operationId,
 			},
-			HostConfig: {
-				Binds: input.existing.HostConfig['Binds'],
-				NetworkMode: 'host',
-				RestartPolicy: { Name: 'no' },
-				Privileged: input.existing.HostConfig['Privileged'] === true,
-			},
+			HostConfig: (() => {
+				const mounts = mountsFromInspect(input.existing.Mounts)
+				return {
+					...(mounts.length > 0
+						? { Mounts: mounts }
+						: { Binds: input.existing.HostConfig['Binds'] }),
+					NetworkMode: 'host',
+					RestartPolicy: { Name: 'no' },
+					Privileged: input.existing.HostConfig['Privileged'] === true,
+				}
+			})(),
 			Entrypoint: ['node', '--import', './src/sentry-init.ts', 'index.ts'],
 			Cmd: [],
 		}

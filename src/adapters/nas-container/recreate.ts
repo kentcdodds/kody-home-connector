@@ -357,14 +357,19 @@ export async function recreateContainerWithRollback(input: {
 			)
 		}
 
-		if (input.keepPreviousOnSuccess !== false) {
-			await pruneOlderPreviousContainers({
-				docker: input.docker,
-				containerName: input.containerName,
-				keepName: prevName,
-			})
-		} else {
-			await input.docker.removeContainer(prevName, { force: true })
+		// Cleanup must not undo a healthy replacement.
+		try {
+			if (input.keepPreviousOnSuccess !== false) {
+				await pruneOlderPreviousContainers({
+					docker: input.docker,
+					containerName: input.containerName,
+					keepName: prevName,
+				})
+			} else {
+				await input.docker.removeContainer(prevName, { force: true })
+			}
+		} catch {
+			// best effort; the new container is already healthy
 		}
 
 		return {
