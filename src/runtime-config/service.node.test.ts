@@ -228,6 +228,17 @@ test('Unleashed and Island runtime settings round-trip through the store', async
 	await storage.close()
 })
 
+test('scan CIDR set_config rejects empty lists (use clear for autoscan)', async () => {
+	const { runtimeConfig, storage, disposeEnv } = await createService()
+	using _env = disposeEnv
+	await expect(
+		runtimeConfig.setIntegrationConfig('access_networks_unleashed', {
+			scanCidrs: [],
+		}),
+	).rejects.toThrow(/clear_config/)
+	await storage.close()
+})
+
 test('clear_config with fields: [] clears nothing', async () => {
 	const { config, runtimeConfig, storage, disposeEnv } = await createService()
 	using _env = disposeEnv

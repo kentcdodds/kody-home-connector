@@ -43,8 +43,18 @@ function parseInteger(value: unknown, definition: RuntimeSettingDefinition) {
 	return parsed
 }
 
-function parseStringList(value: unknown, field: string): Array<string> {
+function parseStringList(
+	value: unknown,
+	field: string,
+	options?: { allowEmpty?: boolean },
+): Array<string> {
 	if (Array.isArray(value)) {
+		if (value.length === 0) {
+			if (options?.allowEmpty) return []
+			throw new Error(
+				`${field} must not be empty. Call clear_config for that field to restore env/autoscan defaults.`,
+			)
+		}
 		return value.map((entry, index) => {
 			if (typeof entry !== 'string' || !entry.trim()) {
 				throw new Error(
@@ -55,10 +65,16 @@ function parseStringList(value: unknown, field: string): Array<string> {
 		})
 	}
 	if (typeof value === 'string') {
-		return value
+		const parsed = value
 			.split(',')
 			.map((entry) => entry.trim())
 			.filter(Boolean)
+		if (parsed.length === 0 && !options?.allowEmpty) {
+			throw new Error(
+				`${field} must not be empty. Call clear_config for that field to restore env/autoscan defaults.`,
+			)
+		}
+		return parsed
 	}
 	throw new Error(`${field} must be a string list or comma-separated string.`)
 }
@@ -106,8 +122,13 @@ export function validateRuntimeSettingValue(
 			return parseBoolean(rawValue, field)
 		case 'integer':
 			return parseInteger(rawValue, definition)
-		case 'string_list':
-			return parseStringList(rawValue, field)
+		case 'string_list': {
+			const allowEmpty =
+				definition.configField === 'pjlinkScanExtraHosts' ||
+				definition.configField === 'courtBlurayScanExtraHosts' ||
+				definition.configField === 'courtBlurayScanCidrs'
+			return parseStringList(rawValue, field, { allowEmpty })
+		}
 		case 'url': {
 			const url = parseUrl(rawValue, field)
 			if (

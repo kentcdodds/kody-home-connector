@@ -113,7 +113,7 @@ export const runtimeSettingDefinitions = [
 		envVar: 'ACCESS_NETWORKS_UNLEASHED_SCAN_CIDRS',
 		kind: 'string_list',
 		description:
-			'CIDR list for Unleashed controller discovery. Empty means derive private /24s.',
+			'CIDR list for Unleashed controller discovery. Use clear_config to restore derived private /24s.',
 	},
 	{
 		key: 'access_networks_unleashed.allow_insecure_tls',

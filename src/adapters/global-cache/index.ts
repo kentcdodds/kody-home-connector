@@ -43,19 +43,41 @@ export function createGlobalCacheAdapter(input: {
 	config: HomeConnectorConfig
 	commandClient?: GlobalCacheCommandClient
 }) {
-	const host = resolveGlobalCacheHost(input.config)
-	const port = resolveGlobalCachePort(input.config)
-	const commandClient =
-		input.commandClient ??
-		(input.config.mocksEnabled
+	let cachedClient: {
+		host: string
+		port: number
+		client: GlobalCacheCommandClient
+	} | null = null
+
+	function resolveEndpoint() {
+		return {
+			host: resolveGlobalCacheHost(input.config),
+			port: resolveGlobalCachePort(input.config),
+		}
+	}
+
+	function getCommandClient() {
+		if (input.commandClient) return input.commandClient
+		const { host, port } = resolveEndpoint()
+		if (
+			cachedClient &&
+			cachedClient.host === host &&
+			cachedClient.port === port
+		) {
+			return cachedClient.client
+		}
+		const client = input.config.mocksEnabled
 			? createMockGlobalCacheCommandClient()
-			: createTcpGlobalCacheCommandClient({ host, port }))
+			: createTcpGlobalCacheCommandClient({ host, port })
+		cachedClient = { host, port, client }
+		return client
+	}
 
 	async function sendCommand(inputCommand: {
 		command: string
 		isComplete: (line: string, lines: Array<string>) => boolean
 	}) {
-		const lines = await commandClient(inputCommand)
+		const lines = await getCommandClient()(inputCommand)
 		return lines.at(-1) ?? ''
 	}
 
@@ -72,6 +94,7 @@ export function createGlobalCacheAdapter(input: {
 
 	return {
 		getStatus(): GlobalCacheStatus {
+			const { host, port } = resolveEndpoint()
 			return {
 				host,
 				port,
@@ -111,7 +134,8 @@ export function createGlobalCacheAdapter(input: {
 			}
 		},
 		async getDevices() {
-			const lines = await commandClient({
+			const { host, port } = resolveEndpoint()
+			const lines = await getCommandClient()({
 				command: 'getdevices',
 				isComplete: (line) => line === 'endlistdevices',
 			})

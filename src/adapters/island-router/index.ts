@@ -194,12 +194,30 @@ export function createIslandRouterAdapter(input: {
 	commandRunner?: IslandRouterCommandRunner
 }) {
 	const { config } = input
-	let cachedRunner: IslandRouterCommandRunner | null = null
+	let cachedRunner: {
+		key: string
+		runner: IslandRouterCommandRunner
+	} | null = null
+
+	function runnerConfigKey() {
+		return [
+			config.islandRouterHost ?? '',
+			String(config.islandRouterPort),
+			config.islandRouterUsername ?? '',
+			config.islandRouterPrivateKeyPath ?? '',
+			config.islandRouterKnownHostsPath ?? '',
+			config.islandRouterHostFingerprint ?? '',
+			String(config.islandRouterCommandTimeoutMs),
+		].join('\0')
+	}
 
 	function getRunner() {
 		if (input.commandRunner) return input.commandRunner
-		cachedRunner ??= createIslandRouterSshCommandRunner(config)
-		return cachedRunner
+		const key = runnerConfigKey()
+		if (cachedRunner?.key === key) return cachedRunner.runner
+		const runner = createIslandRouterSshCommandRunner(config)
+		cachedRunner = { key, runner }
+		return runner
 	}
 
 	function getConfigStatus() {
