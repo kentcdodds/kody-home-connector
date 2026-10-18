@@ -21,30 +21,12 @@ exists (`stored > env > default`). Bootstrap-only env (`HOME_CONNECTOR_ID`, data
 key/secret, data path, volume mounts, listen port, public MCP base URL, SSH key
 file paths) stays in the start script.
 
-To smoke a PR / branch image **without moving prod `latest`**, use the existing
-manual path (publish only runs on `push` to `main` or `workflow_dispatch`;
-`latest` is enabled only when `github.ref == refs/heads/main`):
-
-1. GitHub → **Actions** → **🐳 Publish Home Connector** → **Run workflow**
-2. Branch: the PR head (e.g. `cursor/unleashed-wlan-addobj-semantics-faf5`)
-3. Optional `extra_tag`: `pr-78` (handy alias; still never touches `latest`)
-4. After the job finishes, note `sha-<7-char>` (and `pr-78` if set) in the job
-   summary
-
-On the NAS (`192.168.1.234`), from the directory with the start script:
+To smoke a PR without moving prod `latest` (currently `sha-f7134d6`), run
+**Publish Home Connector** → **Run workflow** on that branch, then:
 
 ```bash
-# Pull the PR build (example tags — use the ones the workflow printed)
 IMAGE=kentcdodds/kody-home-connector:sha-<short> ./start-kody-home-connector.sh
-# or, if you set extra_tag=pr-78:
-IMAGE=kentcdodds/kody-home-connector:pr-78 ./start-kody-home-connector.sh
-
-# Roll back to current prod after the live test:
-IMAGE=kentcdodds/kody-home-connector:latest ./start-kody-home-connector.sh
 ```
-
-Keep `HOST_DATA_PATH` / the SQLite volume unchanged so OAuth tokens and runtime
-config survive the image swap.
 
 ## Audiobook library mount (RW)
 
