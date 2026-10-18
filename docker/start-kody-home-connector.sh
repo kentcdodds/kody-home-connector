@@ -22,14 +22,15 @@ docker pull "${IMAGE}"
 docker stop "${CONTAINER_NAME}" >/dev/null 2>&1 || true
 docker rm "${CONTAINER_NAME}" >/dev/null 2>&1 || true
 
-# Araknis / Unleashed / Island / court / discovery knobs that used to live as
-# docker -e flags are now runtime config in SQLite under HOST_DATA_PATH.
-# Prefer MCP tools (araknis_set_config, access_networks_unleashed_set_config,
-# …) so changing them does not require editing this script or recreating the
-# container. Env vars still work as a fallback seed (precedence: stored >
-# env > default) but you should not need to add new -e lines for those
-# settings. Username/password are NEVER env vars — use /araknis-switch/setup
-# (or araknis_set_credentials), same pattern as Island PIN / Kasa.
+# Integration knobs (Araknis / Unleashed / Island / court / discovery / …) are
+# runtime config in SQLite under HOST_DATA_PATH. Prefer MCP *_set_config tools
+# so changing them does not require editing this script. Env still seeds when
+# no stored row exists (precedence: stored > env > default).
+#
+# Keep the Araknis -e seeds below until Kent has called araknis_set_config at
+# least once (self-signed TLS needs allowInsecureTls=true). After that they
+# can be removed. Username/password are NEVER env vars — use
+# /araknis-switch/setup (or araknis_set_credentials).
 #
 # Bootstrap-only env that must stay here: HOME_CONNECTOR_ID, data key/secret,
 # HOME_CONNECTOR_DATA_PATH, volume mounts (HOST_DATA_PATH, audiobook library),
@@ -40,6 +41,9 @@ docker run -d --name "${CONTAINER_NAME}" --network host --restart unless-stopped
 	-e "HOME_CONNECTOR_DATA_KEY=${HOME_CONNECTOR_DATA_KEY:-}" \
 	-e "HOME_CONNECTOR_DATA_PATH=/data/home-connector" \
 	-e "AUDIOBOOK_LIBRARY_PATH=${AUDIOBOOK_LIBRARY_PATH}" \
+	-e "ARAKNIS_SWITCH_BASE_URL=${ARAKNIS_SWITCH_BASE_URL:-https://192.168.0.50}" \
+	-e "ARAKNIS_SWITCH_ALLOW_INSECURE_TLS=${ARAKNIS_SWITCH_ALLOW_INSECURE_TLS:-true}" \
+	-e "ARAKNIS_SWITCH_SSH_ENABLED=${ARAKNIS_SWITCH_SSH_ENABLED:-false}" \
 	-v "${HOST_DATA_PATH}:/data/home-connector" \
 	-v "${HOST_AUDIOBOOK_LIBRARY_PATH}:${AUDIOBOOK_LIBRARY_PATH}" \
 	"${IMAGE}"

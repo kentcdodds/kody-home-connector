@@ -228,6 +228,21 @@ test('Unleashed and Island runtime settings round-trip through the store', async
 	await storage.close()
 })
 
+test('clear_config with fields: [] clears nothing', async () => {
+	const { config, runtimeConfig, storage, disposeEnv } = await createService()
+	using _env = disposeEnv
+	await runtimeConfig.setIntegrationConfig('araknis_switch', {
+		sshEnabled: true,
+	})
+	await runtimeConfig.clearIntegrationConfig('araknis_switch', [])
+	expect(config.araknisSwitchSshEnabled).toBe(true)
+	const snapshot = await runtimeConfig.getIntegrationConfig('araknis_switch')
+	expect(
+		snapshot.settings.find((setting) => setting.field === 'sshEnabled')?.source,
+	).toBe('stored')
+	await storage.close()
+})
+
 test('get_config never exposes a secret-shaped value when none are defined', async () => {
 	const { runtimeConfig, storage, disposeEnv } = await createService()
 	using _env = disposeEnv

@@ -254,7 +254,9 @@ export function createAudiobookAdapter(input: {
 	const fetchImpl = input.fetchImpl ?? fetch
 	const ffmpegPath = input.config.ffmpegPath
 	const libraryPath = input.config.audiobookLibraryPath
-	const importTimeoutMs = input.config.audiobookImportTimeoutMs
+	function importTimeoutMs() {
+		return input.config.audiobookImportTimeoutMs
+	}
 
 	async function checkFfmpegAvailable() {
 		if (input.probeFfmpeg) return await input.probeFfmpeg()
@@ -478,12 +480,12 @@ export function createAudiobookAdapter(input: {
 					coverPath: resolvedCoverPath,
 					title: request.title,
 				}),
-				timeoutMs: importTimeoutMs,
+				timeoutMs: importTimeoutMs(),
 			})
 			if (result.timedOut) {
 				throw createAudiobookError({
 					code: 'audiobook_ffmpeg_failed',
-					message: `ffmpeg timed out after ${importTimeoutMs}ms.`,
+					message: `ffmpeg timed out after ${String(importTimeoutMs())}ms.`,
 					filename: target.filename,
 				})
 			}

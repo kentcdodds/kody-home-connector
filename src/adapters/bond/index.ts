@@ -611,9 +611,13 @@ export function createBondAdapter(input: {
 	storage: HomeConnectorStorage
 }) {
 	const connectorId = input.config.homeConnectorId
-	const requestPaceMs = input.config.bondRequestPaceMs
-	const circuitBreakerCooldownMs = input.config.bondCircuitBreakerCooldownMs
 	const queueStates = new Map<string, BondQueueState>()
+	function requestPaceMs() {
+		return input.config.bondRequestPaceMs
+	}
+	function circuitBreakerCooldownMs() {
+		return input.config.bondCircuitBreakerCooldownMs
+	}
 	const stateReadCache = new Map<string, BondStateReadCacheEntry>()
 
 	function getQueueState(bridgeId: string) {
@@ -828,7 +832,7 @@ export function createBondAdapter(input: {
 					}),
 				)
 				const cooldownMs = getBondCircuitBreakerCooldownMs({
-					baseCooldownMs: circuitBreakerCooldownMs,
+					baseCooldownMs: circuitBreakerCooldownMs(),
 					consecutiveFailures,
 				})
 				const cooldownUntil = Date.now() + cooldownMs
@@ -863,7 +867,7 @@ export function createBondAdapter(input: {
 			}
 			throw error
 		} finally {
-			queueState.nextAvailableAt = Date.now() + requestPaceMs
+			queueState.nextAvailableAt = Date.now() + requestPaceMs()
 			releaseQueue()
 		}
 	}
@@ -1096,15 +1100,15 @@ export function createBondAdapter(input: {
 				inputStatus.limit == null
 					? 50
 					: Math.max(1, Math.min(200, Math.floor(inputStatus.limit)))
+			const paceMs = requestPaceMs()
+			const cooldownMs = circuitBreakerCooldownMs()
 			return {
 				health: await getBridgeHealthSnapshot(bridge),
 				config: {
-					requestPaceMs,
-					circuitBreakerCooldownMs,
+					requestPaceMs: paceMs,
+					circuitBreakerCooldownMs: cooldownMs,
 					maxCircuitBreakerCooldownMs:
-						circuitBreakerCooldownMs === 0
-							? 0
-							: maxBondCircuitBreakerCooldownMs,
+						cooldownMs === 0 ? 0 : maxBondCircuitBreakerCooldownMs,
 					coalescesInFlightStateReads: true,
 				},
 				queue: {

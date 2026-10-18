@@ -265,19 +265,41 @@ export function createRuntimeConfigService(input: {
 		fields?: Array<string>,
 	) {
 		const definitions = listRuntimeSettingDefinitions(integration)
-		const targets =
-			fields && fields.length > 0
-				? fields.map((field) => {
-						const definition = getRuntimeSettingDefinitionByField(
-							integration,
-							field,
-						)
-						if (!definition) {
-							throw new Error(`Unknown ${integration} config field "${field}".`)
-						}
-						return definition
-					})
-				: definitions
+		let targets: Array<RuntimeSettingDefinition>
+		if (fields === undefined) {
+			targets = definitions
+		} else if (fields.length === 0) {
+			// Explicit empty selection clears nothing (do not treat as "all").
+			targets = []
+		} else {
+			targets = fields.map((field) => {
+				const definition = getRuntimeSettingDefinitionByField(
+					integration,
+					field,
+				)
+				if (!definition) {
+					throw new Error(`Unknown ${integration} config field "${field}".`)
+				}
+				return definition
+			})
+		}
+
+		if (integration === 'araknis_switch' && targets.length > 0) {
+			const clearingBaseUrl = targets.some(
+				(definition) => definition.field === 'baseUrl',
+			)
+			const clearingAllowInsecureTls = targets.some(
+				(definition) => definition.field === 'allowInsecureTls',
+			)
+			assertAraknisBaseUrlPolicy({
+				baseUrl: clearingBaseUrl
+					? envBaseline.araknisSwitchBaseUrl
+					: config.araknisSwitchBaseUrl,
+				allowInsecureTls: clearingAllowInsecureTls
+					? envBaseline.araknisSwitchAllowInsecureTls
+					: config.araknisSwitchAllowInsecureTls,
+			})
+		}
 
 		await deleteStoredRuntimeSettingsForIntegration({
 			storage,

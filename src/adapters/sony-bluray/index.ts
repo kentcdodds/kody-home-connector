@@ -169,7 +169,9 @@ export function createSonyBlurayAdapter(input: {
 }) {
 	const { config, storage } = input
 	const connectorId = config.homeConnectorId
-	const timeoutMs = config.courtBlurayTimeoutMs
+	function timeoutMs() {
+		return config.courtBlurayTimeoutMs
+	}
 	const http = input.http ?? createSonyIrccHttpClient()
 	const wakeOnLan = input.wakeOnLan ?? sendWakeOnLan
 	const sleep = input.sleep ?? defaultSleep
@@ -265,7 +267,7 @@ export function createSonyBlurayAdapter(input: {
 		const probe = await probeSonyIrccHost({
 			host: target.host,
 			http,
-			timeoutMs,
+			timeoutMs: timeoutMs(),
 		})
 		const persistedAuth = target.player
 			? await getSonyIrccAuth({
@@ -355,7 +357,7 @@ export function createSonyBlurayAdapter(input: {
 				controlUrl: lastSent?.controlUrl ?? status.irccControlUrl,
 				authCookie: auth.authCookie ?? config.courtBlurayAuthCookie,
 				psk: auth.psk ?? config.courtBlurayPsk,
-				timeoutMs,
+				timeoutMs: timeoutMs(),
 			})
 			if (!lastSent.ok) {
 				const firstOk = press > 1
@@ -531,7 +533,7 @@ export function createSonyBlurayAdapter(input: {
 				const probe = await probeSonyIrccHost({
 					host,
 					http,
-					timeoutMs,
+					timeoutMs: timeoutMs(),
 				})
 				result.probes.push(
 					...probe.probedEndpoints.map((endpoint) => ({
@@ -675,7 +677,7 @@ export function createSonyBlurayAdapter(input: {
 				controlUrl: status.irccControlUrl,
 				authCookie: auth.authCookie ?? config.courtBlurayAuthCookie,
 				psk: auth.psk ?? config.courtBlurayPsk,
-				timeoutMs,
+				timeoutMs: timeoutMs(),
 			})
 			if (sent.ok) {
 				const after = status.connected ? status : await statusFromProbe()
