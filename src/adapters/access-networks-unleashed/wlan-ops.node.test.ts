@@ -912,6 +912,56 @@ test('clone of g (id 2) gets its own guestservice; deleting the clone does not r
 	])
 })
 
+test('failed clone cleans up owned guestservice after WLAN rollback', async () => {
+	const fake = createFakeController({ addobjCorruptsSibling: true })
+	const beforeGuests = new Set(
+		fake.guestservices().entries.map((entry) => entry.id),
+	)
+	await expect(
+		cloneWlanById({
+			client: fake.client,
+			sourceId: '2',
+			overrides: {
+				name: 'orphan-gs-test',
+				ssid: 'orphan-gs-test',
+				attributes: { 'enable-type': '1' },
+			},
+		}),
+	).rejects.toBeInstanceOf(AccessNetworksUnleashedWlanSafetyError)
+	const afterGuests = fake.guestservices().entries.map((entry) => entry.id)
+	expect(afterGuests.sort()).toEqual([...beforeGuests].sort())
+	expect(
+		fake.writes.some(
+			(write) =>
+				write.comp === 'guestservice-list' && write.action === 'delobj',
+		),
+	).toBe(true)
+})
+
+test('guestservice id still resolves when post-addobj reread fails', async () => {
+	const fake = createFakeController()
+	const original = fake.client.request.bind(fake.client)
+	let guestGets = 0
+	fake.client.request = async (request) => {
+		if (request.comp === 'guestservice-list' && request.action === 'getconf') {
+			guestGets += 1
+			// First getconf (pre-clone) succeeds; the post-addobj reread throws.
+			if (guestGets > 1) throw new Error('guestservice getconf failed')
+		}
+		return await original(request)
+	}
+	const created = await cloneWlanById({
+		client: fake.client,
+		sourceId: '2',
+		overrides: {
+			name: 'reread-fallback',
+			ssid: 'reread-fallback',
+			attributes: { 'enable-type': '1' },
+		},
+	})
+	expect(created.created!.attributes['guestservice-id']).toBe('10')
+})
+
 test('guestservice create id is resolved from before/after diff, not highest id in echo', async () => {
 	const fake = createFakeController()
 	const originalApplyGuest = fake.client.request.bind(fake.client)

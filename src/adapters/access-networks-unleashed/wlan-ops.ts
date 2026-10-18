@@ -395,20 +395,25 @@ function resolveCreatedGuestserviceId(input: {
 	return null
 }
 
-async function cleanupOrphanGuestservice(input: {
+/**
+ * Delete a guestservice created during this clone. Only call with an id that
+ * was absent from the pre-clone guestservice-list (`beforeIds`). Force-delete
+ * after WLAN rollback — reference-checked cleanup is wrong here because a
+ * half-applied clone WLAN still references the new guestservice and would
+ * block the delete, then clear the id so post-rollback cleanup never runs
+ * (Bugbot on PR #78).
+ */
+async function deleteOwnedGuestservice(input: {
 	client: AccessNetworksUnleashedClient
 	guestserviceId: string
-	warnings?: Array<string>
+	beforeIds: ReadonlySet<string>
 }): Promise<void> {
-	const wlanList = await readWlanList(input.client).catch(() => null)
-	if (!wlanList) return
-	const warnings = input.warnings ?? []
-	await deleteGuestserviceIfUnreferenced({
-		client: input.client,
-		guestserviceId: input.guestserviceId,
-		wlanEntries: wlanList.entries,
-		warnings,
-	}).catch(() => undefined)
+	if (input.beforeIds.has(input.guestserviceId)) return
+	await sendGuestserviceWrite(
+		input.client,
+		'delobj',
+		`<guestservice id='${escapeXmlAttribute(input.guestserviceId)}'/>`,
+	).catch(() => undefined)
 }
 
 /**
@@ -1450,11 +1455,18 @@ export async function cloneWlanById(
 				'addobj',
 				guestserviceCreateXml,
 			)
-			const afterGuests = await readGuestserviceList(input.client)
+			// Reread is preferred; if it fails, still resolve from the addobj
+			// response filtered by beforeIds (single new id).
+			let afterEntries: Array<GuestserviceEntry> = []
+			try {
+				afterEntries = (await readGuestserviceList(input.client)).entries
+			} catch {
+				afterEntries = []
+			}
 			createdGuestserviceId = resolveCreatedGuestserviceId({
 				beforeIds: guestserviceBeforeIds,
 				responseXml: guestResponse.xml,
-				afterEntries: afterGuests.entries,
+				afterEntries,
 			})
 			if (!createdGuestserviceId) {
 				throw new Error(
@@ -1478,16 +1490,8 @@ export async function cloneWlanById(
 		if (error instanceof AccessNetworksUnleashedWlanWriteRefusedError)
 			throw error
 		writeError = error
-		if (createdGuestserviceId) {
-			// Never delete without a reference check — a mis-resolved id must
-			// not remove a live guestservice still used by another WLAN.
-			await cleanupOrphanGuestservice({
-				client: input.client,
-				guestserviceId: createdGuestserviceId,
-				warnings,
-			})
-			createdGuestserviceId = null
-		}
+		// Do not delete the guestservice here: a half-applied WLAN may still
+		// reference it. Clean up after verifyOrRollback restores WLANs.
 	}
 
 	try {
@@ -1556,10 +1560,10 @@ export async function cloneWlanById(
 		}
 	} catch (error) {
 		if (createdGuestserviceId) {
-			await cleanupOrphanGuestservice({
+			await deleteOwnedGuestservice({
 				client: input.client,
 				guestserviceId: createdGuestserviceId,
-				warnings,
+				beforeIds: guestserviceBeforeIds,
 			})
 		}
 		throw error
