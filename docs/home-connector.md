@@ -942,11 +942,93 @@ otherwise disrupt local connectivity. Each call requires:
 - an operator reason of at least 20 characters
 - the exact confirmation phrase rejected for any other value
 
-Higher-level Unleashed flows (list APs, list clients, edit WLANs, block clients,
-restart APs, etc.) are intended to live in saved Kody packages that wrap
-`home_access_networks_unleashed_request` through `kody:runtime`. The home
-connector itself does not expose any typed Unleashed CLI or per-operation
-capabilities.
+Higher-level Unleashed flows (list APs, list clients, block clients, restart
+APs, etc.) are intended to live in saved Kody packages that wrap
+`home_access_networks_unleashed_request` through `kody:runtime`. WLAN config is
+the exception: it has typed, safety-wrapped tools because raw WLAN writes
+damaged the live controller twice.
+
+### WLAN tools and write semantics
+
+**WLAN writes are disabled by default.** `update_wlan`, `clone_wlan` and
+`delete_wlan` refuse before sending anything, and so do raw `addobj` / `updobj`
+/ `delobj` on `wlansvc-list`. They stay off until Kent sets
+`access_networks_unleashed_set_config { wlanWritesEnabled: true }` (env
+`ACCESS_NETWORKS_UNLEASHED_WLAN_WRITES_ENABLED`) for a supervised live
+validation. Turn it off again afterward.
+
+The raw request tool accepts `addobj` / `updobj` / `delobj` (sent to
+`_conf.jsp`). It refuses `setconf` on any `*-list` component by default, because
+on this firmware setconf there is positional: a full element replaces the first
+slot as sent, and `IS_PARTIAL` merges into the first slot. The only escape hatch
+is `allowDangerousPositionalListSetconf: true` plus the exact confirmation
+phrase documenting that you understand positional overwrite
+(`accessNetworksUnleashedDangerousListSetconfConfirmation`); for `wlansvc-list`
+that also requires `wlanWritesEnabled`.
+
+Clone builds its create payload the way aioruckus `do_clone_wlan` does. It
+starts from `getconf wlansvc-standard-template` and lays the source WLAN on top.
+The source wins, and template-only defaults are kept.
+
+If any PSK WLAN's passphrase can't be captured, writes are refused unless the
+caller passes `acceptUnrestorablePassphrases: true` with Kent's explicit
+acceptance. Rollback then restores only those WLANs' root attributes and never
+re-creates them. Clone always refuses when the _source_ passphrase is missing.
+
+- `access_networks_unleashed_list_wlans` / `_get_wlan` (read-only). They keep
+  working on a damaged list: entries with no `id` are reported under
+  `anomalies`, duplicate ids under `duplicateIds`. Secrets are redacted.
+- `access_networks_unleashed_check_wlan_write_readiness` (read-only). Reports
+  whether a write could be fully snapshotted and rolled back right now.
+- `access_networks_unleashed_update_wlan`: `updobj` + `id` + `IS_PARTIAL`.
+- `access_networks_unleashed_clone_wlan`: when the source has a
+  `guestservice-id`, first `addobj` a dedicated copy on `guestservice-list`
+  (Unleashed UI / 200.15 guest-WLAN create is two-step), then `addobj` the WLAN
+  with that new id. Never share the source guestservice (cascade-on-WLAN-delete
+  is unverified on 200.18; aioruckus only deletes the wlansvc).
+- `access_networks_unleashed_delete_wlan`: `delobj` the WLAN, then only `delobj`
+  its guestservice if no remaining WLAN still references that id.
+
+Each write tool accepts `dryRun: true`: it still takes the restorable snapshot
+and builds the exact object request(s), then returns them (secrets redacted)
+without sending. Dry-run works while `wlanWritesEnabled` is off and does not
+need the high-risk confirmation.
+
+These match how the Unleashed web UI and the existing clients talk to
+`_conf.jsp`: the CommScope `RUCKUS-Unleashed` Postman collection ("Create …
+wlan" uses `action='addobj' comp='wlansvc-list'`), aioruckus
+(`_add_wlan_template` → `addobj`, `_update_wlan_template` / `do_disable_wlan` →
+`updobj`, `do_delete_wlan` → `delobj`), and ruckus-go (`Create` / `Update` /
+`Delete`).
+
+`setconf` on `wlansvc-list` is refused by the typed WLAN tools always, and by
+the raw tool unless the dangerous positional escape hatch above is armed. On fw
+200.x a single-`<wlansvc>` setconf replaced the **first** WLAN in the list no
+matter what id the payload carried. That happened on Oct 12 2026 with `id="5"`
+(friendlyfamily became a duplicate id 5) and again on Oct 17 2026 with no id
+(friendlyfamily was replaced by an id-less `friendlyguest-2.4`).
+
+Every write:
+
+1. Takes a snapshot with `getconf DECRYPT_X="true"` so WPA/SAE passphrases can
+   be restored. With `DECRYPT_X="false"` the controller leaves them out. The
+   write is refused, with nothing sent, if the list is damaged, any PSK WLAN's
+   passphrase is missing, or two consecutive reads disagree.
+2. Sends exactly one id-targeted `updobj` / `delobj`, or one `addobj` with no
+   id.
+3. Re-reads the list leniently. **Any** anomaly triggers rollback _before_ an
+   error is raised. Anomalies include another WLAN changing, a missing,
+   duplicate or empty id, a failed re-read, or a failed write request. Rollback
+   uses `updobj` for changed WLANs, `delobj` for extras, and `addobj` for
+   missing WLANs (these may get a new id). Id-less or duplicate entries can't be
+   targeted by any action, so they are reported for manual repair instead.
+
+Secrets never go out through tool output. The raw request tool also redacts
+`passphrase`, `sae-passphrase`, `guest-pass`, and every `x-` attribute.
+
+`radioBand` maps to `wlan-bind-24g` / `wlan-bind-5g` / `wlan-bind-6g`. Unleashed
+has no `radio` attribute, so that name is refused. Clone and update attributes
+must already exist on the WLAN.
 
 ## Local persistence
 

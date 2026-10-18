@@ -36,6 +36,12 @@ export type HomeConnectorConfig = {
 	accessNetworksUnleashedAllowInsecureTls: boolean
 	accessNetworksUnleashedRequestTimeoutMs: number
 	/**
+	 * Hard gate for the typed WLAN write tools (update/clone/delete) and raw
+	 * addobj/updobj/delobj on wlansvc-list. Off by default until the
+	 * object-action semantics are validated live on the controller firmware.
+	 */
+	accessNetworksUnleashedWlanWritesEnabled?: boolean
+	/**
 	 * Kasa KLAP plug discovery probes UDP discovery ports and these CIDRs over
 	 * HTTP. When unset, the connector derives private `/24` networks from local
 	 * IPv4 interfaces. `KASA_SCAN_CIDRS` can override the derived list.
@@ -482,6 +488,8 @@ export function loadHomeConnectorConfig(): HomeConnectorConfig {
 		accessNetworksUnleashedScanCidrs,
 		accessNetworksUnleashedAllowInsecureTls:
 			process.env.ACCESS_NETWORKS_UNLEASHED_ALLOW_INSECURE_TLS === 'true',
+		accessNetworksUnleashedWlanWritesEnabled:
+			process.env.ACCESS_NETWORKS_UNLEASHED_WLAN_WRITES_ENABLED === 'true',
 		accessNetworksUnleashedRequestTimeoutMs:
 			Number.isFinite(accessNetworksUnleashedRequestTimeoutMs) &&
 			accessNetworksUnleashedRequestTimeoutMs >= 1000

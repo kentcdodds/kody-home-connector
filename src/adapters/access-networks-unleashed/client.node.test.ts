@@ -425,6 +425,47 @@ test('fw 200.18 curl ground-truth getconf wlansvc-list body is posted to _conf.j
 	expect(headers.get('X-CSRF-Token')).toBe('csrf-token')
 })
 
+test('WLAN snapshot getconf sends DECRYPT_X="true" and object actions post to _conf.jsp', async () => {
+	const config = createConfig()
+	const fetchMock = installFetch(loginHandler(), (href) => {
+		if (href.endsWith('/_conf.jsp')) {
+			return response(
+				'<ajax-response><response type="object" id="x"/></ajax-response>',
+			)
+		}
+		return null
+	})
+	const client = createAccessNetworksUnleashedAjaxClient({
+		config,
+		controller: createController(),
+	})
+	await client.request({
+		action: 'getconf',
+		comp: 'wlansvc-list',
+		xmlBody: '',
+		updater: 'wlansvc-list.0.5',
+		decryptSecrets: true,
+	})
+	for (const action of ['addobj', 'updobj', 'delobj'] as const) {
+		await client.request({
+			action,
+			comp: 'wlansvc-list',
+			xmlBody:
+				action === 'addobj' ? "<wlansvc name='t'/>" : "<wlansvc id='9'/>",
+			updater: `wlansvc-list.${action}`,
+		})
+	}
+	const bodies = fetchMock.mock.calls
+		.filter(([url]) => String(url).endsWith('/_conf.jsp'))
+		.map(([, init]) => String(init?.body ?? ''))
+	expect(bodies).toEqual([
+		'<ajax-request action="getconf" DECRYPT_X="true" updater="wlansvc-list.0.5" comp="wlansvc-list"/>',
+		'<ajax-request action="addobj" comp="wlansvc-list" updater="wlansvc-list.addobj"><wlansvc name=\'t\'/></ajax-request>',
+		'<ajax-request action="updobj" comp="wlansvc-list" updater="wlansvc-list.updobj"><wlansvc id=\'9\'/></ajax-request>',
+		'<ajax-request action="delobj" comp="wlansvc-list" updater="wlansvc-list.delobj"><wlansvc id=\'9\'/></ajax-request>',
+	])
+})
+
 test('empty AJAX response error includes status and content metadata without body values', async () => {
 	const config = createConfig()
 	installFetch(loginHandler(), (href) => {

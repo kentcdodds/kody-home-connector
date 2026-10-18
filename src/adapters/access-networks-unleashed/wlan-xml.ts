@@ -50,33 +50,77 @@ function escapeReplacementString(value: string) {
 	return value.replace(/\$/g, '$$$$')
 }
 
+/** A `<wlansvc>` that could not be addressed by id (missing or blank id). */
+export type WlanListAnomaly = {
+	/** Zero-based position in wlansvc-list (diagnostic only; never a write target). */
+	index: number
+	kind: 'missing-id'
+	name: string | null
+	ssid: string | null
+	rawXml: string
+}
+
+export type ParsedWlanList = {
+	/** Entries that carry an id, in list order. */
+	entries: Array<WlanSvcEntry>
+	/** Entries the controller returned without an id (e.g. Oct 17 overwrite). */
+	anomalies: Array<WlanListAnomaly>
+	/** Ids that appear more than once (e.g. Oct 12 overwrite). */
+	duplicateIds: Array<string>
+}
+
+const wlansvcElementRegex =
+	/<wlansvc(?=[\s>/])(?<attrs>[^>]*?)\/>|<wlansvc(?=[\s>/])(?<openAttrs>[^>]*)>(?<body>[\s\S]*?)<\/wlansvc>/gi
+
 /**
- * Extract every top-level `<wlansvc>...</wlansvc>` (or self-closing) element.
- * Nested tags inside a wlansvc are preserved; nested wlansvc is not expected.
+ * Lenient parse of every top-level `<wlansvc>` element. Never throws on
+ * content: id-less entries are reported as anomalies instead, so reads keep
+ * working and post-write checks can trigger rollback instead of aborting.
  */
-export function extractWlansvcEntries(xml: string): Array<WlanSvcEntry> {
+export function parseWlansvcList(xml: string): ParsedWlanList {
 	const entries: Array<WlanSvcEntry> = []
-	const elementRegex =
-		/<wlansvc(?=[\s>/])(?<attrs>[^>]*)\/>|<wlansvc(?=[\s>/])(?<openAttrs>[^>]*)>(?<body>[\s\S]*?)<\/wlansvc>/gi
-	for (const match of xml.matchAll(elementRegex)) {
+	const anomalies: Array<WlanListAnomaly> = []
+	let index = 0
+	for (const match of xml.matchAll(wlansvcElementRegex)) {
 		const rawXml = match[0]
 		const attrText = match.groups?.attrs ?? match.groups?.openAttrs ?? ''
 		const attributes = parseAttributes(attrText)
 		const id = attributes['id']?.trim() ?? ''
 		if (!id) {
-			throw new Error(
-				'wlansvc-list contains a <wlansvc> without an id attribute. Refusing to snapshot or mutate an incomplete WLAN list.',
-			)
+			anomalies.push({
+				index,
+				kind: 'missing-id',
+				name: attributes['name'] ?? null,
+				ssid: attributes['ssid'] ?? null,
+				rawXml,
+			})
+		} else {
+			entries.push({
+				id,
+				name: attributes['name'] ?? null,
+				ssid: attributes['ssid'] ?? null,
+				attributes,
+				rawXml,
+			})
 		}
-		entries.push({
-			id,
-			name: attributes['name'] ?? null,
-			ssid: attributes['ssid'] ?? null,
-			attributes,
-			rawXml,
-		})
+		index += 1
 	}
-	return entries
+	return { entries, anomalies, duplicateIds: findDuplicateIds(entries) }
+}
+
+/**
+ * Strict variant: throws when any `<wlansvc>` lacks an id. Kept for callers
+ * that must never operate on an incomplete list; WLAN ops use
+ * {@link parseWlansvcList} so they can report and roll back instead.
+ */
+export function extractWlansvcEntries(xml: string): Array<WlanSvcEntry> {
+	const parsed = parseWlansvcList(xml)
+	if (parsed.anomalies.length > 0) {
+		throw new Error(
+			'wlansvc-list contains a <wlansvc> without an id attribute. Refusing to snapshot or mutate an incomplete WLAN list.',
+		)
+	}
+	return parsed.entries
 }
 
 /** Allow only plain Unleashed attribute names (no markup injection). */
@@ -277,27 +321,295 @@ export function expectPatchedWlanXml(
 const secretAttributeNames = new Set([
 	'passphrase',
 	'sae-passphrase',
-	'x-passphrase',
-	'x-sae-passphrase',
 	'guest-pass',
+	'psk',
+	'key',
+	'wep-key',
+	'secret',
+	'shared-secret',
+	'radius-secret',
 ])
+
+/**
+ * True for attribute names that carry Wi-Fi / portal secrets. Every `x-`
+ * attribute is the controller's obfuscated twin of a secret (aioruckus:
+ * "x-psk" pairs with "psk"), so those are always treated as secret.
+ */
+export function isSecretWlanAttributeName(name: string): boolean {
+	const lower = name.toLowerCase()
+	return lower.startsWith('x-') || secretAttributeNames.has(lower)
+}
+
+const anyAttributeRegex = /(\s)([:\w-]+)(\s*=\s*)(["'])(.*?)\4/gs
+
+/**
+ * Replace the value of every secret attribute anywhere in an XML string
+ * (root and children). Empty values stay empty so "no secret" is still
+ * distinguishable from "secret present" in diagnostics.
+ */
+export function redactSecretsInXmlText(xml: string): string {
+	const redactedAttrs = xml.replace(
+		anyAttributeRegex,
+		(
+			match,
+			space: string,
+			name: string,
+			eq: string,
+			quote: string,
+			value: string,
+		) => {
+			if (!isSecretWlanAttributeName(name)) return match
+			const replacement = value.length === 0 ? '' : '[redacted]'
+			return `${space}${name}${eq}${quote}${replacement}${quote}`
+		},
+	)
+	// Also redact element-text secrets (rare on Unleashed; seen in other AJAX).
+	return redactedAttrs.replace(
+		/<(passphrase|sae-passphrase|guest-pass|psk|shared-secret|radius-secret|secret)\b([^>]*)>([\s\S]*?)<\/\1>/gi,
+		(_match, name: string, attrs: string, value: string) => {
+			const replacement = value.length === 0 ? '' : '[redacted]'
+			return `<${name}${attrs}>${replacement}</${name}>`
+		},
+	)
+}
 
 /** Redact Wi-Fi secrets from tool-facing WLAN payloads. */
 export function redactWlanSecrets(entry: WlanSvcEntry): WlanSvcEntry {
-	const attributes = { ...entry.attributes }
-	for (const name of secretAttributeNames) {
-		if (name in attributes) attributes[name] = '[redacted]'
-	}
-	let rawXml = entry.rawXml
-	for (const name of secretAttributeNames) {
-		const pattern = new RegExp(`(\\s${name}\\s*=\\s*)(["'])(.*?)\\2`, 'gi')
-		rawXml = rawXml.replace(pattern, `$1$2[redacted]$2`)
+	const attributes: Record<string, string> = {}
+	for (const [name, value] of Object.entries(entry.attributes)) {
+		attributes[name] =
+			isSecretWlanAttributeName(name) && value.length > 0 ? '[redacted]' : value
 	}
 	return {
 		...entry,
 		attributes,
-		rawXml,
+		rawXml: redactSecretsInXmlText(entry.rawXml),
 	}
+}
+
+/** Redact secrets in a root-attribute map (for tool output). */
+export function redactSecretAttributes(
+	attributes: Record<string, string>,
+): Record<string, string> {
+	const result: Record<string, string> = {}
+	for (const [name, value] of Object.entries(attributes)) {
+		result[name] =
+			isSecretWlanAttributeName(name) && value.length > 0 ? '[redacted]' : value
+	}
+	return result
+}
+
+/** Remove the named attributes from the root element's open tag only. */
+export function removeRootAttributes(
+	elementXml: string,
+	names: ReadonlyArray<string>,
+): string {
+	const openTagMatch = /^<(\w[\w-]*)([^>]*?)(\/?)>/i.exec(elementXml)
+	if (!openTagMatch) return elementXml
+	const tagName = openTagMatch[1] ?? ''
+	let attributes = openTagMatch[2] ?? ''
+	for (const name of names) {
+		const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+		attributes = attributes.replace(
+			new RegExp(`\\s+${escaped}\\s*=\\s*(["'])(.*?)\\1`, 'gi'),
+			'',
+		)
+	}
+	return `<${tagName}${attributes}${openTagMatch[3] ?? ''}>${elementXml.slice(openTagMatch[0].length)}`
+}
+
+type CanonicalElement = {
+	attributes: Record<string, string>
+	children: Record<string, Array<CanonicalElement>>
+}
+
+function parseCanonicalElement(xml: string): CanonicalElement | null {
+	// Minimal recursive element parser (attribute values never contain '<').
+	const tagRegex = /<(\/?)([\w:-]+)([^>]*?)(\/?)>/g
+	const stack: Array<{ name: string; element: CanonicalElement }> = []
+	let root: CanonicalElement | null = null
+	for (const match of xml.matchAll(tagRegex)) {
+		const closing = match[1] === '/'
+		const name = match[2] ?? ''
+		const selfClosing = match[4] === '/'
+		if (closing) {
+			stack.pop()
+			continue
+		}
+		const element: CanonicalElement = {
+			attributes: parseAttributes(match[3] ?? ''),
+			children: {},
+		}
+		const parent = stack[stack.length - 1]
+		if (parent) {
+			const list = parent.element.children[name] ?? []
+			list.push(element)
+			parent.element.children[name] = list
+		} else if (!root) {
+			root = element
+		}
+		if (!selfClosing) stack.push({ name, element })
+	}
+	return root
+}
+
+function stableSerialize(
+	element: CanonicalElement,
+	ignore: (
+		name: string,
+		depth: number,
+		attrs: Record<string, string>,
+	) => boolean,
+	depth = 0,
+): string {
+	const attrs = Object.keys(element.attributes)
+		.filter((name) => !ignore(name, depth, element.attributes))
+		.sort()
+		.map((name) => `${name}=${JSON.stringify(element.attributes[name])}`)
+	const children = Object.keys(element.children)
+		.sort()
+		.map(
+			(name) =>
+				`${name}[${(element.children[name] ?? [])
+					.map((child) => stableSerialize(child, ignore, depth + 1))
+					.join(',')}]`,
+		)
+	return `{${attrs.join(' ')}|${children.join(' ')}}`
+}
+
+/**
+ * Order-insensitive fingerprint of a `<wlansvc>` element (root attributes +
+ * child elements). `x-` obfuscated secret twins are ignored because their
+ * encoding is not guaranteed stable across reads; the plaintext secret is
+ * compared instead. `ignoreRootAttributes` drops controller bookkeeping such
+ * as `id` / `create-time` when comparing a re-created object.
+ */
+export function canonicalWlanFingerprint(
+	elementXml: string,
+	options?: { ignoreRootAttributes?: ReadonlyArray<string> },
+): string {
+	const element = parseCanonicalElement(elementXml)
+	if (!element) return elementXml
+	const ignoredRoot = new Set(
+		(options?.ignoreRootAttributes ?? []).map((name) => name.toLowerCase()),
+	)
+	return stableSerialize(element, (name, depth, attrs) => {
+		const lower = name.toLowerCase()
+		if (lower.startsWith('x-')) {
+			// Ignore the obfuscated twin only when the plaintext twin is also
+			// present (compared instead). If x-passphrase is the only captured
+			// secret, keep it in the fingerprint so passphrase changes are
+			// detected (Devin review on PR #78).
+			const twin = lower.slice(2)
+			const hasPlaintext = Object.keys(attrs).some(
+				(key) => key.toLowerCase() === twin,
+			)
+			return hasPlaintext
+		}
+		return depth === 0 && ignoredRoot.has(lower)
+	})
+}
+
+/** Attributes of the first direct child element named `childName`. */
+export function getChildElementAttributes(
+	elementXml: string,
+	childName: string,
+): Record<string, string> | null {
+	const element = parseCanonicalElement(elementXml)
+	const child = element?.children[childName]?.[0]
+	return child ? { ...child.attributes } : null
+}
+
+/**
+ * True when every attribute (root and child elements) in `expectedXml` has
+ * the same value in `actualXml`. Extra attributes on `actual` (controller
+ * defaults added on create) are allowed. `x-` twins are ignored.
+ */
+export function wlanXmlContainsExpected(input: {
+	expectedXml: string
+	actualXml: string
+	ignoreRootAttributes?: ReadonlyArray<string>
+}): { ok: true } | { ok: false; mismatch: string } {
+	const expected = parseCanonicalElement(input.expectedXml)
+	const actual = parseCanonicalElement(input.actualXml)
+	if (!expected || !actual) return { ok: false, mismatch: 'unparseable XML' }
+	const ignoredRoot = new Set(
+		(input.ignoreRootAttributes ?? []).map((name) => name.toLowerCase()),
+	)
+	function compare(
+		exp: CanonicalElement,
+		act: CanonicalElement,
+		path: string,
+		depth: number,
+	): string | null {
+		for (const [name, value] of Object.entries(exp.attributes)) {
+			const lower = name.toLowerCase()
+			if (lower.startsWith('x-')) continue
+			if (depth === 0 && ignoredRoot.has(lower)) continue
+			if (act.attributes[name] !== value) {
+				// Never echo secret values into mismatch text.
+				return isSecretWlanAttributeName(name)
+					? `${path}@${name} differs`
+					: `${path}@${name} expected "${value}" but found "${act.attributes[name] ?? '(missing)'}"`
+			}
+		}
+		for (const [childName, children] of Object.entries(exp.children)) {
+			const actualChildren = act.children[childName] ?? []
+			for (const [childIndex, child] of children.entries()) {
+				const actualChild = actualChildren[childIndex]
+				if (!actualChild) return `${path}/${childName} is missing`
+				const nested = compare(
+					child,
+					actualChild,
+					`${path}/${childName}`,
+					depth + 1,
+				)
+				if (nested) return nested
+			}
+		}
+		return null
+	}
+	const mismatch = compare(expected, actual, 'wlansvc', 0)
+	return mismatch ? { ok: false, mismatch } : { ok: true }
+}
+
+/**
+ * Explain why an entry's snapshot could not restore its secrets, or return
+ * an empty list when it can. A WPA2/WPA3 PSK WLAN must carry its passphrase
+ * (plaintext or `x-` twin) in the snapshot; getconf with DECRYPT_X="false"
+ * omits it on Unleashed 200.x (observed Oct 17 2026), which is why the
+ * friendlyfamily backup had no passphrase.
+ */
+export function findUnrestorableSecrets(entry: WlanSvcEntry): Array<string> {
+	const encryption = (entry.attributes['encryption'] ?? 'none').toLowerCase()
+	const authentication = (
+		entry.attributes['authentication'] ?? ''
+	).toLowerCase()
+	if (encryption === 'none' || encryption === '' || encryption === 'owe') {
+		return []
+	}
+	if (/802\.1x|eap/.test(authentication)) return []
+	const wpa = getChildElementAttributes(entry.rawXml, 'wpa')
+	if (!wpa) return [`encryption "${encryption}" but no <wpa> element`]
+	const has = (name: string) =>
+		Boolean(wpa[name]?.length) || Boolean(wpa[`x-${name}`]?.length)
+	const problems: Array<string> = []
+	if (
+		(encryption === 'wpa2' ||
+			encryption === 'wpa23-mixed' ||
+			encryption === 'wpa-mixed' ||
+			encryption === 'wpa') &&
+		!has('passphrase')
+	) {
+		problems.push('WPA passphrase missing from snapshot')
+	}
+	if (
+		(encryption === 'wpa3' || encryption === 'wpa23-mixed') &&
+		!has('sae-passphrase')
+	) {
+		problems.push('SAE passphrase missing from snapshot')
+	}
+	return problems
 }
 
 /**
