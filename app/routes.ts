@@ -10,6 +10,8 @@ export const routes = route({
 	islandRouterStatus: get('/island-router/status'),
 	islandRouterApiStatus: get('/island-router-api/status'),
 	islandRouterApiSetup: '/island-router-api/setup',
+	araknisSwitchStatus: get('/araknis-switch/status'),
+	araknisSwitchSetup: '/araknis-switch/setup',
 	health: get('/health'),
 	rokuStatus: '/roku/status',
 	rokuSetup: get('/roku/setup'),

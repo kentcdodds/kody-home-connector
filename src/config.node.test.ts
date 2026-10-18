@@ -399,6 +399,52 @@ test('island router SSH env vars honor explicit port, fingerprint, and timeout',
 	})
 })
 
+test('Araknis switch env vars honor defaults and explicit overrides', () => {
+	{
+		using _env = createTemporaryEnv({
+			...requiredConfigEnv,
+			ARAKNIS_SWITCH_BASE_URL: undefined,
+			ARAKNIS_SWITCH_ALLOW_INSECURE_TLS: undefined,
+			ARAKNIS_SWITCH_REQUEST_TIMEOUT_MS: undefined,
+			ARAKNIS_SWITCH_SSH_ENABLED: undefined,
+			ARAKNIS_SWITCH_SSH_PORT: undefined,
+		})
+
+		expect(loadHomeConnectorConfig()).toMatchObject({
+			araknisSwitchBaseUrl: 'https://192.168.0.50',
+			araknisSwitchAllowInsecureTls: false,
+			araknisSwitchRequestTimeoutMs: 8000,
+			araknisSwitchSshEnabled: false,
+			araknisSwitchSshPort: 22,
+		})
+		expect(loadHomeConnectorConfig()).not.toHaveProperty(
+			'araknisSwitchUsername',
+		)
+		expect(loadHomeConnectorConfig()).not.toHaveProperty(
+			'araknisSwitchPassword',
+		)
+	}
+
+	{
+		using _env = createTemporaryEnv({
+			...requiredConfigEnv,
+			ARAKNIS_SWITCH_BASE_URL: 'https://192.168.0.50/',
+			ARAKNIS_SWITCH_ALLOW_INSECURE_TLS: 'true',
+			ARAKNIS_SWITCH_REQUEST_TIMEOUT_MS: '12000',
+			ARAKNIS_SWITCH_SSH_ENABLED: 'true',
+			ARAKNIS_SWITCH_SSH_PORT: '2222',
+		})
+
+		expect(loadHomeConnectorConfig()).toMatchObject({
+			araknisSwitchBaseUrl: 'https://192.168.0.50',
+			araknisSwitchAllowInsecureTls: true,
+			araknisSwitchRequestTimeoutMs: 12000,
+			araknisSwitchSshEnabled: true,
+			araknisSwitchSshPort: 2222,
+		})
+	}
+})
+
 test('Access Networks Unleashed TLS and timeout env vars honor safe defaults and explicit overrides', () => {
 	{
 		using _env = createTemporaryEnv({
