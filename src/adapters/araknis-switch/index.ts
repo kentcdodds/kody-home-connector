@@ -180,12 +180,42 @@ export function createAraknisSwitchAdapter(input: {
 					client.getRegistry(),
 					client.getDot1dBaseConfig(),
 				])
-			return parseAraknisSystemInfo({
+			const results = [system1213, systemMisc, registry, dot1dBase]
+			if (results.every((result) => result.status === 'rejected')) {
+				const first = results[0]
+				throw first.status === 'rejected'
+					? first.reason
+					: new Error('Araknis switch system info reads all failed.')
+			}
+			const authFailure = results.find(
+				(result) =>
+					result.status === 'rejected' &&
+					result.reason instanceof AraknisSwitchAuthError,
+			)
+			if (authFailure && authFailure.status === 'rejected') {
+				throw authFailure.reason
+			}
+			const system = parseAraknisSystemInfo({
 				system1213: system1213.status === 'fulfilled' ? system1213.value : null,
 				systemMisc: systemMisc.status === 'fulfilled' ? systemMisc.value : null,
 				registry: registry.status === 'fulfilled' ? registry.value : null,
 				dot1dBase: dot1dBase.status === 'fulfilled' ? dot1dBase.value : null,
 			})
+			const hasUsefulField = Boolean(
+				system.sysName ||
+				system.sysDescr ||
+				system.hostname ||
+				system.baseBridgeAddress ||
+				system.machineModel ||
+				system.burnedInMacAddress ||
+				system.baseNumPorts != null,
+			)
+			if (!hasUsefulField) {
+				throw new Error(
+					'Araknis switch system info reads returned no usable fields.',
+				)
+			}
+			return system
 		})
 	}
 
@@ -329,8 +359,8 @@ export function createAraknisSwitchAdapter(input: {
 		async authenticate() {
 			return await withAuthRecording(async () => {
 				const client = await getClient()
+				// Force a fresh OpEN session; subsequent tools reuse the cookie.
 				await client.login()
-				// Keep the session cookie warm for subsequent reads (no logout).
 				return getConfigStatus()
 			})
 		},
@@ -376,12 +406,16 @@ export function createAraknisSwitchAdapter(input: {
 			let poePortCount = 0
 			let system = emptyAraknisSystemInfo()
 
+			// Reuse an existing OpEN session when present (keepalive). Only force
+			// a fresh login via araknis_authenticate.
 			try {
-				await client.login()
+				await client.getDot1dBaseConfig()
 				loginOk = true
 				await recordAuthSuccess()
 			} catch (error) {
-				await recordAuthFailure(error)
+				if (error instanceof AraknisSwitchAuthError) {
+					await recordAuthFailure(error)
+				}
 				errors.push(errorMessage(error, 'Araknis switch login failed.'))
 				return {
 					config: await getConfigStatus(),
@@ -407,13 +441,11 @@ export function createAraknisSwitchAdapter(input: {
 
 			try {
 				system = await getSystemInfo()
-				systemReadable = Boolean(
-					system.sysName ||
-					system.hostname ||
-					system.baseBridgeAddress ||
-					system.machineModel,
-				)
+				systemReadable = true
 			} catch (error) {
+				if (error instanceof AraknisSwitchAuthError) {
+					await recordAuthFailure(error)
+				}
 				errors.push(errorMessage(error, 'Failed to read system info.'))
 			}
 
@@ -441,10 +473,6 @@ export function createAraknisSwitchAdapter(input: {
 			lldpSource = lldp.source
 			lldpReadable = lldp.neighbors.length > 0 || lldp.source !== 'unavailable'
 			errors.push(...lldp.errors)
-
-			// Intentionally keep the OpEN session cookie for subsequent tools
-			// (keepalive). Callers that need an explicit re-login can use
-			// araknis_authenticate.
 
 			return {
 				config: await getConfigStatus(),

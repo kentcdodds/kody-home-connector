@@ -183,3 +183,26 @@ test('parseAraknisPoePayload and CLI parser read PoE status', () => {
 	expect(cliPoe.map((port) => port.port)).toEqual(['0/5', '0/6'])
 	expect(cliPoe[0]?.powerWatts).toBe(12.4)
 })
+
+test('tagged-only participation does not invent an untagged PVID', () => {
+	const ports = parseAraknisInterfacesPayload({
+		interfaces: [
+			{
+				interface: '0/20',
+				description: 'tagged-only',
+				adminMode: 'enabled',
+				linkState: 'up',
+				pvId: 20,
+				participation: [20],
+				tagging: [20],
+			},
+		],
+	})
+	expect(ports[0]).toMatchObject({
+		port: '0/20',
+		pvid: 20,
+		taggedVlans: [20],
+		untaggedVlans: [],
+		switchportMode: 'trunk',
+	})
+})

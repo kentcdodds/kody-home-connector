@@ -301,7 +301,12 @@ export function parseAraknisInterfaceMembership(
 		untaggedVlans = participationVlans.filter(
 			(vlanId) => !taggedFromArray.includes(vlanId),
 		)
-		if (untaggedVlans.length === 0 && pvid != null) {
+		// Only infer PVID as untagged when it is not already explicitly tagged.
+		if (
+			untaggedVlans.length === 0 &&
+			pvid != null &&
+			!taggedFromArray.includes(pvid)
+		) {
 			untaggedVlans = [pvid]
 		}
 	} else if (typeof taggingRaw === 'string') {

@@ -72,6 +72,7 @@ export function createAraknisSwitchOpenClient(input: {
 	const username = credentials.username
 	const password = credentials.password
 	const session: SessionState = { sidCookie: null }
+	let loginPromise: Promise<void> | null = null
 
 	async function rawFetch(path: string, init?: RequestInit) {
 		const url = `${baseUrl}${path.startsWith('/') ? path : `/${path}`}`
@@ -111,18 +112,16 @@ export function createAraknisSwitchOpenClient(input: {
 			try {
 				payload = JSON.parse(text)
 			} catch {
-				payload = { rawText: text.slice(0, 500) }
+				throw new AraknisSwitchRequestError(
+					`Araknis switch ${path} returned non-JSON body (HTTP ${String(response.status)}).`,
+					{ path, statusCode: response.status },
+				)
 			}
 		}
 		return { response, payload, text }
 	}
 
-	async function ensureLogin() {
-		if (session.sidCookie) return
-		await login()
-	}
-
-	async function login() {
+	async function performLogin() {
 		const body = new URLSearchParams({
 			username,
 			password,
@@ -141,6 +140,7 @@ export function createAraknisSwitchOpenClient(input: {
 		const sidValue =
 			extractSidFromSetCookie(setCookie) ?? extractSidFromPayload(payload)
 		if (!response.ok || !sidValue) {
+			session.sidCookie = null
 			throw new AraknisSwitchAuthError(
 				'Araknis switch login failed. Check the credentials stored via /araknis-switch/setup (or araknis_set_credentials) and that HTTPS management is reachable from the connector host.',
 				{ path: '/open/v1/login' },
@@ -148,6 +148,25 @@ export function createAraknisSwitchOpenClient(input: {
 		}
 		const cookieName = baseUrl.startsWith('https:') ? 'SIDSSL' : 'SID'
 		session.sidCookie = `${cookieName}=${sidValue}`
+	}
+
+	async function ensureLogin() {
+		if (session.sidCookie) return
+		if (loginPromise) {
+			await loginPromise
+			return
+		}
+		loginPromise = performLogin().finally(() => {
+			loginPromise = null
+		})
+		await loginPromise
+	}
+
+	async function login() {
+		// Force a fresh session (used by araknis_authenticate).
+		session.sidCookie = null
+		loginPromise = null
+		await ensureLogin()
 	}
 
 	async function logout() {
@@ -199,6 +218,13 @@ export function createAraknisSwitchOpenClient(input: {
 			session.sidCookie = null
 			await ensureLogin()
 			const retry = await readJson(path, { method: 'GET' })
+			if (retry.response.status === 401 || retry.response.status === 403) {
+				session.sidCookie = null
+				throw new AraknisSwitchAuthError(
+					`Araknis switch GET ${path} still unauthorized after re-login (HTTP ${String(retry.response.status)}).`,
+					{ path },
+				)
+			}
 			if (!retry.response.ok) {
 				throw new AraknisSwitchRequestError(
 					`Araknis switch GET ${path} failed with HTTP ${retry.response.status}.`,
@@ -216,6 +242,54 @@ export function createAraknisSwitchOpenClient(input: {
 		}
 		assertOpenPayloadOk(path, first.payload)
 		return first.payload
+	}
+
+	function assertInventoryCollection(
+		path: string,
+		payload: unknown,
+		keys: Array<string>,
+	): Array<Record<string, unknown>> {
+		if (Array.isArray(payload)) {
+			return payload as Array<Record<string, unknown>>
+		}
+		if (!isRecord(payload)) {
+			throw new AraknisSwitchRequestError(
+				`Araknis switch GET ${path} returned an unrecognized payload shape.`,
+				{ path, statusCode: 200 },
+			)
+		}
+		for (const key of keys) {
+			const value = payload[key]
+			if (Array.isArray(value)) {
+				return value as Array<Record<string, unknown>>
+			}
+		}
+		// Valid empty inventory: OpEN often returns { status, <collection>: [] }
+		// or just status with no collection key. Prefer empty over inventing rows,
+		// but reject HTML/login masquerades already handled by readJson.
+		if ('status' in payload || keys.some((key) => key in payload)) {
+			return []
+		}
+		throw new AraknisSwitchRequestError(
+			`Araknis switch GET ${path} returned an unrecognized inventory payload.`,
+			{ path, statusCode: 200 },
+		)
+	}
+
+	function isMeaningfulPoeGlobal(
+		path: string,
+		payload: Record<string, unknown>,
+	): Record<string, unknown> | null {
+		const nested = isRecord(payload['poeGlobal'])
+			? payload['poeGlobal']
+			: isRecord(payload['global'])
+				? payload['global']
+				: path.toLowerCase().includes('poeglobal')
+					? payload
+					: null
+		if (!nested) return null
+		const keys = Object.keys(nested).filter((key) => key !== 'status')
+		return keys.length > 0 ? nested : null
 	}
 
 	async function getRecord(path: string) {
@@ -239,7 +313,9 @@ export function createAraknisSwitchOpenClient(input: {
 			return getRecord('/open/v1/registry')
 		},
 		async listVlans() {
-			const payload = await getJson('/open/v1/vlans?limit=512')
+			const path = '/open/v1/vlans?limit=512'
+			const payload = await getJson(path)
+			assertInventoryCollection(path, payload, ['vlans', 'vlan_element'])
 			return parseAraknisVlansPayload(payload)
 		},
 		async getVlan(vlanId: number) {
@@ -266,17 +342,12 @@ export function createAraknisSwitchOpenClient(input: {
 			return { vlan, members }
 		},
 		async listInterfaces() {
-			const payload = await getJson('/open/v1/interfaces?limit=512')
-			if (isRecord(payload) && Array.isArray(payload['interfaces'])) {
-				return payload['interfaces'] as Array<Record<string, unknown>>
-			}
-			if (isRecord(payload) && Array.isArray(payload['port_element'])) {
-				return payload['port_element'] as Array<Record<string, unknown>>
-			}
-			if (Array.isArray(payload)) {
-				return payload as Array<Record<string, unknown>>
-			}
-			return []
+			const path = '/open/v1/interfaces?limit=512'
+			const payload = await getJson(path)
+			return assertInventoryCollection(path, payload, [
+				'interfaces',
+				'port_element',
+			])
 		},
 		async listPoe() {
 			// Dell OpEN 6.8.0 does not document PoE resources. Probe common
@@ -308,17 +379,9 @@ export function createAraknisSwitchOpenClient(input: {
 												>)
 											: []
 						: (payload as Array<Record<string, unknown>>)
-					const global =
-						isRecord(payload) &&
-						(path.toLowerCase().includes('poeglobal') ||
-							isRecord(payload['poeGlobal']) ||
-							isRecord(payload['global']))
-							? isRecord(payload['poeGlobal'])
-								? payload['poeGlobal']
-								: isRecord(payload['global'])
-									? payload['global']
-									: payload
-							: null
+					const global = isRecord(payload)
+						? isMeaningfulPoeGlobal(path, payload)
+						: null
 					if (ports.length > 0 || global) {
 						return { ports, global, path }
 					}

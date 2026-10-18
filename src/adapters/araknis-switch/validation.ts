@@ -10,9 +10,15 @@ function trimTrailingSlash(value: string) {
 }
 
 export function resolveAraknisSwitchBaseUrl(config: HomeConnectorConfig) {
-	return trimTrailingSlash(
+	const baseUrl = trimTrailingSlash(
 		config.araknisSwitchBaseUrl || 'https://192.168.0.50',
 	)
+	if (/^http:\/\//i.test(baseUrl) && !config.araknisSwitchAllowInsecureTls) {
+		throw new Error(
+			'ARAKNIS_SWITCH_BASE_URL must use https:// (cleartext HTTP would send the switch password unencrypted). Set ARAKNIS_SWITCH_ALLOW_INSECURE_TLS=true only for a deliberate LAN exception.',
+		)
+	}
+	return baseUrl
 }
 
 export function resolveAraknisSwitchHost(baseUrl: string) {
