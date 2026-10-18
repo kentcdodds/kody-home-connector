@@ -129,6 +129,9 @@ export type AraknisSwitchCredentials = {
 }
 
 export type AraknisSwitchClient = {
+	/** Reuse an existing OpEN session cookie when present; login only if needed. */
+	ensureSession(): Promise<void>
+	/** Force a fresh OpEN login (used by araknis_authenticate). */
 	login(): Promise<void>
 	logout(): Promise<void>
 	getDot1dBaseConfig(): Promise<Record<string, unknown>>

@@ -407,9 +407,10 @@ export function createAraknisSwitchAdapter(input: {
 			let system = emptyAraknisSystemInfo()
 
 			// Reuse an existing OpEN session when present (keepalive). Only force
-			// a fresh login via araknis_authenticate.
+			// a fresh login via araknis_authenticate. Do not treat a missing
+			// individual OpEN resource as a total outage.
 			try {
-				await client.getDot1dBaseConfig()
+				await client.ensureSession()
 				loginOk = true
 				await recordAuthSuccess()
 			} catch (error) {

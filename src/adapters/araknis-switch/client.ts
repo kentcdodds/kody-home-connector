@@ -108,17 +108,16 @@ export function createAraknisSwitchOpenClient(input: {
 		const response = await rawFetch(path, init)
 		const text = await response.text()
 		let payload: unknown = null
+		let jsonParseFailed = false
 		if (text.trim().length > 0) {
 			try {
 				payload = JSON.parse(text)
 			} catch {
-				throw new AraknisSwitchRequestError(
-					`Araknis switch ${path} returned non-JSON body (HTTP ${String(response.status)}).`,
-					{ path, statusCode: response.status },
-				)
+				jsonParseFailed = true
+				payload = null
 			}
 		}
-		return { response, payload, text }
+		return { response, payload, text, jsonParseFailed }
 	}
 
 	async function performLogin() {
@@ -211,6 +210,31 @@ export function createAraknisSwitchOpenClient(input: {
 		return null
 	}
 
+	function throwForFailedJsonBody(
+		path: string,
+		result: {
+			response: Response
+			text: string
+			jsonParseFailed: boolean
+		},
+	): never {
+		const looksLikeLogin =
+			/login|sign\s*in|unauthorized|session/i.test(result.text) ||
+			result.response.status === 401 ||
+			result.response.status === 403
+		if (looksLikeLogin) {
+			session.sidCookie = null
+			throw new AraknisSwitchAuthError(
+				`Araknis switch GET ${path} returned a non-JSON body that looks like an expired session (HTTP ${String(result.response.status)}).`,
+				{ path },
+			)
+		}
+		throw new AraknisSwitchRequestError(
+			`Araknis switch GET ${path} returned non-JSON body (HTTP ${String(result.response.status)}).`,
+			{ path, statusCode: result.response.status },
+		)
+	}
+
 	async function getJson(path: string) {
 		await ensureLogin()
 		const first = await readJson(path, { method: 'GET' })
@@ -231,6 +255,9 @@ export function createAraknisSwitchOpenClient(input: {
 					{ path, statusCode: retry.response.status },
 				)
 			}
+			if (retry.jsonParseFailed) {
+				throwForFailedJsonBody(path, retry)
+			}
 			assertOpenPayloadOk(path, retry.payload)
 			return retry.payload
 		}
@@ -239,6 +266,9 @@ export function createAraknisSwitchOpenClient(input: {
 				`Araknis switch GET ${path} failed with HTTP ${first.response.status}.`,
 				{ path, statusCode: first.response.status },
 			)
+		}
+		if (first.jsonParseFailed) {
+			throwForFailedJsonBody(path, first)
 		}
 		assertOpenPayloadOk(path, first.payload)
 		return first.payload
@@ -298,6 +328,7 @@ export function createAraknisSwitchOpenClient(input: {
 	}
 
 	return {
+		ensureSession: ensureLogin,
 		login,
 		logout,
 		async getDot1dBaseConfig() {
@@ -407,9 +438,10 @@ export function createAraknisSwitchOpenClient(input: {
 				try {
 					const payload = await getJson(path)
 					const neighbors = parseOpenLldpNeighborsPayload(payload)
-					if (neighbors.length > 0 || isRecord(payload)) {
+					if (neighbors.length > 0) {
 						return neighbors
 					}
+					// Status-only / empty object: keep probing alternate path names.
 				} catch (error) {
 					if (
 						error instanceof AraknisSwitchRequestError &&
