@@ -5,6 +5,13 @@ import { initializeHomeConnectorSentry } from './src/sentry.ts'
 // again after env-file loading to pick up `.env`-only DSNs.
 initializeHomeConnectorSentry()
 
+if (process.env.NAS_CONTAINER_UPDATE_HELPER === '1') {
+	const { runNasContainerUpdateHelper } =
+		await import('./src/adapters/nas-container/helper-main.ts')
+	const code = await runNasContainerUpdateHelper()
+	process.exit(code)
+}
+
 if (process.env.MOCKS === 'true') {
 	await import('./mocks/index.ts')
 }

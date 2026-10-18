@@ -81,6 +81,9 @@ OAuth audience / volume mounts and need a container recreate:
 - `FFMPEG_PATH` - ffmpeg binary path inside the image.
 - `ISLAND_ROUTER_PRIVATE_KEY_PATH` / `ISLAND_ROUTER_KNOWN_HOSTS_PATH` - SSH key
   / known_hosts file paths mounted into the container.
+- `NAS_DOCKER_SOCKET_PATH` - Docker Engine unix socket path inside the container
+  (default `/var/run/docker.sock`). Requires the host socket bind-mount; see
+  `docker/README.md` one-time setup.
 - `NODE_ENV` / `MOCKS` / `SENTRY_*` / `APP_COMMIT_SHA` - process mode and
   observability bootstrap.
 
@@ -98,7 +101,8 @@ Examples: `araknis_set_config`, `access_networks_unleashed_set_config`,
 `kasa_set_config`, `island_router_set_config`, `island_router_api_set_config`,
 `global_cache_set_config`, `court_set_config`, `pjlink_set_config`,
 `bluray_set_config`, `bond_set_config`, `venstar_set_config`,
-`jellyfish_set_config`, `discovery_set_config`, `audiobook_set_config`.
+`jellyfish_set_config`, `discovery_set_config`, `audiobook_set_config`,
+`nas_container_updates_set_config`.
 
 **Precedence (pick one rule, keep it forever):** stored runtime setting > env
 var > built-in default. If Kent still has an env var on the NAS start script, it
@@ -1120,6 +1124,74 @@ HOME_CONNECTOR_DB_PATH=... npx remix db reset --force   # destructive: wipes the
 
 SQLite migrations have no cross-process lock, so run the CLI while the connector
 is stopped.
+
+## NAS container updates (MediaRSS + self-update)
+
+After the one-time docker.sock mount (exact steps in `docker/README.md`), agents
+can deploy merged **main** images on the Synology NAS without SSH:
+
+| Service          | Allowlisted image                       | Default container name |
+| ---------------- | --------------------------------------- | ---------------------- |
+| `home-connector` | `kentcdodds/kody-home-connector:latest` | `kody-home-connector`  |
+| `mediarss`       | `kentcdodds/mediarss:main`              | `mediarss`             |
+
+No other services, tags (`dev`, `sha-*`, semver), digests, registries, or
+free-form image strings are accepted. Container **names** may be changed with
+`nas_container_updates_set_config`; image/tag cannot.
+
+**Host access:** Docker Engine API over `/var/run/docker.sock` (unix socket +
+`node:http`, no Docker CLI, no shell interpolation). The socket is
+root-equivalent on the NAS; only allowlisted Engine calls are issued. NAS
+credentials stay local (socket mount + SQLite runtime config) — never Kody
+secrets. Env/secret values are never logged or returned (plans list env **keys**
+only).
+
+**Gating (repo convention, default off):** writes require
+`nas_container_updates.enabled === true` (via
+`nas_container_updates_set_config`), plus `acknowledgeHighRisk: true`, a
+≥20-char `reason`, and the exact confirmation phrase. `dryRun: true` and
+`nas_check_container_update` work while the gate is off. Defaulting the gate off
+matches Unleashed WLAN writes: Kent flips it on when ready for supervised
+post-merge deploys; confirmation alone is not enough for a root-equivalent
+socket.
+
+Tools:
+
+```js
+kody.mcp['home'].nas_check_container_update({ service: 'mediarss' })
+
+kody.mcp['home'].nas_update_container({
+	service: 'mediarss',
+	dryRun: true,
+})
+
+kody.mcp['home'].nas_update_container({
+	service: 'mediarss',
+	acknowledgeHighRisk: true,
+	reason: 'Deploy mediarss main after Publish succeeded.',
+	confirmation:
+		'I understand this will recreate a NAS container from its allowlisted main image and may briefly interrupt the service.',
+})
+
+// Self-update: returns immediately; poll status after the connector restarts.
+kody.mcp['home'].nas_update_container({
+	service: 'home-connector',
+	acknowledgeHighRisk: true,
+	reason: 'Deploy home connector latest after Publish succeeded.',
+	confirmation:
+		'I understand this will recreate a NAS container from its allowlisted main image and may briefly interrupt the service.',
+})
+
+kody.mcp['home'].nas_container_update_status({ operationId: '<id>' })
+```
+
+Recreate never deletes the working container until `/health` passes: the old
+container is renamed to `*-prev-<timestamp>`, stopped, and only removed after
+success (latest prev kept; older prev pruned). On failure the replacement is
+removed and the previous container is renamed back and started. Self-update
+hands off to a one-shot helper container from the new image so the response
+returns before this process dies; status JSON lives under
+`HOME_CONNECTOR_DATA_PATH/nas-container-updates/`.
 
 ## Discovery and mocks
 

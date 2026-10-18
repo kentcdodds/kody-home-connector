@@ -13,6 +13,59 @@ container filesystem, wipes the OAuth store and forces interactive reauth.
 Tokens are opaque hashes, not JWTs, so there is no signing key to carry across
 deploys.
 
+## One-time: enable NAS container updates (docker.sock)
+
+Agents can pull allowlisted **main** images and recreate containers
+(`home-connector` → `kentcdodds/kody-home-connector:latest`, `mediarss` →
+`kentcdodds/mediarss:main`) via `nas_update_container`. The connector talks to
+the Docker Engine API over a unix socket (no Docker CLI, no SSH). **docker.sock
+is root-equivalent** — the code only issues allowlisted Engine calls, and writes
+default **off** until you enable them.
+
+Do this once on the NAS (Container Manager UI or SSH). The running container
+cannot mount the socket into itself.
+
+1. Merge the template `docker/start-kody-home-connector.sh` into
+   `/volume1/docker/start-kody-home-connector.sh` (keep your secrets). Confirm
+   these lines exist:
+
+   ```bash
+   -v /var/run/docker.sock:/var/run/docker.sock \
+   -e "NAS_DOCKER_SOCKET_PATH=/var/run/docker.sock" \
+   ```
+
+2. Recreate the connector from the host (pulls `latest` and remounts):
+
+   ```bash
+   cd /volume1/docker
+   ./start-kody-home-connector.sh
+   ```
+
+3. Confirm the socket is visible:
+
+   ```bash
+   docker exec kody-home-connector ls -l /var/run/docker.sock
+   ```
+
+4. In MCP, enable writes when you are ready (still requires
+   `acknowledgeHighRisk` + exact confirmation on each update):
+
+   ```js
+   kody.mcp['home'].nas_container_updates_set_config({ enabled: true })
+   ```
+
+5. Optional: if MediaRSS’s container name is not `mediarss`, set it once:
+
+   ```js
+   kody.mcp['home'].nas_container_updates_set_config({
+   	mediarssContainerName: 'your-actual-name',
+   })
+   ```
+
+After step 2, agents can `nas_check_container_update` / `nas_update_container`
+(and self-update the connector). Keep the data volume mount unchanged across
+recreates.
+
 Integration settings that used to be docker `-e` flags (Araknis base URL / TLS /
 SSH, Unleashed scan CIDRs, Island host, court pins, discovery URLs, …) now live
 in that same SQLite file as **runtime config**. Prefer MCP `*_set_config` tools

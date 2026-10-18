@@ -154,6 +154,24 @@ export type HomeConnectorConfig = {
 	audiobookLibraryPath: string
 	ffmpegPath: string
 	audiobookImportTimeoutMs: number
+	/**
+	 * Hard gate for `nas_update_container` writes. Off by default. dryRun and
+	 * `nas_check_container_update` work while disabled. Enable with
+	 * `nas_container_updates_set_config { enabled: true }` after the docker.sock
+	 * mount is in place.
+	 */
+	nasContainerUpdatesEnabled?: boolean
+	/**
+	 * Docker Engine unix socket path inside the connector container. Requires a
+	 * host bind-mount of `/var/run/docker.sock` (one-time NAS setup).
+	 */
+	nasDockerSocketPath: string
+	/** Local container name for the home connector (default kody-home-connector). */
+	nasHomeConnectorContainerName: string
+	/** Local container name for MediaRSS (default mediarss). */
+	nasMediarssContainerName: string
+	/** HTTP /health wait timeout when recreating a container. */
+	nasContainerHealthTimeoutMs: number
 	dataPath: string
 	dbPath: string
 	port: number
@@ -434,6 +452,10 @@ export function loadHomeConnectorConfig(): HomeConnectorConfig {
 			String(defaultAudiobookImportTimeoutMs),
 		10,
 	)
+	const nasContainerHealthTimeoutMs = Number.parseInt(
+		process.env.NAS_CONTAINER_HEALTH_TIMEOUT_MS ?? '60000',
+		10,
+	)
 	const homeConnectorId = resolveHomeConnectorId(process.env.HOME_CONNECTOR_ID)
 	const publicBaseUrl = resolvePublicBaseUrl()
 	const mcpPath = homeMcpPath
@@ -610,6 +632,20 @@ export function loadHomeConnectorConfig(): HomeConnectorConfig {
 			audiobookImportTimeoutMs >= 5_000
 				? audiobookImportTimeoutMs
 				: defaultAudiobookImportTimeoutMs,
+		nasContainerUpdatesEnabled:
+			process.env.NAS_CONTAINER_UPDATES_ENABLED === 'true',
+		nasDockerSocketPath:
+			process.env.NAS_DOCKER_SOCKET_PATH?.trim() || '/var/run/docker.sock',
+		nasHomeConnectorContainerName:
+			process.env.NAS_HOME_CONNECTOR_CONTAINER_NAME?.trim() ||
+			'kody-home-connector',
+		nasMediarssContainerName:
+			process.env.NAS_MEDIARSS_CONTAINER_NAME?.trim() || 'mediarss',
+		nasContainerHealthTimeoutMs:
+			Number.isFinite(nasContainerHealthTimeoutMs) &&
+			nasContainerHealthTimeoutMs >= 5_000
+				? nasContainerHealthTimeoutMs
+				: 60_000,
 		dataPath,
 		dbPath: resolveHomeConnectorDbPath(dataPath),
 		port: Number.isFinite(port) ? port : 4040,

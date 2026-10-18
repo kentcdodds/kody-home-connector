@@ -24,6 +24,7 @@ export type RuntimeIntegrationId =
 	| 'jellyfish'
 	| 'discovery'
 	| 'audiobook'
+	| 'nas_container_updates'
 
 export type RuntimeConfigField = keyof HomeConnectorConfig
 
@@ -497,6 +498,59 @@ export const runtimeSettingDefinitions = [
 		integerMinimum: 5_000,
 		description: 'Audiobook import/ffmpeg job timeout in milliseconds.',
 	},
+
+	// NAS container updates (docker.sock; main-branch allowlist only)
+	{
+		key: 'nas_container_updates.enabled',
+		integration: 'nas_container_updates',
+		field: 'enabled',
+		configField: 'nasContainerUpdatesEnabled',
+		envVar: 'NAS_CONTAINER_UPDATES_ENABLED',
+		kind: 'boolean',
+		description:
+			'Allow nas_update_container writes (pull/recreate/self-update). Off by default. dryRun and nas_check_container_update work while disabled.',
+	},
+	{
+		key: 'nas_container_updates.docker_socket_path',
+		integration: 'nas_container_updates',
+		field: 'dockerSocketPath',
+		configField: 'nasDockerSocketPath',
+		envVar: 'NAS_DOCKER_SOCKET_PATH',
+		kind: 'string',
+		description:
+			'Docker Engine unix socket path inside the container (default /var/run/docker.sock). Requires the host socket bind-mount.',
+	},
+	{
+		key: 'nas_container_updates.home_connector_container_name',
+		integration: 'nas_container_updates',
+		field: 'homeConnectorContainerName',
+		configField: 'nasHomeConnectorContainerName',
+		envVar: 'NAS_HOME_CONNECTOR_CONTAINER_NAME',
+		kind: 'string',
+		description:
+			'Local Docker container name for the home connector (default kody-home-connector). Image/tag stay hard-coded.',
+	},
+	{
+		key: 'nas_container_updates.mediarss_container_name',
+		integration: 'nas_container_updates',
+		field: 'mediarssContainerName',
+		configField: 'nasMediarssContainerName',
+		envVar: 'NAS_MEDIARSS_CONTAINER_NAME',
+		kind: 'string',
+		description:
+			'Local Docker container name for MediaRSS (default mediarss). Image/tag stay hard-coded to kentcdodds/mediarss:main.',
+	},
+	{
+		key: 'nas_container_updates.health_timeout_ms',
+		integration: 'nas_container_updates',
+		field: 'healthTimeoutMs',
+		configField: 'nasContainerHealthTimeoutMs',
+		envVar: 'NAS_CONTAINER_HEALTH_TIMEOUT_MS',
+		kind: 'integer',
+		integerMinimum: 5_000,
+		description:
+			'How long to wait for HTTP /health after recreating a container (milliseconds).',
+	},
 ] as const satisfies ReadonlyArray<RuntimeSettingDefinition>
 
 export type RuntimeSettingKey =
@@ -550,4 +604,5 @@ export const runtimeIntegrationToolPrefixes: Record<
 	jellyfish: 'jellyfish',
 	discovery: 'discovery',
 	audiobook: 'audiobook',
+	nas_container_updates: 'nas_container_updates',
 }
