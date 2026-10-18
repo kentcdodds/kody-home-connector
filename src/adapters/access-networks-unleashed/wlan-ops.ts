@@ -372,17 +372,43 @@ async function readGuestserviceList(
 	return { xml: result.xml, ...parseGuestserviceList(result.xml) }
 }
 
-function extractCreatedGuestserviceId(xml: string): string | null {
-	const parsed = parseGuestserviceList(xml)
-	if (parsed.entries.length === 1) return parsed.entries[0]?.id ?? null
-	// Some controllers echo only the new object; others echo the whole list.
-	// Prefer the highest numeric id as a last resort when the response embeds
-	// multiple entries (test fake returns the created element alone).
-	const numeric = parsed.entries
-		.map((entry) => ({ entry, n: Number.parseInt(entry.id, 10) }))
-		.filter((row) => Number.isFinite(row.n))
-		.sort((a, b) => b.n - a.n)
-	return numeric[0]?.entry.id ?? parsed.entries[0]?.id ?? null
+/**
+ * Resolve the guestservice id created by addobj. Never guess "highest numeric
+ * id" from a full-list echo — that can point at a pre-existing service and
+ * cause cleanup to delete the wrong object (Bugbot on PR #78).
+ */
+function resolveCreatedGuestserviceId(input: {
+	beforeIds: ReadonlySet<string>
+	responseXml: string
+	afterEntries: ReadonlyArray<GuestserviceEntry>
+}): string | null {
+	const added = input.afterEntries.filter(
+		(entry) => !input.beforeIds.has(entry.id),
+	)
+	if (added.length === 1) return added[0]?.id ?? null
+
+	const fromResponse = parseGuestserviceList(input.responseXml).entries.filter(
+		(entry) => !input.beforeIds.has(entry.id),
+	)
+	if (fromResponse.length === 1) return fromResponse[0]?.id ?? null
+	if (added.length === 0 && fromResponse.length === 0) return null
+	return null
+}
+
+async function cleanupOrphanGuestservice(input: {
+	client: AccessNetworksUnleashedClient
+	guestserviceId: string
+	warnings?: Array<string>
+}): Promise<void> {
+	const wlanList = await readWlanList(input.client).catch(() => null)
+	if (!wlanList) return
+	const warnings = input.warnings ?? []
+	await deleteGuestserviceIfUnreferenced({
+		client: input.client,
+		guestserviceId: input.guestserviceId,
+		wlanEntries: wlanList.entries,
+		warnings,
+	}).catch(() => undefined)
 }
 
 /**
@@ -1354,6 +1380,7 @@ export async function cloneWlanById(
 	}
 
 	let guestserviceCreateXml: string | null = null
+	let guestserviceBeforeIds = new Set<string>()
 	if (shouldCloneGuestservice) {
 		let guestList: { entries: Array<GuestserviceEntry> }
 		try {
@@ -1363,6 +1390,7 @@ export async function cloneWlanById(
 				`Refusing clone: could not read guestservice-list (${errorText(error)}). Nothing was sent.`,
 			)
 		}
+		guestserviceBeforeIds = new Set(guestList.entries.map((entry) => entry.id))
 		const sourceGuest = guestList.entries.find(
 			(entry) => entry.id === sourceGuestserviceId,
 		)
@@ -1422,10 +1450,15 @@ export async function cloneWlanById(
 				'addobj',
 				guestserviceCreateXml,
 			)
-			createdGuestserviceId = extractCreatedGuestserviceId(guestResponse.xml)
+			const afterGuests = await readGuestserviceList(input.client)
+			createdGuestserviceId = resolveCreatedGuestserviceId({
+				beforeIds: guestserviceBeforeIds,
+				responseXml: guestResponse.xml,
+				afterEntries: afterGuests.entries,
+			})
 			if (!createdGuestserviceId) {
 				throw new Error(
-					'guestservice addobj did not return a new guestservice id',
+					'guestservice addobj did not yield exactly one new guestservice id',
 				)
 			}
 			createXml = setOrAddAttribute(
@@ -1446,11 +1479,13 @@ export async function cloneWlanById(
 			throw error
 		writeError = error
 		if (createdGuestserviceId) {
-			await sendGuestserviceWrite(
-				input.client,
-				'delobj',
-				`<guestservice id='${escapeXmlAttribute(createdGuestserviceId)}'/>`,
-			).catch(() => undefined)
+			// Never delete without a reference check — a mis-resolved id must
+			// not remove a live guestservice still used by another WLAN.
+			await cleanupOrphanGuestservice({
+				client: input.client,
+				guestserviceId: createdGuestserviceId,
+				warnings,
+			})
 			createdGuestserviceId = null
 		}
 	}
@@ -1521,18 +1556,11 @@ export async function cloneWlanById(
 		}
 	} catch (error) {
 		if (createdGuestserviceId) {
-			const after = await readWlanList(input.client).catch(() => null)
-			const stillReferenced = after?.entries.some(
-				(entry) =>
-					entry.attributes['guestservice-id'] === createdGuestserviceId,
-			)
-			if (!stillReferenced) {
-				await sendGuestserviceWrite(
-					input.client,
-					'delobj',
-					`<guestservice id='${escapeXmlAttribute(createdGuestserviceId)}'/>`,
-				).catch(() => undefined)
-			}
+			await cleanupOrphanGuestservice({
+				client: input.client,
+				guestserviceId: createdGuestserviceId,
+				warnings,
+			})
 		}
 		throw error
 	}

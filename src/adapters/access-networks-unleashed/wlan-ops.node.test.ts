@@ -912,6 +912,43 @@ test('clone of g (id 2) gets its own guestservice; deleting the clone does not r
 	])
 })
 
+test('guestservice create id is resolved from before/after diff, not highest id in echo', async () => {
+	const fake = createFakeController()
+	const originalApplyGuest = fake.client.request.bind(fake.client)
+	let guestAddSeen = false
+	fake.client.request = async (request) => {
+		const result = await originalApplyGuest(request)
+		if (
+			request.comp === 'guestservice-list' &&
+			request.action === 'addobj' &&
+			!guestAddSeen
+		) {
+			guestAddSeen = true
+			// Simulate a controller that echoes the whole list (including older
+			// higher-looking ids) instead of only the new object.
+			return {
+				...result,
+				xml: fake
+					.guestservices()
+					.entries.map((e) => e.rawXml)
+					.join(''),
+			}
+		}
+		return result
+	}
+	const created = await cloneWlanById({
+		client: fake.client,
+		sourceId: '2',
+		overrides: {
+			name: 'echo-test',
+			ssid: 'echo-test',
+			attributes: { 'enable-type': '1' },
+		},
+	})
+	expect(created.created!.attributes['guestservice-id']).toBe('10')
+	expect(created.created!.attributes['guestservice-id']).not.toBe('5')
+})
+
 test('delete never removes a guestservice still referenced by another WLAN', async () => {
 	const fake = createFakeController()
 	await fake.client.request({
