@@ -33,17 +33,25 @@ docker rm "${CONTAINER_NAME}" >/dev/null 2>&1 || true
 # /araknis-switch/setup (or araknis_set_credentials).
 #
 # Bootstrap-only env that must stay here: HOME_CONNECTOR_ID, data key/secret,
-# HOME_CONNECTOR_DATA_PATH, volume mounts (HOST_DATA_PATH, audiobook library),
-# and optionally HOME_MCP_PUBLIC_BASE_URL / PORT.
+# HOME_CONNECTOR_DATA_PATH, volume mounts (HOST_DATA_PATH, audiobook library,
+# docker.sock for NAS container updates), and optionally
+# HOME_MCP_PUBLIC_BASE_URL / PORT.
+#
+# docker.sock is root-equivalent on the NAS host. The connector only issues
+# allowlisted Docker Engine API calls for home-connector + mediarss main images.
+# Writes stay gated off until nas_container_updates_set_config { enabled: true }.
+DOCKER_SOCK_PATH="${DOCKER_SOCK_PATH:-/var/run/docker.sock}"
 docker run -d --name "${CONTAINER_NAME}" --network host --restart unless-stopped \
 	-e "HOME_CONNECTOR_ID=${HOME_CONNECTOR_ID:-default}" \
 	-e "HOME_CONNECTOR_SHARED_SECRET=${HOME_CONNECTOR_SHARED_SECRET:-}" \
 	-e "HOME_CONNECTOR_DATA_KEY=${HOME_CONNECTOR_DATA_KEY:-}" \
 	-e "HOME_CONNECTOR_DATA_PATH=/data/home-connector" \
 	-e "AUDIOBOOK_LIBRARY_PATH=${AUDIOBOOK_LIBRARY_PATH}" \
+	-e "NAS_DOCKER_SOCKET_PATH=/var/run/docker.sock" \
 	-e "ARAKNIS_SWITCH_BASE_URL=${ARAKNIS_SWITCH_BASE_URL:-https://192.168.0.50}" \
 	-e "ARAKNIS_SWITCH_ALLOW_INSECURE_TLS=${ARAKNIS_SWITCH_ALLOW_INSECURE_TLS:-true}" \
 	-e "ARAKNIS_SWITCH_SSH_ENABLED=${ARAKNIS_SWITCH_SSH_ENABLED:-false}" \
 	-v "${HOST_DATA_PATH}:/data/home-connector" \
 	-v "${HOST_AUDIOBOOK_LIBRARY_PATH}:${AUDIOBOOK_LIBRARY_PATH}" \
+	-v "${DOCKER_SOCK_PATH}:/var/run/docker.sock" \
 	"${IMAGE}"

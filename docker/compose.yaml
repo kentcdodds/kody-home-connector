@@ -11,8 +11,11 @@ services:
     environment:
       HOME_CONNECTOR_DATA_PATH: /data/home-connector
       AUDIOBOOK_LIBRARY_PATH: /media/audiobooks
+      NAS_DOCKER_SOCKET_PATH: /var/run/docker.sock
     volumes:
       - ${HOST_DATA_PATH:-/volume1/docker/kody-home-connector}:/data/home-connector
       # Synology: /volume1/media/audio/audiobooks
       # Mac: /Volumes/media/audio/audiobooks
       - ${HOST_AUDIOBOOK_LIBRARY_PATH:-/volume1/media/audio/audiobooks}:/media/audiobooks
+      # Required for nas_update_container / self-update (root-equivalent; gated).
+      - ${DOCKER_SOCK_PATH:-/var/run/docker.sock}:/var/run/docker.sock

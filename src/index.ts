@@ -5,6 +5,7 @@ import { createIslandRouterApiAdapter } from './adapters/island-router-api/index
 import { createIslandRouterAdapter } from './adapters/island-router/index.ts'
 import { createJellyfishAdapter } from './adapters/jellyfish/index.ts'
 import { createKasaAdapter } from './adapters/kasa/index.ts'
+import { createNasContainerAdapter } from './adapters/nas-container/index.ts'
 import { createPhoneAdapter } from './adapters/phone/index.ts'
 import { createPjlinkAdapter } from './adapters/pjlink/index.ts'
 import { createRokuAdapter } from './adapters/roku/index.ts'
@@ -97,6 +98,9 @@ export async function createHomeConnectorApp() {
 		config,
 		storage,
 	})
+	const nasContainer = createNasContainerAdapter({
+		config,
+	})
 	const mcp = createHomeConnectorMcpServer({
 		config,
 		state,
@@ -117,6 +121,7 @@ export async function createHomeConnectorApp() {
 		pjlink,
 		roku,
 		bluray,
+		nasContainer,
 	})
 	const toolRegistry = mcp.createToolRegistry()
 	updateConnectionState(state, {
@@ -148,6 +153,7 @@ export async function createHomeConnectorApp() {
 		pjlink,
 		roku,
 		bluray,
+		nasContainer,
 		mcp,
 		toolRegistry,
 	}

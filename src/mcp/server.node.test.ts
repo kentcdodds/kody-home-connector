@@ -10,6 +10,7 @@ import { type IslandRouterCommandRequest } from '../adapters/island-router/types
 import { createIslandRouterAdapter } from '../adapters/island-router/index.ts'
 import { createJellyfishAdapter } from '../adapters/jellyfish/index.ts'
 import { createKasaAdapter } from '../adapters/kasa/index.ts'
+import { createNasContainerAdapter } from '../adapters/nas-container/index.ts'
 import { createPhoneAdapter } from '../adapters/phone/index.ts'
 import { createPjlinkAdapter } from '../adapters/pjlink/index.ts'
 import { createSonyBlurayAdapter } from '../adapters/sony-bluray/index.ts'
@@ -516,6 +517,7 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 		phone: createPhoneAdapter({ config }),
 		pjlink: createPjlinkAdapter({ config, state, storage }),
 		bluray: createSonyBlurayAdapter({ config, storage }),
+		nasContainer: createNasContainerAdapter({ config }),
 	})
 
 	try {
@@ -1315,6 +1317,7 @@ test('mcp server exposes island router write tools when host verification is con
 		phone: createPhoneAdapter({ config }),
 		pjlink: createPjlinkAdapter({ config, state, storage }),
 		bluray: createSonyBlurayAdapter({ config, storage }),
+		nasContainer: createNasContainerAdapter({ config }),
 	})
 
 	try {
