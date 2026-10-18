@@ -4,6 +4,7 @@ import {
 	buildPartialWlanUpdateXml,
 	diffWlanLists,
 	escapeXmlAttribute,
+	expectPatchedWlanXml,
 	extractWlansvcEntries,
 	findDuplicateIds,
 	getAttributeValue,
@@ -142,28 +143,45 @@ async function deleteWlanById(
 	)
 }
 
+async function readWlanListLenient(
+	client: AccessNetworksUnleashedClient,
+): Promise<WlanSnapshot> {
+	const result = await client.request({
+		action: 'getconf',
+		comp: wlanListComp,
+		xmlBody: '',
+	})
+	// Lenient path for corrupt controllers: extract may throw on id-less
+	// entries; surface that after we still attempt deletes by regex ids.
+	let entries: Array<WlanSvcEntry> = []
+	try {
+		entries = extractWlansvcEntries(result.xml)
+	} catch {
+		const idMatches = [
+			...result.xml.matchAll(/<wlansvc\b[^>]*\bid\s*=\s*(['"])(.*?)\1/gi),
+		]
+		entries = idMatches.map((match, index) => ({
+			id: match[2] ?? `unknown-${String(index)}`,
+			name: null,
+			ssid: null,
+			attributes: { id: match[2] ?? '' },
+			rawXml: match[0] ?? '',
+		}))
+	}
+	return { xml: result.xml, entries }
+}
+
 /**
  * Restore every snapshot entry by id and delete any WLANs that were not in the
- * snapshot. Used after a failed safety check.
+ * snapshot. Verifies the restored list matches the snapshot exactly.
  */
 export async function restoreWlanSnapshot(
 	client: AccessNetworksUnleashedClient,
 	snapshot: WlanSnapshot,
 ): Promise<void> {
-	const current = await fetchWlanSnapshot(client).catch(async () => {
-		// If the list is already corrupt (duplicate ids), fetchWlanSnapshot
-		// throws. Fall back to a raw getconf so we can still delete extras and
-		// rewrite known ids.
-		const result = await client.request({
-			action: 'getconf',
-			comp: wlanListComp,
-			xmlBody: '',
-		})
-		return {
-			xml: result.xml,
-			entries: extractWlansvcEntries(result.xml),
-		}
-	})
+	const current = await fetchWlanSnapshot(client).catch(async () =>
+		readWlanListLenient(client),
+	)
 	const snapIds = new Set(snapshot.entries.map((entry) => entry.id))
 	const seenCurrent = new Set<string>()
 	for (const entry of current.entries) {
@@ -178,8 +196,39 @@ export async function restoreWlanSnapshot(
 			await deleteWlanById(client, entry.id)
 		}
 	}
+	// Prefer IS_PARTIAL attribute restores when the snapshot entry still exists
+	// and only attributes differ; fall back to full-object rewrite with id.
+	const afterDeletes = await readWlanListLenient(client)
+	const afterById = indexWlansById(afterDeletes.entries)
 	for (const entry of snapshot.entries) {
+		const currentEntry = afterById.get(entry.id)
+		if (currentEntry && currentEntry.rawXml === entry.rawXml) {
+			continue
+		}
+		// Full-object rewrite keeps the id attribute so wlansvc-list can target
+		// the object (aioruckus updobj pattern). Always verify afterward.
 		await setconfWlan(client, entry.rawXml)
+	}
+
+	const restored = await fetchWlanSnapshot(client)
+	const restoredById = indexWlansById(restored.entries)
+	if (restored.entries.length !== snapshot.entries.length) {
+		throw new Error(
+			`WLAN snapshot restore verification failed: expected ${String(snapshot.entries.length)} WLANs, found ${String(restored.entries.length)}.`,
+		)
+	}
+	for (const entry of snapshot.entries) {
+		const actual = restoredById.get(entry.id)
+		if (!actual) {
+			throw new Error(
+				`WLAN snapshot restore verification failed: id "${entry.id}" is still missing.`,
+			)
+		}
+		if (actual.rawXml !== entry.rawXml) {
+			throw new Error(
+				`WLAN snapshot restore verification failed: id "${entry.id}" does not match the snapshot after restore.`,
+			)
+		}
 	}
 }
 
@@ -190,37 +239,39 @@ async function verifyOrRollback(input: {
 	allowedAddedIds: ReadonlySet<string>
 	assertTarget?: (after: WlanSnapshot) => void
 }): Promise<{ after: WlanSnapshot; safety: WlanWriteSafetyResult }> {
-	const after = await fetchWlanSnapshot(input.client).catch((error) => {
-		// Duplicate ids after write: treat as a failed safety check and roll back.
-		if (error instanceof Error && /duplicate id/i.test(error.message)) {
-			return null
-		}
-		throw error
-	})
+	let after: WlanSnapshot | null = null
+	let readError: Error | null = null
+	try {
+		after = await fetchWlanSnapshot(input.client)
+	} catch (error) {
+		readError = error instanceof Error ? error : new Error(String(error))
+		// Duplicate ids or other post-write read problems: attempt a lenient
+		// read for diagnostics, then always roll back.
+		after = null
+	}
 
 	if (after === null) {
-		const corrupt = await input.client.request({
-			action: 'getconf',
-			comp: wlanListComp,
-			xmlBody: '',
-		})
-		const corruptEntries = extractWlansvcEntries(corrupt.xml)
+		const corrupt = await readWlanListLenient(input.client).catch(() => ({
+			xml: '',
+			entries: [] as Array<WlanSvcEntry>,
+		}))
 		const diff = diffWlanLists({
 			before: input.snapshot.entries,
-			after: corruptEntries,
+			after: corrupt.entries,
 			allowedChangedIds: input.allowedChangedIds,
 			allowedAddedIds: input.allowedAddedIds,
 		})
-		// Force failure when duplicates exist even if diff missed them.
 		diff.ok = false
-		diff.duplicateIds = findDuplicateIds(corruptEntries)
-		diff.summary = `WLAN list safety check failed: duplicate wlansvc id(s): ${diff.duplicateIds.join(', ') || 'unknown'}.`
+		diff.duplicateIds = findDuplicateIds(corrupt.entries)
+		diff.summary = readError
+			? `WLAN list safety check failed after write (could not re-read config: ${readError.message}).`
+			: `WLAN list safety check failed: duplicate wlansvc id(s): ${diff.duplicateIds.join(', ') || 'unknown'}.`
 		await restoreWlanSnapshot(input.client, input.snapshot)
 		const safety: WlanWriteSafetyResult = {
 			rolledBack: true,
 			diff,
 			snapshotEntryCount: input.snapshot.entries.length,
-			afterEntryCount: corruptEntries.length,
+			afterEntryCount: corrupt.entries.length,
 		}
 		throw new AccessNetworksUnleashedWlanSafetyError(
 			`${diff.summary} Automatically rolled back to the pre-write WLAN snapshot.`,
@@ -323,14 +374,14 @@ export async function updateWlanById(input: {
 					`WLAN id mismatch after update: expected "${targetId}", got "${updated.id}".`,
 				)
 			}
-			for (const [name, value] of Object.entries(appliedAttributes)) {
-				const actual =
-					updated.attributes[name] ?? getAttributeValue(updated.rawXml, name)
-				if (actual !== value) {
-					throw new Error(
-						`WLAN id "${targetId}" attribute "${name}" expected "${value}" but found "${actual ?? '(missing)'}".`,
-					)
-				}
+			const expectedRawXml = expectPatchedWlanXml(
+				before.rawXml,
+				appliedAttributes,
+			)
+			if (updated.rawXml !== expectedRawXml) {
+				throw new Error(
+					`WLAN id "${targetId}" changed beyond the requested attributes (unexpected fields or children mutated).`,
+				)
 			}
 		},
 	})

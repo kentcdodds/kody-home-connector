@@ -284,6 +284,18 @@ test('request refuses whole-list WLAN setconf payloads', async () => {
 				confirmation: accessNetworksUnleashedRequestConfirmation,
 			}),
 		).rejects.toThrow(/whole WLAN list|update_wlan|clone_wlan/i)
+
+		await expect(
+			adapter.request({
+				action: 'setconf',
+				comp: 'wlansvc-list',
+				xmlBody:
+					"<wlansvc id='5' name='friendlyguest' ssid='friendlyguest' vlan-id='20'></wlansvc>",
+				acknowledgeHighRisk: true,
+				reason: validReason,
+				confirmation: accessNetworksUnleashedRequestConfirmation,
+			}),
+		).rejects.toThrow(/full <wlansvc> object without IS_PARTIAL|update_wlan/i)
 	} finally {
 		await storage.close()
 	}

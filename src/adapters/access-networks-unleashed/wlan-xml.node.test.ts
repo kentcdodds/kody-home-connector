@@ -7,6 +7,7 @@ import {
 	extractWlansvcEntries,
 	findDuplicateIds,
 	removeRootIdAttribute,
+	xmlBodyLooksLikeFullObjectWlanWrite,
 	xmlBodyLooksLikeFullWlanListWrite,
 } from './wlan-xml.ts'
 
@@ -77,6 +78,32 @@ test('xmlBodyLooksLikeFullWlanListWrite catches the dangerous whole-list pattern
 		),
 	).toBe(false)
 	expect(countTopLevelWlansvcElements("<wlansvc id='5'/>")).toBe(1)
+})
+
+test('xmlBodyLooksLikeFullObjectWlanWrite catches non-partial single-object writes', () => {
+	expect(
+		xmlBodyLooksLikeFullObjectWlanWrite(
+			"<wlansvc id='5' name='friendlyguest' vlan-id='20'></wlansvc>",
+		),
+	).toBe(true)
+	expect(
+		xmlBodyLooksLikeFullObjectWlanWrite(
+			"<wlansvc id='5' IS_PARTIAL='true' vlan-id='20'/>",
+		),
+	).toBe(false)
+	expect(
+		xmlBodyLooksLikeFullObjectWlanWrite(
+			"<wlansvc id='5' DELETE='true' IS_PARTIAL='true'/>",
+		),
+	).toBe(false)
+})
+
+test('extractWlansvcEntries rejects id-less entries', () => {
+	expect(() =>
+		extractWlansvcEntries(
+			"<ajax-response><wlansvc name='orphan' ssid='orphan'/></ajax-response>",
+		),
+	).toThrow(/without an id/i)
 })
 
 test('regression: overwrite-first-WLAN bug produces duplicate id 5 and unexpected id 1 change', () => {

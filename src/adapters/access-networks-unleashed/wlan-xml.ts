@@ -64,9 +64,9 @@ export function extractWlansvcEntries(xml: string): Array<WlanSvcEntry> {
 		const attributes = parseAttributes(attrText)
 		const id = attributes['id']?.trim() ?? ''
 		if (!id) {
-			// Config entries from getconf wlansvc-list always carry id. Skip
-			// incomplete fragments rather than inventing keys.
-			continue
+			throw new Error(
+				'wlansvc-list contains a <wlansvc> without an id attribute. Refusing to snapshot or mutate an incomplete WLAN list.',
+			)
 		}
 		entries.push({
 			id,
@@ -77,6 +77,15 @@ export function extractWlansvcEntries(xml: string): Array<WlanSvcEntry> {
 		})
 	}
 	return entries
+}
+
+/** Allow only plain Unleashed attribute names (no markup injection). */
+export function assertSafeWlanAttributeName(name: string) {
+	if (!/^[\w:-]+$/.test(name)) {
+		throw new Error(
+			`Invalid WLAN attribute name "${name}". Names may only contain letters, digits, underscore, colon, or hyphen.`,
+		)
+	}
 }
 
 function parseAttributes(attrText: string): Record<string, string> {
@@ -234,6 +243,7 @@ export function buildPartialWlanUpdateXml(input: {
 	const parts = [`id='${escapeXmlAttribute(input.id)}'`, `IS_PARTIAL='true'`]
 	for (const [name, value] of Object.entries(input.attributes)) {
 		if (name === 'id' || name === 'IS_PARTIAL' || name === 'DELETE') continue
+		assertSafeWlanAttributeName(name)
 		parts.push(`${name}='${escapeXmlAttribute(value)}'`)
 	}
 	return `<wlansvc ${parts.join(' ')}/>`
@@ -246,9 +256,60 @@ export function applyWlanAttributeOverrides(
 	let updated = elementXml
 	for (const [name, value] of Object.entries(attributes)) {
 		if (name === 'id') continue
+		assertSafeWlanAttributeName(name)
 		updated = setOrAddAttribute(updated, name, value)
 	}
 	return updated
+}
+
+/**
+ * Build the expected post-update rawXml by applying only the requested
+ * attribute patches to the pre-write element. Used to detect unintended
+ * mutations on the target WLAN itself.
+ */
+export function expectPatchedWlanXml(
+	beforeRawXml: string,
+	attributes: Record<string, string>,
+): string {
+	return applyWlanAttributeOverrides(beforeRawXml, attributes)
+}
+
+const secretAttributeNames = new Set([
+	'passphrase',
+	'sae-passphrase',
+	'x-passphrase',
+	'x-sae-passphrase',
+	'guest-pass',
+])
+
+/** Redact Wi-Fi secrets from tool-facing WLAN payloads. */
+export function redactWlanSecrets(entry: WlanSvcEntry): WlanSvcEntry {
+	const attributes = { ...entry.attributes }
+	for (const name of secretAttributeNames) {
+		if (name in attributes) attributes[name] = '[redacted]'
+	}
+	let rawXml = entry.rawXml
+	for (const name of secretAttributeNames) {
+		const pattern = new RegExp(`(\\s${name}\\s*=\\s*)(["'])(.*?)\\2`, 'gi')
+		rawXml = rawXml.replace(pattern, `$1$2[redacted]$2`)
+	}
+	return {
+		...entry,
+		attributes,
+		rawXml,
+	}
+}
+
+/**
+ * True when a setconf body is a single non-partial, non-delete wlansvc object.
+ * Those full-object writes are the Oct 12 failure mode when applied by position.
+ */
+export function xmlBodyLooksLikeFullObjectWlanWrite(xmlBody: string): boolean {
+	if (xmlBodyLooksLikeFullWlanListWrite(xmlBody)) return false
+	if (countTopLevelWlansvcElements(xmlBody) !== 1) return false
+	if (/IS_PARTIAL\s*=\s*(['"])true\1/i.test(xmlBody)) return false
+	if (/DELETE\s*=\s*(['"])true\1/i.test(xmlBody)) return false
+	return /<wlansvc(?=[\s>/])/i.test(xmlBody)
 }
 
 /**
