@@ -820,11 +820,25 @@ otherwise disrupt local connectivity. Each call requires:
 - an operator reason of at least 20 characters
 - the exact confirmation phrase rejected for any other value
 
-Higher-level Unleashed flows (list APs, list clients, edit WLANs, block clients,
-restart APs, etc.) are intended to live in saved Kody packages that wrap
-`home_access_networks_unleashed_request` through `kody:runtime`. The home
-connector itself does not expose any typed Unleashed CLI or per-operation
-capabilities.
+Whole-list WLAN `setconf` bodies (`<wlansvc-list>` wrappers or multiple
+`<wlansvc>` elements) are rejected: that pattern can overwrite the first WLAN by
+list position and duplicate ids (Oct 12 friendlyguest → friendlyfamily
+incident).
+
+Safe per-WLAN tools (prefer these over the raw request for WLAN changes):
+
+- `access_networks_unleashed_list_wlans` / `access_networks_unleashed_get_wlan`
+  — `getconf` of `wlansvc-list`, keyed by stable wlansvc `id`
+- `access_networks_unleashed_update_wlan` — partial `IS_PARTIAL` update by id;
+  snapshots the full list first, re-reads after write, rolls back on unexpected
+  diffs / duplicate or missing ids
+- `access_networks_unleashed_clone_wlan` — clone by source id (copies guest
+  portal, client isolation, access VLAN, etc.) with optional name/ssid/radio
+  overrides; same snapshot/diff/rollback
+
+Other higher-level Unleashed flows (list APs, list clients, block clients,
+restart APs, etc.) may still live in saved Kody packages that wrap
+`home_access_networks_unleashed_request` through `kody:runtime`.
 
 ## Local persistence
 
