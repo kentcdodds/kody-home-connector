@@ -134,6 +134,16 @@ export const runtimeSettingDefinitions = [
 		integerMinimum: 1000,
 		description: 'Unleashed HTTP request timeout in milliseconds.',
 	},
+	{
+		key: 'access_networks_unleashed.wlan_writes_enabled',
+		integration: 'access_networks_unleashed',
+		field: 'wlanWritesEnabled',
+		configField: 'accessNetworksUnleashedWlanWritesEnabled',
+		envVar: 'ACCESS_NETWORKS_UNLEASHED_WLAN_WRITES_ENABLED',
+		kind: 'boolean',
+		description:
+			'Allow WLAN writes (update/clone/delete_wlan and raw addobj/updobj/delobj on wlansvc-list). Off by default until addobj/updobj/delobj are validated live on this firmware (Oct 17 2026 incident).',
+	},
 
 	// Kasa (non-secret; username/password stay in kasa_credentials)
 	{

@@ -24,16 +24,23 @@ import {
 	type AccessNetworksUnleashedRequestInput,
 	type AccessNetworksUnleashedRequestResult,
 } from './types.ts'
+import { parseAccessNetworksUnleashedXml } from './xml.ts'
 import {
+	AccessNetworksUnleashedWlanWriteRefusedError,
+	assertTargetedWlanWrite,
+	checkWlanWriteReadiness,
 	cloneWlanById,
-	fetchWlanSnapshot,
+	deleteWlanById,
+	describeWlanListDamage,
 	getWlanById,
+	readWlanList,
 	updateWlanById,
 	type WlanAttributeOverrides,
 } from './wlan-ops.ts'
 import {
+	countTopLevelWlansvcElements,
+	redactSecretsInXmlText,
 	redactWlanSecrets,
-	xmlBodyLooksLikeFullObjectWlanWrite,
 	xmlBodyLooksLikeFullWlanListWrite,
 } from './wlan-xml.ts'
 
@@ -54,7 +61,15 @@ type WriteOperationRequest = {
 }
 
 type RequestCapabilityRequest = WriteOperationRequest &
-	AccessNetworksUnleashedRequestInput
+	AccessNetworksUnleashedRequestInput & {
+		/**
+		 * Escape hatch for raw `setconf` on a `*-list` component. Requires the
+		 * matching `dangerousListSetconfConfirmation` phrase. Prefer addobj /
+		 * updobj / delobj (and the typed WLAN tools) instead.
+		 */
+		allowDangerousPositionalListSetconf?: boolean
+		dangerousListSetconfConfirmation?: string
+	}
 
 export const accessNetworksUnleashedRequestConfirmation =
 	'I am highly certain making this raw Access Networks Unleashed AJAX request is necessary right now.'
@@ -68,31 +83,99 @@ const validActions: ReadonlySet<AccessNetworksUnleashedAjaxAction> =
 		'getconf',
 		'setconf',
 		'docmd',
+		'addobj',
+		'updobj',
+		'delobj',
 	])
+
+export const accessNetworksUnleashedWlanWritesDisabledMessage =
+	'Access Networks Unleashed WLAN writes are disabled. On this firmware setconf on wlansvc-list always hits the FIRST WLAN (Oct 12 + Oct 17 2026 incidents), and addobj/updobj/delobj have not been validated live yet. ' +
+	'Nothing was sent. Kent must explicitly enable them for a supervised test with access_networks_unleashed_set_config { wlanWritesEnabled: true } (and turn them off again afterward).'
+
+/** Exact phrase required to unlock raw setconf on a `*-list` component. */
+export const accessNetworksUnleashedDangerousListSetconfConfirmation =
+	'I understand that setconf on *-list is positional on Unleashed 200.x and can overwrite the first list entry regardless of id.'
+
+function assertWlanWritesEnabled(config: HomeConnectorConfig) {
+	if (config.accessNetworksUnleashedWlanWritesEnabled !== true) {
+		throw new AccessNetworksUnleashedWlanWriteRefusedError(
+			accessNetworksUnleashedWlanWritesDisabledMessage,
+		)
+	}
+}
 
 function assertSafeRawWlanWrite(input: {
 	action: AccessNetworksUnleashedAjaxAction
 	comp: string
 	xmlBody: string
+	config: HomeConnectorConfig
+	allowDangerousPositionalListSetconf?: boolean
+	dangerousListSetconfConfirmation?: string
 }) {
+	const comp = input.comp.trim().toLowerCase()
+	if (
+		input.action === 'addobj' ||
+		input.action === 'updobj' ||
+		input.action === 'delobj'
+	) {
+		if (
+			comp === 'wlansvc-list' ||
+			countTopLevelWlansvcElements(input.xmlBody) > 0
+		) {
+			assertWlanWritesEnabled(input.config)
+			// Same wire guard as the typed tools: explicit id or addobj create.
+			assertTargetedWlanWrite(input.action, input.xmlBody)
+		}
+		return
+	}
 	if (input.action !== 'setconf') return
+	if (comp.endsWith('-list')) {
+		const escapeHatchArmed =
+			input.allowDangerousPositionalListSetconf === true &&
+			input.dangerousListSetconfConfirmation ===
+				accessNetworksUnleashedDangerousListSetconfConfirmation
+		if (!escapeHatchArmed) {
+			throw new Error(
+				`Refusing raw setconf on list component "${input.comp}". On Unleashed 200.x setconf on a *-list component is positional (it targets the first entry whatever id you send). ` +
+					'Use addobj (create), updobj (by id, IS_PARTIAL), or delobj (by id) instead; for WLANs use the typed update/clone/delete_wlan tools. ' +
+					'Escape hatch (HIGH RISK): set allowDangerousPositionalListSetconf=true and dangerousListSetconfConfirmation to the exact phrase documenting that you understand positional overwrite.',
+			)
+		}
+		if (comp === 'wlansvc-list') {
+			assertWlanWritesEnabled(input.config)
+		}
+		return
+	}
 	if (xmlBodyLooksLikeFullWlanListWrite(input.xmlBody)) {
 		throw new Error(
 			'Refusing to setconf a whole WLAN list (wlansvc-list wrapper or multiple <wlansvc> elements). ' +
 				'That pattern can overwrite the first WLAN by list position and duplicate ids ' +
 				'(Oct 12 friendlyguest/friendlyfamily incident). ' +
-				'Use access_networks_unleashed_update_wlan or access_networks_unleashed_clone_wlan, ' +
+				'Use access_networks_unleashed_update_wlan, access_networks_unleashed_clone_wlan, or access_networks_unleashed_delete_wlan, ' +
 				'which target a single wlansvc id, snapshot first, and roll back on unexpected diffs.',
 		)
 	}
-	if (xmlBodyLooksLikeFullObjectWlanWrite(input.xmlBody)) {
+	if (
+		input.comp.trim().toLowerCase() === 'wlansvc-list' ||
+		countTopLevelWlansvcElements(input.xmlBody) > 0
+	) {
 		throw new Error(
-			'Refusing raw setconf of a full <wlansvc> object without IS_PARTIAL. ' +
-				'Full-object writes can be applied by list position and duplicate ids. ' +
-				'Use access_networks_unleashed_update_wlan (partial by id) or ' +
-				'access_networks_unleashed_clone_wlan (create by cloning).',
+			'Refusing raw setconf of a <wlansvc> / wlansvc-list. On Unleashed 200.x a single-<wlansvc> setconf ' +
+				'is applied to the FIRST WLAN in the list regardless of its id (observed Oct 12 with id="5" and ' +
+				'Oct 17 with no id, both overwriting friendlyfamily). ' +
+				'Use access_networks_unleashed_update_wlan (updobj by id), access_networks_unleashed_clone_wlan ' +
+				'(addobj create), or access_networks_unleashed_delete_wlan (delobj by id).',
 		)
 	}
+}
+
+/** Strip WPA / portal secrets from any raw AJAX response before returning it. */
+function redactRequestResult(
+	result: AccessNetworksUnleashedRequestResult,
+): AccessNetworksUnleashedRequestResult {
+	const xml = redactSecretsInXmlText(result.xml)
+	if (xml === result.xml) return result
+	return { ...result, xml, parsed: parseAccessNetworksUnleashedXml(xml) }
 }
 
 function getConfigStatus(
@@ -385,6 +468,11 @@ export function createAccessNetworksUnleashedAdapter(input: {
 				action: request.action,
 				comp,
 				xmlBody,
+				config,
+				allowDangerousPositionalListSetconf:
+					request.allowDangerousPositionalListSetconf,
+				dangerousListSetconfConfirmation:
+					request.dangerousListSetconfConfirmation,
 			})
 			const client = await createClient()
 			const adoptedController = await requireControllerWithCredentials()
@@ -404,7 +492,7 @@ export function createAccessNetworksUnleashedAdapter(input: {
 					lastAuthenticatedAt: new Date().toISOString(),
 					lastAuthError: null,
 				})
-				return result
+				return redactRequestResult(result)
 			} catch (error) {
 				// Only record authentication errors against the controller. Generic
 				// raw-request failures (malformed payload, unsupported component,
@@ -425,9 +513,10 @@ export function createAccessNetworksUnleashedAdapter(input: {
 		},
 		async listWlans() {
 			const client = await createClient()
-			const snapshot = await fetchWlanSnapshot(client)
+			// Lenient read: an id-less or duplicate entry is reported, not fatal.
+			const list = await readWlanList(client)
 			return {
-				wlans: snapshot.entries.map((entry) => {
+				wlans: list.entries.map((entry) => {
 					const redacted = redactWlanSecrets(entry)
 					return {
 						id: redacted.id,
@@ -439,12 +528,21 @@ export function createAccessNetworksUnleashedAdapter(input: {
 				}),
 				// Full list xml is omitted from the tool response to avoid leaking
 				// WPA secrets; use get_wlan for a single redacted entry.
-				wlanCount: snapshot.entries.length,
+				wlanCount: list.entries.length + list.anomalies.length,
+				anomalies: list.anomalies.map((anomaly) => ({
+					index: anomaly.index,
+					kind: anomaly.kind,
+					name: anomaly.name,
+					ssid: anomaly.ssid,
+				})),
+				duplicateIds: list.duplicateIds,
+				damaged: list.anomalies.length > 0 || list.duplicateIds.length > 0,
+				damageSummary: describeWlanListDamage(list),
 			}
 		},
 		async getWlan(input: { id: string }) {
 			const client = await createClient()
-			const { wlan, snapshot } = await getWlanById(client, input.id)
+			const { wlan, list } = await getWlanById(client, input.id)
 			const redacted = redactWlanSecrets(wlan)
 			return {
 				wlan: {
@@ -454,22 +552,38 @@ export function createAccessNetworksUnleashedAdapter(input: {
 					attributes: redacted.attributes,
 					rawXml: redacted.rawXml,
 				},
-				wlanCount: snapshot.entries.length,
+				wlanCount: list.entries.length + list.anomalies.length,
+				damageSummary: describeWlanListDamage(list),
 			}
+		},
+		async checkWlanWriteReadiness() {
+			const client = await createClient()
+			return await checkWlanWriteReadiness(client)
 		},
 		async updateWlan(
 			request: WriteOperationRequest & {
 				id: string
 				attributes: Record<string, string>
+				acceptUnrestorablePassphrases?: boolean
+				dryRun?: boolean
 			},
 		) {
-			assertWriteAllowed(request, accessNetworksUnleashedWlanWriteConfirmation)
+			const dryRun = request.dryRun === true
+			if (!dryRun) {
+				assertWriteAllowed(
+					request,
+					accessNetworksUnleashedWlanWriteConfirmation,
+				)
+				assertWlanWritesEnabled(config)
+			}
 			return await withWlanWriteLock(async () => {
 				const client = await createClient()
 				return await updateWlanById({
 					client,
 					id: request.id,
 					attributes: request.attributes,
+					acceptUnrestorablePassphrases: request.acceptUnrestorablePassphrases,
+					dryRun,
 				})
 			})
 		},
@@ -477,15 +591,53 @@ export function createAccessNetworksUnleashedAdapter(input: {
 			request: WriteOperationRequest & {
 				sourceId: string
 				overrides?: WlanAttributeOverrides
+				acceptUnrestorablePassphrases?: boolean
+				dryRun?: boolean
 			},
 		) {
-			assertWriteAllowed(request, accessNetworksUnleashedWlanWriteConfirmation)
+			const dryRun = request.dryRun === true
+			if (!dryRun) {
+				assertWriteAllowed(
+					request,
+					accessNetworksUnleashedWlanWriteConfirmation,
+				)
+				assertWlanWritesEnabled(config)
+			}
 			return await withWlanWriteLock(async () => {
 				const client = await createClient()
 				return await cloneWlanById({
 					client,
 					sourceId: request.sourceId,
 					overrides: request.overrides,
+					acceptUnrestorablePassphrases: request.acceptUnrestorablePassphrases,
+					dryRun,
+				})
+			})
+		},
+		async deleteWlan(
+			request: WriteOperationRequest & {
+				id: string
+				expectedName: string
+				acceptUnrestorablePassphrases?: boolean
+				dryRun?: boolean
+			},
+		) {
+			const dryRun = request.dryRun === true
+			if (!dryRun) {
+				assertWriteAllowed(
+					request,
+					accessNetworksUnleashedWlanWriteConfirmation,
+				)
+				assertWlanWritesEnabled(config)
+			}
+			return await withWlanWriteLock(async () => {
+				const client = await createClient()
+				return await deleteWlanById({
+					client,
+					id: request.id,
+					expectedName: request.expectedName,
+					acceptUnrestorablePassphrases: request.acceptUnrestorablePassphrases,
+					dryRun,
 				})
 			})
 		},
@@ -494,6 +646,7 @@ export function createAccessNetworksUnleashedAdapter(input: {
 
 export {
 	AccessNetworksUnleashedWlanSafetyError,
+	AccessNetworksUnleashedWlanWriteRefusedError,
 	type WlanAttributeOverrides,
 	type WlanRadioBand,
 } from './wlan-ops.ts'

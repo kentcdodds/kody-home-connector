@@ -71,6 +71,17 @@ export type AccessNetworksUnleashedAjaxAction =
 	| 'getconf'
 	| 'setconf'
 	| 'docmd'
+	/**
+	 * Object-level config actions used by the Unleashed/ZoneDirector admin UI
+	 * (and aioruckus / ruckus-go / the CommScope Postman collection):
+	 * `addobj` creates a new object (controller assigns the id), `updobj`
+	 * updates the object named by its `id`, `delobj` deletes by `id`.
+	 * Typed WLAN tools prefer these; the raw request tool also accepts them
+	 * (with the same id / no-id guards on wlansvc-list).
+	 */
+	| 'addobj'
+	| 'updobj'
+	| 'delobj'
 
 export type AccessNetworksUnleashedRequestInput = {
 	action: AccessNetworksUnleashedAjaxAction
@@ -83,6 +94,13 @@ export type AccessNetworksUnleashedRequestInput = {
 	 */
 	caller?: string
 	allowInsecureTls?: boolean
+	/**
+	 * getconf only: send `DECRYPT_X="true"` so the controller includes WPA /
+	 * SAE passphrases (plaintext plus the `x-` obfuscated twin). Internal to
+	 * WLAN write snapshots so rollback can restore secrets; never exposed on
+	 * the raw request tool and never returned through tool output.
+	 */
+	decryptSecrets?: boolean
 }
 
 export type AccessNetworksUnleashedRequestResult = {

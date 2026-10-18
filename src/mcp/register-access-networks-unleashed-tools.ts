@@ -2,10 +2,15 @@ import { type CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { markSecretInputFields } from '@kody-bot/connector-kit/schema'
 import { z } from 'zod'
 import {
+	accessNetworksUnleashedDangerousListSetconfConfirmation,
 	accessNetworksUnleashedRequestConfirmation,
 	accessNetworksUnleashedWlanWriteConfirmation,
 	type createAccessNetworksUnleashedAdapter,
 } from '../adapters/access-networks-unleashed/index.ts'
+import {
+	redactSecretAttributes,
+	redactSecretsInXmlText,
+} from '../adapters/access-networks-unleashed/wlan-xml.ts'
 import {
 	buildToolInputSchema,
 	type SdkToolInputSchema,
@@ -48,22 +53,25 @@ const requestDangerNotice =
 
 const requestDescription = `${requestDangerNotice}
 
-Posts an authenticated text/xml AJAX payload using the stored credentials and the managed session (cookie jar + X-CSRF-Token). getstat/docmd go to POST {host}/admin/_cmdstat.jsp; getconf/setconf go to POST {host}/admin/_conf.jsp. The session is reused across calls and re-established automatically when it expires.
+Posts an authenticated text/xml AJAX payload using the stored credentials and the managed session (cookie jar + X-CSRF-Token). getstat/docmd go to POST {host}/admin/_cmdstat.jsp; getconf/setconf/addobj/updobj/delobj go to POST {host}/admin/_conf.jsp. The session is reused across calls and re-established automatically when it expires.
 
-WLAN WRITES: do NOT use this tool to create/update WLANs or to setconf a whole wlansvc-list. Whole-list / position-based setconf can overwrite the first WLAN and duplicate ids (Oct 12 incident). Use access_networks_unleashed_get_wlan, access_networks_unleashed_update_wlan, and access_networks_unleashed_clone_wlan instead. This raw tool rejects setconf bodies that wrap <wlansvc-list> or contain multiple <wlansvc> elements.
+WLAN WRITES: this raw tool refuses every setconf on wlansvc-list or containing a <wlansvc>. On Unleashed 200.x a single-<wlansvc> setconf is applied to the FIRST WLAN in the list regardless of id (Oct 12 and Oct 17 incidents, both overwrote friendlyfamily). Use access_networks_unleashed_update_wlan (updobj by id), access_networks_unleashed_clone_wlan (addobj), and access_networks_unleashed_delete_wlan (delobj by id) instead.
+
+SECRETS: WPA/SAE passphrases, guest-pass values, and every x- obfuscated attribute are redacted from the returned XML and parsed object.
 
 Inputs:
-- action: 'getstat' | 'getconf' | 'setconf' | 'docmd'.
+- action: 'getstat' | 'getconf' | 'setconf' | 'docmd' | 'addobj' | 'updobj' | 'delobj'. setconf is refused on any *-list comp unless the dangerous positional escape hatch is armed. addobj/updobj/delobj on wlansvc-list additionally require WLAN writes to be enabled (wlanWritesEnabled) and an explicit id (updobj/delobj) or no id (addobj), and get no snapshot/rollback — prefer the typed WLAN tools.
 - comp: Unleashed component name such as 'system', 'stamgr', 'wlansvc-list', 'apStat', 'eventd'.
 - xmlBody: inner XML appended inside the <ajax-request> envelope (may be empty for getconf).
 - updater: optional updater string. Required by getconf/setconf/docmd when omitted the connector generates "<comp>.<timestamp>.<rand>"; getstat omits updater unless supplied.
 - caller: optional ajax-request caller attribute. When omitted, getstat vap/wlangroup bodies default to caller="SCI" (aioruckus ground truth). Bare &lt;vap/&gt; bodies are normalized to &lt;vap INTERVAL-STATS="no" LEVEL="1"/&gt;.
 - allowInsecureTls: optional boolean. When omitted, falls back to the connector-wide ACCESS_NETWORKS_UNLEASHED_ALLOW_INSECURE_TLS setting (off unless explicitly enabled). Only applies to the actual AJAX post; the connector-wide setting also governs session establishment so concurrent callers cannot disagree about login-time TLS.
+- allowDangerousPositionalListSetconf + dangerousListSetconfConfirmation: escape hatch for setconf on *-list only. Both required; confirmation must be the exact phrase documenting that you understand positional overwrite. Prefer addobj/updobj/delobj. For wlansvc-list this also requires wlanWritesEnabled.
 
 Returns the raw XML response and a best-effort parsed object.`
 
 const wlanWriteDangerNotice =
-	'HIGH RISK: mutates live Unleashed WLAN configuration on the adopted controller. Every write snapshots the full wlansvc-list first, re-reads after the write, and automatically rolls back if any other WLAN changed, ids are duplicated/missing, or the target id does not match.'
+	'DISABLED BY DEFAULT: refuses unless Kent enabled access_networks_unleashed_set_config { wlanWritesEnabled: true } for a supervised test. HIGH RISK: mutates live Unleashed WLAN configuration on the adopted controller. Writes use the Unleashed object actions (addobj / updobj / delobj on wlansvc-list) and every payload must carry an explicit target id (or be an addobj create). Before writing, the tool takes a restorable snapshot (DECRYPT_X so passphrases can be restored; secrets are never returned) and refuses if the list is damaged or any PSK WLAN secret is missing. After writing it re-reads and, on ANY anomaly (other WLAN changed, id missing/duplicated, id-less entry, failed re-read), rolls back first and then reports.'
 
 export function registerAccessNetworksUnleashedHomeConnectorTools(input: {
 	registerTool: (
@@ -234,9 +242,17 @@ export function registerAccessNetworksUnleashedHomeConnectorTools(input: {
 
 	const requestSchema = buildToolInputSchema({
 		action: z
-			.enum(['getstat', 'getconf', 'setconf', 'docmd'])
+			.enum([
+				'getstat',
+				'getconf',
+				'setconf',
+				'docmd',
+				'addobj',
+				'updobj',
+				'delobj',
+			])
 			.describe(
-				"Unleashed AJAX action: 'getstat' for status reads via _cmdstat.jsp, 'getconf' for config reads via _conf.jsp, 'setconf' for object mutations, 'docmd' for command-style operations such as block client or restart AP.",
+				"Unleashed AJAX action: 'getstat' for status reads via _cmdstat.jsp, 'getconf' for config reads via _conf.jsp, 'addobj' / 'updobj' / 'delobj' for object create / update-by-id / delete-by-id on *-list components via _conf.jsp (the Unleashed web UI / aioruckus semantics), 'setconf' for non-list config only (refused on any *-list comp because it is positional), 'docmd' for command-style operations such as block client or restart AP.",
 			),
 		comp: z
 			.string()
@@ -286,6 +302,18 @@ export function registerAccessNetworksUnleashedHomeConnectorTools(input: {
 			.describe(
 				'Exact confirmation phrase required by the tool. The tool rejects any other value.',
 			),
+		allowDangerousPositionalListSetconf: z
+			.boolean()
+			.optional()
+			.describe(
+				'Escape hatch only: allow setconf on a *-list component despite positional-overwrite risk. Requires dangerousListSetconfConfirmation.',
+			),
+		dangerousListSetconfConfirmation: z
+			.literal(accessNetworksUnleashedDangerousListSetconfConfirmation)
+			.optional()
+			.describe(
+				`Exact escape-hatch phrase: "${accessNetworksUnleashedDangerousListSetconfConfirmation}"`,
+			),
 	})
 
 	registerTool(
@@ -301,7 +329,14 @@ export function registerAccessNetworksUnleashedHomeConnectorTools(input: {
 		},
 		async (args) => {
 			const result = await accessNetworksUnleashed.request({
-				action: args['action'] as 'getstat' | 'getconf' | 'setconf' | 'docmd',
+				action: args['action'] as
+					| 'getstat'
+					| 'getconf'
+					| 'setconf'
+					| 'docmd'
+					| 'addobj'
+					| 'updobj'
+					| 'delobj',
 				comp: String(args['comp'] ?? ''),
 				xmlBody: String(args['xmlBody'] ?? ''),
 				updater: args['updater'] == null ? undefined : String(args['updater']),
@@ -310,6 +345,12 @@ export function registerAccessNetworksUnleashedHomeConnectorTools(input: {
 					typeof args['allowInsecureTls'] === 'boolean'
 						? args['allowInsecureTls']
 						: undefined,
+				allowDangerousPositionalListSetconf:
+					args['allowDangerousPositionalListSetconf'] === true,
+				dangerousListSetconfConfirmation:
+					args['dangerousListSetconfConfirmation'] == null
+						? undefined
+						: String(args['dangerousListSetconfConfirmation']),
 				acknowledgeHighRisk: args['acknowledgeHighRisk'] === true,
 				reason: String(args['reason'] ?? ''),
 				confirmation: String(args['confirmation'] ?? ''),
@@ -326,7 +367,7 @@ export function registerAccessNetworksUnleashedHomeConnectorTools(input: {
 			name: 'access_networks_unleashed_list_wlans',
 			title: 'List Access Networks Unleashed WLANs',
 			description:
-				'Read-only getconf of wlansvc-list. Returns every WLAN with its stable wlansvc id, name, ssid, attributes, and raw XML. Prefer this (or get_wlan) before any WLAN write so you target by id, never by list position.',
+				'Read-only getconf of wlansvc-list. Returns every WLAN with its stable wlansvc id, name, ssid, attributes, and raw XML (secrets redacted). Works even when the list is damaged: entries with no id are listed under anomalies and duplicate ids under duplicateIds (writes refuse until repaired). Prefer this (or get_wlan) before any WLAN write so you target by id, never by list position.',
 			inputSchema: {},
 			annotations: {
 				readOnlyHint: true,
@@ -387,24 +428,39 @@ export function registerAccessNetworksUnleashedHomeConnectorTools(input: {
 		attributes: z
 			.record(z.string(), z.string())
 			.describe(
-				'Only the Unleashed attributes to change (exact names). Example: { "vlan-id": "20" }. Sent as a single-id IS_PARTIAL setconf on wlansvc-list — never a full list rewrite.',
+				'Only the Unleashed attributes to change (exact names already present on the WLAN). Example: { "vlan-id": "20" } or { "enable-type": "1" } to disable. Sent as a single-id updobj IS_PARTIAL on wlansvc-list — never a list rewrite.',
+			),
+		acceptUnrestorablePassphrases: z
+			.boolean()
+			.optional()
+			.describe(
+				"Default false: the write is refused if any WLAN passphrase could not be captured in the snapshot. Set true only with Kent's explicit acceptance that those passphrases cannot be auto-restored; rollback then restores only their root attributes and never re-creates them. Clone always refuses if the SOURCE passphrase is missing.",
+			),
+		dryRun: z
+			.boolean()
+			.optional()
+			.describe(
+				'When true: take the restorable snapshot, build the exact updobj request, and return it without sending. Does not require wlanWritesEnabled or the high-risk confirmation. Secrets in the planned request are redacted.',
 			),
 		acknowledgeHighRisk: z
 			.literal(true)
+			.optional()
 			.describe(
-				'Must be true. Confirms you intend a live per-WLAN mutation with automatic snapshot/diff/rollback.',
+				'Required unless dryRun=true. Confirms you intend a live per-WLAN mutation with automatic snapshot/diff/rollback.',
 			),
 		reason: z
 			.string()
 			.min(20)
 			.max(500)
+			.optional()
 			.describe(
-				'Operator justification (≥20 chars). Name the WLAN id and the intended attribute change.',
+				'Required unless dryRun=true. Operator justification (≥20 chars). Name the WLAN id and the intended attribute change.',
 			),
 		confirmation: z
 			.literal(accessNetworksUnleashedWlanWriteConfirmation)
+			.optional()
 			.describe(
-				'Exact confirmation phrase required by the tool. The tool rejects any other value.',
+				'Required unless dryRun=true. Exact confirmation phrase required by the tool.',
 			),
 	})
 
@@ -414,7 +470,9 @@ export function registerAccessNetworksUnleashedHomeConnectorTools(input: {
 			title: 'Update Access Networks Unleashed WLAN By Id',
 			description: `${wlanWriteDangerNotice}
 
-Updates one WLAN by wlansvc id. Sends only the changed attributes as IS_PARTIAL setconf on comp=wlansvc-list (id is required on the wire). Before writing: snapshots the full wlansvc-list. After writing: re-reads, verifies the target id still matches, verifies each requested attribute, and verifies no other WLAN changed and ids are not duplicated/missing. On any safety failure, restores the snapshot and returns a clear error.
+Updates one WLAN by wlansvc id. Sends only the changed attributes as updobj + IS_PARTIAL on comp=wlansvc-list (aioruckus do_disable_wlan pattern; id is required on the wire). Attribute names must already exist on the WLAN; secrets, id, and the bogus "radio" attribute are refused. After writing: re-reads, verifies the target changed only as requested and no other WLAN changed; otherwise rolls back.
+
+dryRun=true returns the exact request(s) without sending (works while writes are disabled).
 
 Do not pass the whole WLAN object or a wlansvc-list. Prefer get_wlan first.`,
 			inputSchema: updateWlanSchema.inputSchema,
@@ -440,32 +498,43 @@ Do not pass the whole WLAN object or a wlansvc-list. Prefer get_wlan first.`,
 			)) {
 				attributes[key] = String(value)
 			}
+			const dryRun = args['dryRun'] === true
 			const result = await accessNetworksUnleashed.updateWlan({
 				id: String(args['id'] ?? ''),
 				attributes,
+				acceptUnrestorablePassphrases:
+					args['acceptUnrestorablePassphrases'] === true,
+				dryRun,
 				acknowledgeHighRisk: args['acknowledgeHighRisk'] === true,
 				reason: String(args['reason'] ?? ''),
 				confirmation: String(args['confirmation'] ?? ''),
 			})
 			return structuredTextResult(
-				`Updated WLAN id ${result.id}; safety check passed (no rollback).`,
+				dryRun
+					? `Dry-run update for WLAN id ${result.id}: nothing sent.`
+					: `Updated WLAN id ${result.id}; safety check passed (no rollback).`,
 				{
+					dryRun: result.dryRun,
 					id: result.id,
 					before: {
 						id: result.before.id,
 						name: result.before.name,
 						ssid: result.before.ssid,
-						attributes: result.before.attributes,
+						attributes: redactSecretAttributes(result.before.attributes),
 					},
-					after: {
-						id: result.after.id,
-						name: result.after.name,
-						ssid: result.after.ssid,
-						attributes: result.after.attributes,
-					},
+					after: result.after
+						? {
+								id: result.after.id,
+								name: result.after.name,
+								ssid: result.after.ssid,
+								attributes: redactSecretAttributes(result.after.attributes),
+							}
+						: null,
 					appliedAttributes: result.appliedAttributes,
 					safety: result.safety,
-					setconfXml: result.setconfXml,
+					requestAction: result.requestAction,
+					requestXml: redactSecretsInXmlText(result.requestXml),
+					requests: result.requests,
 				},
 			)
 		},
@@ -489,22 +558,36 @@ Do not pass the whole WLAN object or a wlansvc-list. Prefer get_wlan first.`,
 					.enum(['all', '2.4ghz', '5ghz', '6ghz'])
 					.optional()
 					.describe(
-						'Convenience mapping onto the wlansvc `radio` attribute (Both / 2.4G / 5G / 6G). For other radio-related attrs, use attributes.',
+						'Radio band restriction, mapped onto the real Unleashed flags wlan-bind-24g / wlan-bind-5g / wlan-bind-6g ("2.4ghz" = 24g true, 5g false, 6g false; "all" = all true).',
 					),
 				attributes: z
 					.record(z.string(), z.string())
 					.optional()
 					.describe(
-						'Exact Unleashed attribute overrides merged on top of the cloned XML (id is stripped before create).',
+						'Exact Unleashed root attribute overrides merged on top of the cloned XML. Names must already exist on the source (e.g. "enable-type": "1" creates it disabled). id/create-time are stripped before create; secrets cannot be overridden.',
 					),
 			})
 			.optional()
 			.describe(
 				'Optional overrides applied after cloning the full source XML (id removed). Typical: name/ssid and radioBand for a 2.4 GHz-only copy.',
 			),
-		acknowledgeHighRisk: z.literal(true),
-		reason: z.string().min(20).max(500),
-		confirmation: z.literal(accessNetworksUnleashedWlanWriteConfirmation),
+		acceptUnrestorablePassphrases: z
+			.boolean()
+			.optional()
+			.describe(
+				"Default false: the write is refused if any WLAN passphrase could not be captured in the snapshot. Set true only with Kent's explicit acceptance that those passphrases cannot be auto-restored; rollback then restores only their root attributes and never re-creates them. Clone always refuses if the SOURCE passphrase is missing.",
+			),
+		dryRun: z
+			.boolean()
+			.optional()
+			.describe(
+				'When true: snapshot + build the exact addobj create payload and return it without sending. Does not require wlanWritesEnabled or the high-risk confirmation. Secrets in the planned request are redacted.',
+			),
+		acknowledgeHighRisk: z.literal(true).optional(),
+		reason: z.string().min(20).max(500).optional(),
+		confirmation: z
+			.literal(accessNetworksUnleashedWlanWriteConfirmation)
+			.optional(),
 	})
 
 	registerTool(
@@ -513,7 +596,9 @@ Do not pass the whole WLAN object or a wlansvc-list. Prefer get_wlan first.`,
 			title: 'Clone Access Networks Unleashed WLAN By Id',
 			description: `${wlanWriteDangerNotice}
 
-Creates a new WLAN by cloning an existing one by wlansvc id. Copies the full source <wlansvc> (guest portal, client isolation, access VLAN, WPA, schedule, etc.), strips the id, applies optional overrides, and setconfs a single create payload on wlansvc-list. Snapshots before write; after write verifies exactly one new id appeared, the source is unchanged, and no other WLAN moved. Rolls back automatically on failure.`,
+Creates a new WLAN by cloning an existing one by wlansvc id. Starts from getconf wlansvc-standard-template, lays the source WLAN on top (source wins), strips id/create-time, applies optional overrides, and sends ONE addobj on wlansvc-list (controller assigns the id). Refuses duplicate names/SSIDs. After write verifies exactly one new id appeared matching the payload and no other WLAN changed; otherwise restores the snapshot.
+
+dryRun=true returns the exact addobj request without sending (works while writes are disabled).`,
 			inputSchema: cloneWlanSchema.inputSchema,
 			sdkInputSchema: cloneWlanSchema.sdkInputSchema,
 			annotations: {
@@ -572,31 +657,145 @@ Creates a new WLAN by cloning an existing one by wlansvc id. Copies the full sou
 					attributes,
 				}
 			}
+			const dryRun = args['dryRun'] === true
 			const result = await accessNetworksUnleashed.cloneWlan({
 				sourceId: String(args['sourceId'] ?? ''),
 				overrides,
+				acceptUnrestorablePassphrases:
+					args['acceptUnrestorablePassphrases'] === true,
+				dryRun,
 				acknowledgeHighRisk: args['acknowledgeHighRisk'] === true,
 				reason: String(args['reason'] ?? ''),
 				confirmation: String(args['confirmation'] ?? ''),
 			})
 			return structuredTextResult(
-				`Cloned WLAN id ${result.sourceId} → new id ${result.created.id}; safety check passed (no rollback).`,
+				dryRun
+					? `Dry-run clone of WLAN id ${result.sourceId}: nothing sent.`
+					: `Cloned WLAN id ${result.sourceId} → new id ${result.created?.id ?? '?'}; safety check passed (no rollback).`,
 				{
+					dryRun: result.dryRun,
 					sourceId: result.sourceId,
 					source: {
 						id: result.source.id,
 						name: result.source.name,
 						ssid: result.source.ssid,
 					},
-					created: {
-						id: result.created.id,
-						name: result.created.name,
-						ssid: result.created.ssid,
-						attributes: result.created.attributes,
-					},
-					overridesApplied: result.overridesApplied,
+					created: result.created
+						? {
+								id: result.created.id,
+								name: result.created.name,
+								ssid: result.created.ssid,
+								attributes: redactSecretAttributes(result.created.attributes),
+							}
+						: null,
+					overridesApplied: redactSecretAttributes(result.overridesApplied),
 					safety: result.safety,
-					setconfXml: result.setconfXml,
+					requestAction: result.requestAction,
+					requestXml: result.requestXml,
+					requests: result.requests,
+					warnings: result.warnings,
+				},
+			)
+		},
+	)
+
+	registerTool(
+		{
+			name: 'access_networks_unleashed_check_wlan_write_readiness',
+			title: 'Check Access Networks Unleashed WLAN Write Readiness',
+			description:
+				'Read-only. Reads wlansvc-list twice with DECRYPT_X (secrets stay in memory, never returned) and reports whether a WLAN write could be fully snapshotted and rolled back right now: no id-less or duplicate entries, every WPA/SAE PSK WLAN has its passphrase captured, and two consecutive reads agree. Run this before any WLAN write.',
+			inputSchema: {},
+			annotations: {
+				readOnlyHint: true,
+				idempotentHint: true,
+			},
+		},
+		async () => {
+			const result = await accessNetworksUnleashed.checkWlanWriteReadiness()
+			return structuredTextResult(
+				result.ready
+					? 'WLAN writes are ready: snapshot would be complete and restorable.'
+					: `WLAN writes are NOT ready: ${result.problems.join('; ')}`,
+				result,
+			)
+		},
+	)
+
+	const deleteWlanSchema = buildToolInputSchema({
+		id: z
+			.string()
+			.min(1)
+			.describe('Stable wlansvc id to delete (from list_wlans / get_wlan).'),
+		expectedName: z
+			.string()
+			.min(1)
+			.describe(
+				'Current name of that WLAN. The delete is refused unless it matches, guarding against a wrong id.',
+			),
+		acceptUnrestorablePassphrases: z
+			.boolean()
+			.optional()
+			.describe(
+				"Default false: the write is refused if any WLAN passphrase could not be captured in the snapshot. Set true only with Kent's explicit acceptance that those passphrases cannot be auto-restored; rollback then restores only their root attributes and never re-creates them. Clone always refuses if the SOURCE passphrase is missing.",
+			),
+		dryRun: z
+			.boolean()
+			.optional()
+			.describe(
+				'When true: snapshot + build the exact delobj request and return it without sending. Does not require wlanWritesEnabled or the high-risk confirmation.',
+			),
+		acknowledgeHighRisk: z.literal(true).optional(),
+		reason: z.string().min(20).max(500).optional(),
+		confirmation: z
+			.literal(accessNetworksUnleashedWlanWriteConfirmation)
+			.optional(),
+	})
+
+	registerTool(
+		{
+			name: 'access_networks_unleashed_delete_wlan',
+			title: 'Delete Access Networks Unleashed WLAN By Id',
+			description: `${wlanWriteDangerNotice}
+
+Deletes one WLAN by wlansvc id with delobj (<wlansvc id='N'/>, the aioruckus / ruckus-go delete). Requires expectedName to match. After write verifies only that id disappeared; otherwise re-creates it from the snapshot (addobj; the controller may assign a new id).
+
+dryRun=true returns the exact delobj request without sending (works while writes are disabled).`,
+			inputSchema: deleteWlanSchema.inputSchema,
+			sdkInputSchema: deleteWlanSchema.sdkInputSchema,
+			annotations: {
+				destructiveHint: true,
+			},
+		},
+		async (args) => {
+			const dryRun = args['dryRun'] === true
+			const result = await accessNetworksUnleashed.deleteWlan({
+				id: String(args['id'] ?? ''),
+				expectedName: String(args['expectedName'] ?? ''),
+				acceptUnrestorablePassphrases:
+					args['acceptUnrestorablePassphrases'] === true,
+				dryRun,
+				acknowledgeHighRisk: args['acknowledgeHighRisk'] === true,
+				reason: String(args['reason'] ?? ''),
+				confirmation: String(args['confirmation'] ?? ''),
+			})
+			return structuredTextResult(
+				dryRun
+					? `Dry-run delete for WLAN id ${result.id}: nothing sent.`
+					: `Deleted WLAN id ${result.id} (${result.deleted.name ?? '?'}); safety check passed (no rollback).`,
+				{
+					dryRun: result.dryRun,
+					id: result.id,
+					deleted: {
+						id: result.deleted.id,
+						name: result.deleted.name,
+						ssid: result.deleted.ssid,
+					},
+					safety: result.safety,
+					requestAction: result.requestAction,
+					requestXml: result.requestXml,
+					requests: result.requests,
+					warnings: result.warnings,
 				},
 			)
 		},

@@ -3,8 +3,11 @@ import { loadHomeConnectorConfig } from '../../config.ts'
 import { createAppState } from '../../state.ts'
 import { createHomeConnectorStorage } from '../../storage/index.ts'
 import { AccessNetworksUnleashedAuthError } from './errors.ts'
+import { readFileSync } from 'node:fs'
 import {
+	accessNetworksUnleashedDangerousListSetconfConfirmation,
 	accessNetworksUnleashedRequestConfirmation,
+	accessNetworksUnleashedWlanWriteConfirmation,
 	createAccessNetworksUnleashedAdapter,
 } from './index.ts'
 
@@ -283,7 +286,7 @@ test('request refuses whole-list WLAN setconf payloads', async () => {
 				reason: validReason,
 				confirmation: accessNetworksUnleashedRequestConfirmation,
 			}),
-		).rejects.toThrow(/whole WLAN list|update_wlan|clone_wlan/i)
+		).rejects.toThrow(/whole WLAN list|list component|update_wlan|clone_wlan/i)
 
 		await expect(
 			adapter.request({
@@ -295,7 +298,7 @@ test('request refuses whole-list WLAN setconf payloads', async () => {
 				reason: validReason,
 				confirmation: accessNetworksUnleashedRequestConfirmation,
 			}),
-		).rejects.toThrow(/full <wlansvc> object without IS_PARTIAL|update_wlan/i)
+		).rejects.toThrow(/positional|update_wlan/i)
 	} finally {
 		await storage.close()
 	}
@@ -533,6 +536,374 @@ test('request does not record lastAuthError for command rejection text', async (
 		const adopted = await adapter.getAdoptedController()
 		expect(adopted?.lastAuthenticatedAt).toBe(afterAuth?.lastAuthenticatedAt)
 		expect(adopted?.lastAuthError).toBeNull()
+	} finally {
+		await storage.close()
+	}
+})
+
+async function createAdoptedAdapterWithClient(
+	request: (input: {
+		action: string
+		comp: string
+		xmlBody: string
+		decryptSecrets?: boolean
+	}) => Promise<string>,
+) {
+	const config = createConfig()
+	const state = createAppState()
+	const storage = await createHomeConnectorStorage(config)
+	const calls: Array<{
+		action: string
+		comp: string
+		xmlBody: string
+		decryptSecrets?: boolean
+	}> = []
+	const adapter = createAccessNetworksUnleashedAdapter({
+		config,
+		state,
+		storage,
+		clientFactory: () => ({
+			async request(input) {
+				calls.push({
+					action: input.action,
+					comp: input.comp,
+					xmlBody: input.xmlBody,
+					decryptSecrets: input.decryptSecrets,
+				})
+				const xml = await request(input)
+				return {
+					action: input.action,
+					comp: input.comp,
+					updater: 'test',
+					xml,
+					parsed: null,
+				}
+			},
+		}),
+	})
+	return { adapter, storage, calls }
+}
+
+async function adopt(
+	adapter: ReturnType<typeof createAccessNetworksUnleashedAdapter>,
+) {
+	await adapter.scan()
+	await adapter.adoptController({ controllerId: '192.168.10.60' })
+	await adapter.setCredentials({
+		controllerId: '192.168.10.60',
+		username: 'admin',
+		password: 'secret-password',
+	})
+}
+
+test('raw request refuses any single-<wlansvc> setconf, including IS_PARTIAL with an id', async () => {
+	const { adapter, storage, calls } = await createAdoptedAdapterWithClient(
+		async () => '<ajax-response/>',
+	)
+	using _server = installLoginAndCmdstat(() =>
+		response('<ajax-response><ok/></ajax-response>'),
+	)
+	try {
+		await adopt(adapter)
+		for (const xmlBody of [
+			"<wlansvc id='5' IS_PARTIAL='true' vlan-id='20'/>",
+			"<wlansvc name='friendlyguest-2.4' ssid='friendlyguest-2.4'/>",
+		]) {
+			await expect(
+				adapter.request({
+					action: 'setconf',
+					comp: 'wlansvc-list',
+					xmlBody,
+					acknowledgeHighRisk: true,
+					reason: validReason,
+					confirmation: accessNetworksUnleashedRequestConfirmation,
+				}),
+			).rejects.toThrow(
+				/positional \(it targets the first entry whatever id you send\)/,
+			)
+		}
+		expect(calls).toEqual([])
+	} finally {
+		await storage.close()
+	}
+})
+
+test('raw request redacts WLAN secrets in the returned xml and parsed object', async () => {
+	const { adapter, storage } = await createAdoptedAdapterWithClient(
+		async () =>
+			"<ajax-response><wlansvc-list><wlansvc id='1' name='a' guest-pass='GP-SECRET'><wpa cipher='aes' x-passphrase='X-SECRET' passphrase='PSK-SECRET'/></wlansvc></wlansvc-list></ajax-response>",
+	)
+	using _server = installLoginAndCmdstat(() =>
+		response('<ajax-response><ok/></ajax-response>'),
+	)
+	try {
+		await adopt(adapter)
+		const result = await adapter.request({
+			action: 'getconf',
+			comp: 'wlansvc-list',
+			xmlBody: '',
+			acknowledgeHighRisk: true,
+			reason: validReason,
+			confirmation: accessNetworksUnleashedRequestConfirmation,
+		})
+		expect(result.xml).not.toMatch(/GP-SECRET|X-SECRET|PSK-SECRET/)
+		expect(JSON.stringify(result.parsed)).not.toMatch(
+			/GP-SECRET|X-SECRET|PSK-SECRET/,
+		)
+		expect(result.xml).toContain("name='a'")
+	} finally {
+		await storage.close()
+	}
+})
+
+test('list_wlans works on the damaged Oct 17 list and reports the id-less entry', async () => {
+	const damaged = readFileSync(
+		new URL(
+			'./fixtures/wlansvc-list-after-clone-incident.xml',
+			import.meta.url,
+		),
+		'utf8',
+	)
+	const { adapter, storage, calls } = await createAdoptedAdapterWithClient(
+		async () => damaged,
+	)
+	using _server = installLoginAndCmdstat(() =>
+		response('<ajax-response><ok/></ajax-response>'),
+	)
+	try {
+		await adopt(adapter)
+		const list = await adapter.listWlans()
+		expect(list.wlans.map((wlan) => wlan.id)).toEqual(['2', '3', '5'])
+		expect(list.damaged).toBe(true)
+		expect(list.anomalies).toEqual([
+			{
+				index: 0,
+				kind: 'missing-id',
+				name: 'friendlyguest-2.4',
+				ssid: 'friendlyguest-2.4',
+			},
+		])
+		expect(list.wlanCount).toBe(4)
+		const one = await adapter.getWlan({ id: '5' })
+		expect(one.wlan.name).toBe('friendlyguest')
+		// Read tools never ask the controller to decrypt secrets.
+		expect(calls.every((call) => call.decryptSecrets !== true)).toBe(true)
+	} finally {
+		await storage.close()
+	}
+})
+
+test('WLAN write tools refuse immediately while wlanWritesEnabled is off (default)', async () => {
+	const { adapter, storage, calls } = await createAdoptedAdapterWithClient(
+		async () => '<ajax-response/>',
+	)
+	using _server = installLoginAndCmdstat(() =>
+		response('<ajax-response><ok/></ajax-response>'),
+	)
+	const write = {
+		acknowledgeHighRisk: true,
+		reason: validReason,
+		confirmation: accessNetworksUnleashedWlanWriteConfirmation,
+	}
+	try {
+		await adopt(adapter)
+		await expect(
+			adapter.updateWlan({
+				id: '5',
+				attributes: { 'vlan-id': '20' },
+				...write,
+			}),
+		).rejects.toThrow(/WLAN writes are disabled/)
+		await expect(
+			adapter.cloneWlan({
+				sourceId: '5',
+				overrides: { name: 'n', ssid: 'n' },
+				...write,
+			}),
+		).rejects.toThrow(/WLAN writes are disabled/)
+		await expect(
+			adapter.deleteWlan({ id: '5', expectedName: 'friendlyguest', ...write }),
+		).rejects.toThrow(/WLAN writes are disabled/)
+		await expect(
+			adapter.request({
+				action: 'addobj',
+				comp: 'wlansvc-list',
+				xmlBody: "<wlansvc name='t' ssid='t'/>",
+				acknowledgeHighRisk: true,
+				reason: validReason,
+				confirmation: accessNetworksUnleashedRequestConfirmation,
+			}),
+		).rejects.toThrow(/WLAN writes are disabled/)
+		// Not even a snapshot read was sent.
+		expect(calls).toEqual([])
+	} finally {
+		await storage.close()
+	}
+})
+
+test('raw object actions: setconf on any *-list is refused; delobj on a non-WLAN list is passed through', async () => {
+	const { adapter, storage, calls } = await createAdoptedAdapterWithClient(
+		async () =>
+			'<ajax-response><response type="object" id="acl-list.1"/></ajax-response>',
+	)
+	using _server = installLoginAndCmdstat(() =>
+		response('<ajax-response><ok/></ajax-response>'),
+	)
+	const raw = {
+		acknowledgeHighRisk: true,
+		reason: validReason,
+		confirmation: accessNetworksUnleashedRequestConfirmation,
+	}
+	try {
+		await adopt(adapter)
+		await expect(
+			adapter.request({
+				action: 'setconf',
+				comp: 'acl-list',
+				xmlBody: "<acl id='2' IS_PARTIAL='true'/>",
+				...raw,
+			}),
+		).rejects.toThrow(/list component "acl-list"/)
+		await expect(
+			adapter.request({
+				action: 'setconf',
+				comp: 'acl-list',
+				xmlBody: "<acl id='2' IS_PARTIAL='true'/>",
+				...raw,
+				allowDangerousPositionalListSetconf: true,
+				dangerousListSetconfConfirmation: 'wrong phrase',
+			}),
+		).rejects.toThrow(/Escape hatch/)
+		await adapter.request({
+			action: 'setconf',
+			comp: 'acl-list',
+			xmlBody: "<acl id='2' IS_PARTIAL='true'/>",
+			...raw,
+			allowDangerousPositionalListSetconf: true,
+			dangerousListSetconfConfirmation:
+				accessNetworksUnleashedDangerousListSetconfConfirmation,
+		})
+		await adapter.request({
+			action: 'delobj',
+			comp: 'acl-list',
+			xmlBody: "<acl id='2'/>",
+			...raw,
+		})
+		expect(calls.map((call) => [call.action, call.comp])).toEqual([
+			['setconf', 'acl-list'],
+			['delobj', 'acl-list'],
+		])
+	} finally {
+		await storage.close()
+	}
+})
+
+test('wlansvc-list setconf escape hatch still requires wlanWritesEnabled', async () => {
+	const { adapter, storage, calls } = await createAdoptedAdapterWithClient(
+		async () => '<ajax-response/>',
+	)
+	using _server = installLoginAndCmdstat(() =>
+		response('<ajax-response><ok/></ajax-response>'),
+	)
+	try {
+		await adopt(adapter)
+		await expect(
+			adapter.request({
+				action: 'setconf',
+				comp: 'wlansvc-list',
+				xmlBody: "<wlansvc id='5' IS_PARTIAL='true' vlan-id='20'/>",
+				acknowledgeHighRisk: true,
+				reason: validReason,
+				confirmation: accessNetworksUnleashedRequestConfirmation,
+				allowDangerousPositionalListSetconf: true,
+				dangerousListSetconfConfirmation:
+					accessNetworksUnleashedDangerousListSetconfConfirmation,
+			}),
+		).rejects.toThrow(/WLAN writes are disabled/)
+		expect(calls).toEqual([])
+	} finally {
+		await storage.close()
+	}
+})
+
+test('dryRun clone works while wlanWritesEnabled is off and sends nothing', async () => {
+	const beforeXml = readFileSync(
+		new URL(
+			'./fixtures/wlansvc-list-before-clone-incident.xml',
+			import.meta.url,
+		),
+		'utf8',
+	)
+	const templateXml = readFileSync(
+		new URL('./fixtures/wlansvc-standard-template.xml', import.meta.url),
+		'utf8',
+	)
+	const hydrateDecrypt = (xml: string) =>
+		xml.replace(
+			/<wpa cipher="aes"/g,
+			'<wpa cipher="aes" x-passphrase="TEST-ONLY-psk" passphrase="TEST-ONLY-psk"',
+		)
+	const { adapter, storage, calls } = await createAdoptedAdapterWithClient(
+		async (input) => {
+			if (input.comp === 'wlansvc-standard-template') {
+				return input.decryptSecrets ? hydrateDecrypt(templateXml) : templateXml
+			}
+			return input.decryptSecrets ? hydrateDecrypt(beforeXml) : beforeXml
+		},
+	)
+	using _server = installLoginAndCmdstat(() =>
+		response('<ajax-response><ok/></ajax-response>'),
+	)
+	try {
+		await adopt(adapter)
+		const result = await adapter.cloneWlan({
+			sourceId: '5',
+			overrides: {
+				name: 'friendlyguest-2.4',
+				ssid: 'friendlyguest-2.4',
+				radioBand: '2.4ghz',
+			},
+			dryRun: true,
+			acknowledgeHighRisk: false,
+			reason: '',
+			confirmation: '',
+		})
+		expect(result.dryRun).toBe(true)
+		expect(result.requests).toHaveLength(1)
+		expect(result.requests[0]?.action).toBe('addobj')
+		expect(result.requests[0]?.comp).toBe('wlansvc-list')
+		expect(result.requestXml).not.toMatch(/\sid\s*=/)
+		expect(result.requestXml).not.toMatch(/TEST-ONLY/)
+		expect(calls.every((call) => call.action === 'getconf')).toBe(true)
+		expect(calls.some((call) => call.action !== 'getconf')).toBe(false)
+	} finally {
+		await storage.close()
+	}
+})
+
+test('with wlanWritesEnabled, raw wlansvc-list object writes still need an explicit id', async () => {
+	using _env = createTemporaryEnv({
+		ACCESS_NETWORKS_UNLEASHED_WLAN_WRITES_ENABLED: 'true',
+	})
+	const { adapter, storage, calls } = await createAdoptedAdapterWithClient(
+		async () => '<ajax-response/>',
+	)
+	using _server = installLoginAndCmdstat(() =>
+		response('<ajax-response><ok/></ajax-response>'),
+	)
+	try {
+		await adopt(adapter)
+		await expect(
+			adapter.request({
+				action: 'updobj',
+				comp: 'wlansvc-list',
+				xmlBody: "<wlansvc IS_PARTIAL='true' vlan-id='20'/>",
+				acknowledgeHighRisk: true,
+				reason: validReason,
+				confirmation: accessNetworksUnleashedRequestConfirmation,
+			}),
+		).rejects.toThrow(/explicit wlansvc id/)
+		expect(calls).toEqual([])
 	} finally {
 		await storage.close()
 	}

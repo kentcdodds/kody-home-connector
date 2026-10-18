@@ -6,6 +6,7 @@ import {
 	createAccessNetworksUnleashedRequestError,
 } from './errors.ts'
 import { fetchAccessNetworksUnleashed } from './http.ts'
+import { redactSecretsInXmlText } from './wlan-xml.ts'
 import { parseAccessNetworksUnleashedXml } from './xml.ts'
 import {
 	type AccessNetworksUnleashedAjaxAction,
@@ -81,6 +82,9 @@ function endpointForAction(action: AccessNetworksUnleashedAjaxAction) {
 	switch (action) {
 		case 'getconf':
 		case 'setconf':
+		case 'addobj':
+		case 'updobj':
+		case 'delobj':
 			return '_conf.jsp'
 		case 'getstat':
 		case 'docmd':
@@ -99,6 +103,9 @@ function isMutatingAction(action: AccessNetworksUnleashedAjaxAction) {
 			return false
 		case 'setconf':
 		case 'docmd':
+		case 'addobj':
+		case 'updobj':
+		case 'delobj':
 			return true
 		default: {
 			const _exhaustive: never = action
@@ -180,6 +187,7 @@ function buildAjaxRequestEnvelope(input: {
 	xmlBody: string
 	updater: string | undefined
 	caller: string | undefined
+	decryptSecrets?: boolean
 }): { xml: string; updater: string } {
 	const { action, comp } = input
 	const escapedComp = escapeXmlAttribute(comp)
@@ -210,7 +218,7 @@ function buildAjaxRequestEnvelope(input: {
 			const updater = input.updater?.trim() || generateUpdater(comp)
 			const caller = resolveExplicitCaller(input.caller)
 			const attrs =
-				`action="getconf" DECRYPT_X="false" ` +
+				`action="getconf" DECRYPT_X="${input.decryptSecrets === true ? 'true' : 'false'}" ` +
 				`updater="${escapeXmlAttribute(updater)}" comp="${escapedComp}"` +
 				callerAttribute(caller)
 			if (xmlBody.trim()) {
@@ -225,7 +233,10 @@ function buildAjaxRequestEnvelope(input: {
 			}
 		}
 		case 'setconf':
-		case 'docmd': {
+		case 'docmd':
+		case 'addobj':
+		case 'updobj':
+		case 'delobj': {
 			const xmlBody = input.xmlBody
 			const updater = input.updater?.trim() || generateUpdater(comp)
 			const caller = resolveExplicitCaller(input.caller)
@@ -550,7 +561,9 @@ export function createAccessNetworksUnleashedAjaxClient(input: {
 				text,
 			)
 		) {
-			throw new Error(`Access Networks Unleashed rejected the command: ${text}`)
+			throw new Error(
+				`Access Networks Unleashed rejected the command: ${redactSecretsInXmlText(text)}`,
+			)
 		}
 		return text
 	}
@@ -577,6 +590,7 @@ export function createAccessNetworksUnleashedAjaxClient(input: {
 				xmlBody,
 				updater: requestInput.updater,
 				caller: requestInput.caller,
+				decryptSecrets: requestInput.decryptSecrets,
 			})
 			const responseXml = await postAjax(xml, action, allowInsecureTls)
 			return {
