@@ -2,6 +2,7 @@ import { expect, test, vi } from 'vitest'
 import { type HomeConnectorConfig } from '../config.ts'
 import { createHomeConnectorStorage } from '../storage/index.ts'
 import { homeConnectorLogs } from '../storage/schema.ts'
+import { createTestHomeConnectorConfig } from '../test-home-connector-config.ts'
 import { createHomeConnectorLogger, sanitizeLogValue } from './index.ts'
 
 const silentConsole = {
@@ -12,65 +13,16 @@ const silentConsole = {
 }
 
 function createConfig(): HomeConnectorConfig {
-	return {
-		homeConnectorId: 'default',
-		publicBaseUrl: 'http://localhost:4040',
-		mcpPath: '/mcp',
-		mcpUrl: 'http://localhost:4040/mcp',
+	return createTestHomeConnectorConfig({
 		sharedSecret: 'secret',
-		islandRouterHost: null,
-		islandRouterPort: 22,
-		islandRouterUsername: null,
-		islandRouterPrivateKeyPath: null,
-		islandRouterKnownHostsPath: null,
-		islandRouterHostFingerprint: null,
-		islandRouterCommandTimeoutMs: 8000,
-		islandRouterApiBaseUrl: 'https://my.islandrouter.com',
-		islandRouterApiRequestTimeoutMs: 8000,
-		islandRouterApiAllowInsecureTls: false,
-		araknisSwitchBaseUrl: 'https://192.168.0.50',
-		araknisSwitchAllowInsecureTls: false,
-		araknisSwitchRequestTimeoutMs: 8000,
-		araknisSwitchSshEnabled: false,
-		araknisSwitchSshPort: 22,
-		rokuDiscoveryUrl: 'http://roku.mock.local/discovery',
-		samsungTvDiscoveryUrl: 'http://samsung-tv.mock.local/discovery',
-		lutronDiscoveryUrl: 'http://lutron.mock.local/discovery',
-		sonosDiscoveryUrl: 'http://sonos.mock.local/discovery',
-		bondDiscoveryUrl: 'http://bond.mock.local/discovery',
-		accessNetworksUnleashedScanCidrs: ['192.168.1.10/32'],
 		accessNetworksUnleashedAllowInsecureTls: false,
-		accessNetworksUnleashedRequestTimeoutMs: 8000,
 		kasaScanCidrs: ['192.168.1.10/32'],
-		kasaRequestTimeoutMs: 8000,
-		kasaUsername: null,
-		kasaPassword: null,
-		phoneDeviceToken: null,
-		bondRequestPaceMs: 0,
-		bondCircuitBreakerCooldownMs: 0,
 		jellyfishDiscoveryUrl: null,
 		venstarScanCidrs: ['192.168.1.10/32'],
 		jellyfishScanCidrs: ['192.168.1.10/32'],
-		courtPjlinkProjectorId: null,
-		courtBlurayHost: null,
-		courtBlurayMacAddress: null,
-		courtBlurayAuthCookie: null,
-		courtBlurayPsk: null,
-		courtBlurayTimeoutMs: 1_500,
-		courtBlurayScanExtraHosts: [],
-		courtBlurayScanCidrs: [],
-		pjlinkScanCidrs: ['192.168.0.128/32'],
-		pjlinkScanExtraHosts: ['192.168.0.128'],
-		pjlinkRequestTimeoutMs: 5_000,
-		courtPjlinkTimeoutMs: 1_500,
-		audiobookLibraryPath: '/media/audiobooks',
-		ffmpegPath: 'ffmpeg',
-		audiobookImportTimeoutMs: 30 * 60 * 1000,
-		dataPath: '/tmp',
-		dbPath: ':memory:',
-		port: 4040,
-		mocksEnabled: true,
-	}
+		bondRequestPaceMs: 0,
+		bondCircuitBreakerCooldownMs: 0,
+	})
 }
 
 test('sanitizeLogValue redacts secret-shaped keys and inline credentials', async () => {

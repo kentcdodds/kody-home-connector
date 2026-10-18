@@ -94,7 +94,15 @@ export function createAraknisSwitchAdapter(input: {
 	async function getClient() {
 		const credentials = await requireCredentials()
 		if (input.clientFactory) return input.clientFactory(credentials)
-		const credentialsKey = `${credentials.username}\0${credentials.password}`
+		// Include live config knobs so araknis_set_config invalidates the session
+		// client without a process restart.
+		const credentialsKey = [
+			credentials.username,
+			credentials.password,
+			config.araknisSwitchBaseUrl,
+			String(config.araknisSwitchAllowInsecureTls),
+			String(config.araknisSwitchRequestTimeoutMs),
+		].join('\0')
 		if (cachedClient?.credentialsKey === credentialsKey) {
 			return cachedClient.client
 		}

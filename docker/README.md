@@ -13,6 +13,14 @@ container filesystem, wipes the OAuth store and forces interactive reauth.
 Tokens are opaque hashes, not JWTs, so there is no signing key to carry across
 deploys.
 
+Integration settings that used to be docker `-e` flags (Araknis base URL / TLS /
+SSH, Unleashed scan CIDRs, Island host, court pins, discovery URLs, …) now live
+in that same SQLite file as **runtime config**. Prefer MCP `*_set_config` tools
+over editing the start script. Env vars still seed values when no stored row
+exists (`stored > env > default`). Bootstrap-only env (`HOME_CONNECTOR_ID`, data
+key/secret, data path, volume mounts, listen port, public MCP base URL, SSH key
+file paths) stays in the start script.
+
 To smoke a PR without moving prod `latest` (currently `sha-f7134d6`), run
 **Publish Home Connector** → **Run workflow** on that branch, then:
 

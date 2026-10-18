@@ -22,10 +22,19 @@ docker pull "${IMAGE}"
 docker stop "${CONTAINER_NAME}" >/dev/null 2>&1 || true
 docker rm "${CONTAINER_NAME}" >/dev/null 2>&1 || true
 
-# Optional Araknis AN-620 read-only diagnostics (LAN 192.168.0.50).
-# Username/password are NOT env vars — store them via the LAN admin UI at
-# /araknis-switch/setup (encrypted SQLite, same pattern as Island PIN / Kasa).
-# ARAKNIS_SWITCH_ALLOW_INSECURE_TLS=true is typically required for self-signed HTTPS.
+# Integration knobs (Araknis / Unleashed / Island / court / discovery / …) are
+# runtime config in SQLite under HOST_DATA_PATH. Prefer MCP *_set_config tools
+# so changing them does not require editing this script. Env still seeds when
+# no stored row exists (precedence: stored > env > default).
+#
+# Keep the Araknis -e seeds below until Kent has called araknis_set_config at
+# least once (self-signed TLS needs allowInsecureTls=true). After that they
+# can be removed. Username/password are NEVER env vars — use
+# /araknis-switch/setup (or araknis_set_credentials).
+#
+# Bootstrap-only env that must stay here: HOME_CONNECTOR_ID, data key/secret,
+# HOME_CONNECTOR_DATA_PATH, volume mounts (HOST_DATA_PATH, audiobook library),
+# and optionally HOME_MCP_PUBLIC_BASE_URL / PORT.
 docker run -d --name "${CONTAINER_NAME}" --network host --restart unless-stopped \
 	-e "HOME_CONNECTOR_ID=${HOME_CONNECTOR_ID:-default}" \
 	-e "HOME_CONNECTOR_SHARED_SECRET=${HOME_CONNECTOR_SHARED_SECRET:-}" \

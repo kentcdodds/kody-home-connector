@@ -16,6 +16,7 @@ import { createVenstarAdapter } from './adapters/venstar/index.ts'
 import { createHomeConnectorMcpServer } from './mcp/server.ts'
 import { loadHomeConnectorConfig } from './config.ts'
 import { createHomeConnectorLogger } from './logging/index.ts'
+import { createRuntimeConfigService } from './runtime-config/index.ts'
 import { createAppState, updateConnectionState } from './state.ts'
 import { createHomeConnectorStorage } from './storage/index.ts'
 
@@ -23,6 +24,8 @@ export async function createHomeConnectorApp() {
 	const config = loadHomeConnectorConfig()
 	const state = createAppState()
 	const storage = await createHomeConnectorStorage(config)
+	const runtimeConfig = createRuntimeConfigService({ config, storage })
+	await runtimeConfig.applyStoredOverrides()
 	const logger = createHomeConnectorLogger({
 		config,
 		storage,
@@ -98,6 +101,7 @@ export async function createHomeConnectorApp() {
 		config,
 		state,
 		logger,
+		runtimeConfig,
 		samsungTv,
 		lutron,
 		sonos,
@@ -128,6 +132,7 @@ export async function createHomeConnectorApp() {
 		state,
 		storage,
 		logger,
+		runtimeConfig,
 		samsungTv,
 		lutron,
 		sonos,

@@ -47,11 +47,11 @@ export type HomeConnectorConfig = {
 	/**
 	 * Court iTach IP2IR. Defaults to the cage unit at 192.168.1.70:4998.
 	 */
-	globalCacheHost?: string
-	globalCachePort?: number
-	courtRokuDeviceId?: string | null
-	courtSonosPlayerId?: string | null
-	courtPjlinkProjectorId?: string | null
+	globalCacheHost: string
+	globalCachePort: number
+	courtRokuDeviceId: string | null
+	courtSonosPlayerId: string | null
+	courtPjlinkProjectorId: string | null
 	/**
 	 * Court Sony UHD Blu-ray IRCC host. Empty/unset is expected — the player is
 	 * often unplugged. Never default this to 192.168.0.115 (Sony camera).
@@ -370,6 +370,21 @@ function deriveJellyfishAutoscanCidrs() {
 	return derivePrivateAutoscanCidrsFromInterfaces(networkInterfaces())
 }
 
+/**
+ * Load bootstrap + env-seeded connector config.
+ *
+ * Movable integration settings (Araknis base URL / TLS / SSH, Unleashed scan
+ * CIDRs, Island host, court pins, discovery URLs, …) may also be persisted in
+ * SQLite via `*_set_config` tools. After `createHomeConnectorStorage`, call
+ * `createRuntimeConfigService(...).applyStoredOverrides()` so stored values
+ * win. Precedence: **stored runtime setting > env var > built-in default**.
+ * Clearing a stored key falls back to env (if set) then the default.
+ *
+ * Bootstrap-only env (data path, DB path, listen port, connector id, data
+ * encryption key, public MCP base URL, volume mount paths, SSH key file
+ * paths) is intentionally not part of runtime config — those are needed
+ * before the local store can be read or require a container remount.
+ */
 export function loadHomeConnectorConfig(): HomeConnectorConfig {
 	const port = Number.parseInt(process.env.PORT ?? '4040', 10)
 	const islandRouterPort = parseStrictIntegerEnv(process.env.ISLAND_ROUTER_PORT)
