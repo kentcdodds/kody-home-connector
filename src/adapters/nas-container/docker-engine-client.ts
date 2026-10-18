@@ -11,8 +11,6 @@ export type DockerEngineRequest = {
 	method: string
 	path: string
 	body?: unknown
-	/** When true, drain a streaming JSON-lines / progress body. */
-	stream?: boolean
 }
 
 export class DockerEngineError extends Error {
@@ -37,6 +35,71 @@ function readIncomingMessage(response: IncomingMessage): Promise<Buffer> {
 		})
 		response.on('end', () => resolve(Buffer.concat(chunks)))
 		response.on('error', reject)
+	})
+}
+
+/**
+ * Drain a Docker NDJSON progress stream without buffering the whole body.
+ * Keeps only a bounded partial line while scanning for `error` events.
+ */
+function drainNdjsonProgress(
+	response: IncomingMessage,
+): Promise<{ statusCode: number }> {
+	return new Promise((resolve, reject) => {
+		let partial = ''
+		let settled = false
+		const fail = (error: Error) => {
+			if (settled) return
+			settled = true
+			response.destroy()
+			reject(error)
+		}
+		response.setEncoding('utf8')
+		response.on('data', (chunk: string) => {
+			partial += chunk
+			if (partial.length > 64_000) {
+				// Bound memory if a line never ends.
+				partial = partial.slice(-8_000)
+			}
+			const lines = partial.split('\n')
+			partial = lines.pop() ?? ''
+			for (const line of lines) {
+				const trimmed = line.trim()
+				if (!trimmed) continue
+				try {
+					const event = JSON.parse(trimmed) as { error?: string }
+					if (event.error) {
+						fail(new Error(`Docker pull failed: ${event.error}`))
+						return
+					}
+				} catch {
+					// Ignore non-JSON progress noise.
+				}
+			}
+		})
+		response.on('end', () => {
+			if (settled) return
+			settled = true
+			const trimmed = partial.trim()
+			if (trimmed) {
+				try {
+					const event = JSON.parse(trimmed) as { error?: string }
+					if (event.error) {
+						reject(new Error(`Docker pull failed: ${event.error}`))
+						return
+					}
+				} catch {
+					// ignore trailing partial
+				}
+			}
+			resolve({ statusCode: response.statusCode ?? 0 })
+		})
+		response.on('error', (error) => {
+			if (!settled) {
+				settled = true
+				reject(error)
+			}
+		})
 	})
 }
 
@@ -119,7 +182,15 @@ export function createDockerEngineClient(input: {
 
 	return {
 		async ping() {
-			await jsonRequest('GET', '/_ping', undefined, [200])
+			// Docker Engine returns plain text "OK", not JSON.
+			const response = await engineRequest({ method: 'GET', path: '/_ping' })
+			if (response.statusCode !== 200) {
+				throw new DockerEngineError(
+					response.statusCode,
+					response.body.toString('utf8'),
+					'/_ping',
+				)
+			}
 		},
 
 		async inspectContainer(nameOrId) {
@@ -138,37 +209,45 @@ export function createDockerEngineClient(input: {
 
 		async pullImage(repository, tag) {
 			const path = `/images/create?fromImage=${encodeURIComponent(repository)}&tag=${encodeURIComponent(tag)}`
-			const response = await engineRequest({
-				method: 'POST',
-				path,
-				stream: true,
-			})
-			if (response.statusCode !== 200) {
-				throw new DockerEngineError(
-					response.statusCode,
-					response.body.toString('utf8'),
-					path,
+			await new Promise<void>((resolve, reject) => {
+				const req = requestFn(
+					{
+						socketPath,
+						path,
+						method: 'POST',
+						headers: {
+							Host: 'localhost',
+							Accept: 'application/json',
+						},
+						timeout: requestTimeoutMs,
+					},
+					(response) => {
+						const statusCode = response.statusCode ?? 0
+						if (statusCode !== 200) {
+							void readIncomingMessage(response)
+								.then((body) => {
+									reject(
+										new DockerEngineError(
+											statusCode,
+											body.toString('utf8'),
+											path,
+										),
+									)
+								})
+								.catch(reject)
+							return
+						}
+						void drainNdjsonProgress(response)
+							.then(() => resolve())
+							.catch(reject)
+					},
 				)
-			}
-			// Docker streams NDJSON progress; surface the last error line if present.
-			const text = response.body.toString('utf8')
-			for (const line of text.split('\n')) {
-				const trimmed = line.trim()
-				if (!trimmed) continue
-				try {
-					const event = JSON.parse(trimmed) as { error?: string }
-					if (event.error) {
-						throw new Error(`Docker pull failed: ${event.error}`)
-					}
-				} catch (error) {
-					if (
-						error instanceof Error &&
-						error.message.startsWith('Docker pull')
-					) {
-						throw error
-					}
-				}
-			}
+				req.on('timeout', () => {
+					req.destroy(new Error(`Docker Engine request timed out: ${path}`))
+				})
+				req.on('error', reject)
+				req.end()
+			})
 		},
 
 		async getDistributionDigest(imageRef) {

@@ -12,6 +12,7 @@ import {
 	writeNasContainerOperation,
 } from './operation-status.ts'
 import {
+	assertRunningImageMatchesService,
 	buildPreservedConfigPlan,
 	parseCommitFromHealthBody,
 	pickOciRevision,
@@ -46,6 +47,30 @@ export {
 
 function helperContainerName(operationId: string) {
 	return `kody-nas-update-helper-${operationId.slice(0, 12)}`
+}
+
+const updateLocks = new Map<NasContainerServiceId, Promise<unknown>>()
+
+async function withServiceUpdateLock<T>(
+	service: NasContainerServiceId,
+	run: () => Promise<T>,
+): Promise<T> {
+	const previous = updateLocks.get(service) ?? Promise.resolve()
+	let release!: () => void
+	const gate = new Promise<void>((resolve) => {
+		release = resolve
+	})
+	const tail = previous.catch(() => undefined).then(() => gate)
+	updateLocks.set(service, tail)
+	await previous.catch(() => undefined)
+	try {
+		return await run()
+	} finally {
+		release()
+		if (updateLocks.get(service) === tail) {
+			updateLocks.delete(service)
+		}
+	}
 }
 
 export function createNasContainerAdapter(input: {
@@ -171,114 +196,153 @@ export function createNasContainerAdapter(input: {
 			assertNasContainerUpdatesEnabled(config)
 		}
 
-		const docker = await requireDocker()
-		const containerName = resolveContainerNameForService(config, service)
-		const imageRef = allowlistedImageRef(service)
-		const existing = await docker.inspectContainer(containerName)
-		let currentImage = null
-		try {
-			currentImage = await docker.inspectImage(existing.Image)
-		} catch {
-			currentImage = null
-		}
-		const currentDigest = currentImage
-			? pickRepoDigest(currentImage, definition.repository)
-			: null
-		const currentCommit =
-			(await readRunningCommit(service)) ??
-			pickOciRevision(currentImage, existing)
-		const targetDigest = await docker.getDistributionDigest(imageRef)
+		const run = async (): Promise<NasContainerUpdateResult> => {
+			const docker = await requireDocker()
+			const containerName = resolveContainerNameForService(config, service)
+			const imageRef = allowlistedImageRef(service)
+			const existing = await docker.inspectContainer(containerName)
+			let currentImage = null
+			try {
+				currentImage = await docker.inspectImage(existing.Image)
+			} catch {
+				currentImage = null
+			}
+			assertRunningImageMatchesService({
+				service,
+				container: existing,
+				image: currentImage,
+			})
+			const currentDigest = currentImage
+				? pickRepoDigest(currentImage, definition.repository)
+				: null
+			const currentCommit =
+				(await readRunningCommit(service)) ??
+				pickOciRevision(currentImage, existing)
+			const targetDigest = await docker.getDistributionDigest(imageRef)
 
-		const plan = {
-			service,
-			containerName,
-			imageRef,
-			currentImageId: existing.Image,
-			currentDigest,
-			currentCommit,
-			targetDigest,
-			targetCommit: null as string | null,
-			updateAvailable:
-				Boolean(targetDigest) &&
-				Boolean(currentDigest) &&
-				targetDigest !== currentDigest,
-			preservedConfig: buildPreservedConfigPlan(existing, imageRef),
-			steps: definition.selfUpdate
-				? [
-						'Pull allowlisted image',
-						'Write operation status to data volume',
-						'Start detached helper container from the new image',
-						'Return handed_off before this process exits',
-						'Helper renames current container to *-prev-*',
-						'Helper creates/starts replacement with preserved config',
-						'Helper waits for /health then removes or rolls back',
-					]
-				: [
-						'Pull allowlisted image',
-						'Rename current container to *-prev-* and stop it',
-						'Create/start replacement with preserved config',
-						'Wait for /health',
-						'On success keep latest prev and prune older prev containers',
-						'On failure remove replacement and restore previous container',
-					],
-		}
+			const plan = {
+				service,
+				containerName,
+				imageRef,
+				currentImageId: existing.Image,
+				currentDigest,
+				currentCommit,
+				targetDigest,
+				targetCommit: null as string | null,
+				updateAvailable:
+					Boolean(targetDigest) &&
+					Boolean(currentDigest) &&
+					targetDigest !== currentDigest,
+				preservedConfig: buildPreservedConfigPlan(existing, imageRef),
+				steps: definition.selfUpdate
+					? [
+							'Pull allowlisted image',
+							'Write operation status to data volume',
+							'Start detached helper container from the new image',
+							'Return handed_off before this process exits',
+							'Helper renames current container to *-prev-*',
+							'Helper creates/starts replacement with preserved config',
+							'Helper waits for /health then removes or rolls back',
+						]
+					: [
+							'Pull allowlisted image',
+							'Rename current container to *-prev-* and stop it',
+							'Create/start replacement with preserved config',
+							'Wait for /health',
+							'On success keep latest prev and prune older prev containers',
+							'On failure remove replacement and restore previous container',
+						],
+			}
 
-		if (dryRun) {
-			return { status: 'dry_run', plan }
-		}
+			if (dryRun) {
+				return { status: 'dry_run', plan }
+			}
 
-		const operationId = createNasContainerOperationId()
-		await writeNasContainerOperation(config.dataPath, {
-			operationId,
-			service,
-			status: 'pending',
-			createdAt: now().toISOString(),
-			updatedAt: now().toISOString(),
-			containerName,
-			imageRef,
-			oldImageId: existing.Image,
-			oldDigest: currentDigest,
-			oldCommit: currentCommit,
-		})
+			const operationId = createNasContainerOperationId()
+			await writeNasContainerOperation(config.dataPath, {
+				operationId,
+				service,
+				status: 'pending',
+				createdAt: now().toISOString(),
+				updatedAt: now().toISOString(),
+				containerName,
+				imageRef,
+				oldImageId: existing.Image,
+				oldDigest: currentDigest,
+				oldCommit: currentCommit,
+			})
 
-		if (definition.selfUpdate) {
-			return await handOffSelfUpdate({
+			if (definition.selfUpdate) {
+				return await handOffSelfUpdate({
+					docker,
+					service,
+					containerName,
+					imageRef,
+					operationId,
+					existing,
+				})
+			}
+
+			await writeNasContainerOperation(config.dataPath, {
+				operationId,
+				service,
+				status: 'recreating',
+				createdAt: now().toISOString(),
+				updatedAt: now().toISOString(),
+				containerName,
+				imageRef,
+				oldImageId: existing.Image,
+				oldDigest: currentDigest,
+				oldCommit: currentCommit,
+			})
+
+			const result = await recreateContainerWithRollback({
 				docker,
 				service,
 				containerName,
 				imageRef,
-				operationId,
-				existing,
+				healthTimeoutMs: config.nasContainerHealthTimeoutMs,
+				fetchFn,
 			})
-		}
 
-		await writeNasContainerOperation(config.dataPath, {
-			operationId,
-			service,
-			status: 'recreating',
-			createdAt: now().toISOString(),
-			updatedAt: now().toISOString(),
-			containerName,
-			imageRef,
-			oldImageId: existing.Image,
-			oldDigest: currentDigest,
-			oldCommit: currentCommit,
-		})
+			if (result.status === 'updated') {
+				await writeNasContainerOperation(config.dataPath, {
+					operationId,
+					service,
+					status: 'succeeded',
+					createdAt: now().toISOString(),
+					updatedAt: now().toISOString(),
+					containerName,
+					imageRef,
+					oldImageId: result.oldImageId,
+					newImageId: result.newImageId,
+					oldDigest: result.oldDigest,
+					newDigest: result.newDigest,
+					oldCommit: result.oldCommit,
+					newCommit: result.newCommit,
+					previousContainerName: result.previousContainerName,
+					message: 'Container updated successfully.',
+				})
+				return {
+					status: 'updated',
+					service,
+					containerName,
+					imageRef,
+					oldImageId: result.oldImageId,
+					newImageId: result.newImageId,
+					oldDigest: result.oldDigest,
+					newDigest: result.newDigest,
+					oldCommit: result.oldCommit,
+					newCommit: result.newCommit,
+					previousContainerName: result.previousContainerName,
+					operationId,
+				}
+			}
 
-		const result = await recreateContainerWithRollback({
-			docker,
-			service,
-			containerName,
-			imageRef,
-			healthTimeoutMs: config.nasContainerHealthTimeoutMs,
-			fetchFn,
-		})
-
-		if (result.status === 'updated') {
 			await writeNasContainerOperation(config.dataPath, {
 				operationId,
 				service,
-				status: 'succeeded',
+				status: 'rolled_back',
 				createdAt: now().toISOString(),
 				updatedAt: now().toISOString(),
 				containerName,
@@ -290,49 +354,20 @@ export function createNasContainerAdapter(input: {
 				oldCommit: result.oldCommit,
 				newCommit: result.newCommit,
 				previousContainerName: result.previousContainerName,
-				message: 'Container updated successfully.',
+				error: result.error ?? 'Update failed; rolled back.',
 			})
 			return {
-				status: 'updated',
+				status: 'rolled_back',
 				service,
 				containerName,
-				imageRef,
-				oldImageId: result.oldImageId,
-				newImageId: result.newImageId,
-				oldDigest: result.oldDigest,
-				newDigest: result.newDigest,
-				oldCommit: result.oldCommit,
-				newCommit: result.newCommit,
-				previousContainerName: result.previousContainerName,
 				operationId,
+				error: result.error ?? 'Update failed; rolled back.',
+				previousContainerName: result.previousContainerName,
 			}
 		}
 
-		await writeNasContainerOperation(config.dataPath, {
-			operationId,
-			service,
-			status: 'rolled_back',
-			createdAt: now().toISOString(),
-			updatedAt: now().toISOString(),
-			containerName,
-			imageRef,
-			oldImageId: result.oldImageId,
-			newImageId: result.newImageId,
-			oldDigest: result.oldDigest,
-			newDigest: result.newDigest,
-			oldCommit: result.oldCommit,
-			newCommit: result.newCommit,
-			previousContainerName: result.previousContainerName,
-			error: result.error ?? 'Update failed; rolled back.',
-		})
-		return {
-			status: 'rolled_back',
-			service,
-			containerName,
-			operationId,
-			error: result.error ?? 'Update failed; rolled back.',
-			previousContainerName: result.previousContainerName,
-		}
+		if (dryRun) return await run()
+		return await withServiceUpdateLock(service, run)
 	}
 
 	async function handOffSelfUpdate(input: {
@@ -391,8 +426,8 @@ export function createNasContainerAdapter(input: {
 			name: helperName,
 			body: helperBody,
 		})
-		await input.docker.startContainer(helperName)
-
+		// Persist handed_off BEFORE starting the helper so a fast helper cannot
+		// finish and then be overwritten by a late parent write.
 		await writeNasContainerOperation(config.dataPath, {
 			operationId: input.operationId,
 			service: input.service,
@@ -408,6 +443,7 @@ export function createNasContainerAdapter(input: {
 			message:
 				'Self-update handed off to a helper container. Poll nas_container_update_status.',
 		})
+		await input.docker.startContainer(helperName)
 
 		return {
 			status: 'handed_off',
@@ -455,51 +491,66 @@ export function createNasContainerAdapter(input: {
 				throw new Error(`Unknown NAS container update operation ${operationId}`)
 			}
 			const service = resolveNasContainerService(operation.service)
-			const docker = await requireDocker()
-			const containerName = resolveContainerNameForService(config, service)
-			await writeNasContainerOperation(config.dataPath, {
-				...operation,
-				status: 'recreating',
-			})
-			const result = await recreateContainerWithRollback({
-				docker,
-				service,
-				containerName,
-				imageRef: allowlistedImageRef(service),
-				healthTimeoutMs: config.nasContainerHealthTimeoutMs,
-				fetchFn,
-			})
-			if (result.status === 'updated') {
+			// Prefer the name frozen into the operation file so runtime-config
+			// differences in the helper cannot retarget the wrong container.
+			const containerName =
+				operation.containerName?.trim() ||
+				resolveContainerNameForService(config, service)
+			return await withServiceUpdateLock(service, async () => {
+				const docker = await requireDocker()
 				await writeNasContainerOperation(config.dataPath, {
 					...operation,
-					status: 'succeeded',
-					oldImageId: result.oldImageId,
-					newImageId: result.newImageId,
-					oldDigest: result.oldDigest,
-					newDigest: result.newDigest,
-					oldCommit: result.oldCommit,
-					newCommit: result.newCommit,
-					previousContainerName: result.previousContainerName,
-					error: null,
-					message: 'Self-update completed successfully.',
+					containerName,
+					status: 'recreating',
 				})
-			} else {
-				await writeNasContainerOperation(config.dataPath, {
-					...operation,
-					status: 'rolled_back',
-					oldImageId: result.oldImageId,
-					newImageId: result.newImageId,
-					oldDigest: result.oldDigest,
-					newDigest: result.newDigest,
-					oldCommit: result.oldCommit,
-					newCommit: result.newCommit,
-					previousContainerName: result.previousContainerName,
-					error: result.error ?? 'Self-update failed; rolled back.',
+				const result = await recreateContainerWithRollback({
+					docker,
+					service,
+					containerName,
+					imageRef: allowlistedImageRef(service),
+					healthTimeoutMs: config.nasContainerHealthTimeoutMs,
+					fetchFn,
 				})
-			}
-			// Best-effort: remove this helper container by label/name after a short delay
-			// so the process can exit cleanly first. The helper is one-shot with RestartPolicy=no.
-			return result
+				if (result.status === 'updated') {
+					await writeNasContainerOperation(
+						config.dataPath,
+						{
+							...operation,
+							containerName,
+							status: 'succeeded',
+							oldImageId: result.oldImageId,
+							newImageId: result.newImageId,
+							oldDigest: result.oldDigest,
+							newDigest: result.newDigest,
+							oldCommit: result.oldCommit,
+							newCommit: result.newCommit,
+							previousContainerName: result.previousContainerName,
+							error: null,
+							message: 'Self-update completed successfully.',
+						},
+						{ overwriteTerminal: true },
+					)
+				} else {
+					await writeNasContainerOperation(
+						config.dataPath,
+						{
+							...operation,
+							containerName,
+							status: 'rolled_back',
+							oldImageId: result.oldImageId,
+							newImageId: result.newImageId,
+							oldDigest: result.oldDigest,
+							newDigest: result.newDigest,
+							oldCommit: result.oldCommit,
+							newCommit: result.newCommit,
+							previousContainerName: result.previousContainerName,
+							error: result.error ?? 'Self-update failed; rolled back.',
+						},
+						{ overwriteTerminal: true },
+					)
+				}
+				return result
+			})
 		},
 	}
 }

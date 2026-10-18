@@ -21,12 +21,24 @@ export function createNasContainerOperationId() {
 	return randomUUID().replaceAll('-', '')
 }
 
+const terminalStatuses = new Set(['succeeded', 'rolled_back', 'failed'])
+
 export async function writeNasContainerOperation(
 	dataPath: string,
 	operation: NasContainerUpdateOperation,
+	options?: { overwriteTerminal?: boolean },
 ): Promise<NasContainerUpdateOperation> {
 	const dir = nasContainerOperationsDir(dataPath)
 	await mkdir(dir, { recursive: true })
+	if (options?.overwriteTerminal !== true) {
+		const existing = await readNasContainerOperation(
+			dataPath,
+			operation.operationId,
+		)
+		if (existing && terminalStatuses.has(existing.status)) {
+			return existing
+		}
+	}
 	const updated: NasContainerUpdateOperation = {
 		...operation,
 		updatedAt: new Date().toISOString(),

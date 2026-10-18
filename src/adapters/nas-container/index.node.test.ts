@@ -75,6 +75,8 @@ function createImage(input?: {
 	tags?: Array<string>
 	digests?: Array<string>
 	revision?: string
+	cmd?: Array<string> | null
+	entrypoint?: Array<string> | null
 }): DockerImageInspect {
 	return {
 		Id: input?.id ?? 'sha256:newimage',
@@ -87,6 +89,11 @@ function createImage(input?: {
 				'org.opencontainers.image.revision': input?.revision ?? 'abc123new',
 			},
 			Env: ['SECRET=should-never-appear'],
+			Cmd: input?.cmd === undefined ? ['node', 'index.js'] : input.cmd,
+			Entrypoint:
+				input?.entrypoint === undefined
+					? ['/sbin/tini', '--']
+					: input.entrypoint,
 		},
 	}
 }
@@ -215,7 +222,7 @@ test('dev tag can never be selected even when present on an image', () => {
 	).toThrow(/forbidden "dev" tag/)
 })
 
-test('preserved config plan redacts env values', () => {
+test('preserved config plan redacts env values and cmd/entrypoint', () => {
 	const plan = buildPreservedConfigPlan(
 		createInspect(),
 		'kentcdodds/mediarss:main',
@@ -225,22 +232,59 @@ test('preserved config plan redacts env values', () => {
 		'PORT',
 		'HOME_CONNECTOR_SHARED_SECRET',
 	])
+	expect(plan.cmdPresent).toBe(true)
+	expect(plan.entrypointPresent).toBe(true)
 	expect(JSON.stringify(plan)).not.toContain('super-secret-value')
 	expect(JSON.stringify(plan)).not.toContain('do-not-leak')
+	expect(JSON.stringify(plan)).not.toContain('node')
 	expect(extractEnvKeys(['A=1', 'B='])).toEqual(['A', 'B'])
 })
 
-test('create body preserves binds/network/restart and uses allowlisted image', () => {
+test('create body preserves mounts/network/restart and uses allowlisted image', () => {
+	const inspect = createInspect()
+	inspect.Mounts = [
+		{
+			Type: 'bind',
+			Source: '/volume1/media/audio/audiobooks',
+			Destination: '/media/audiobooks',
+			RW: false,
+		},
+		{
+			Type: 'volume',
+			Name: 'mediarss-config',
+			Source: '/var/lib/docker/volumes/mediarss-config/_data',
+			Destination: '/config',
+			RW: true,
+		},
+	]
 	const body = buildCreateBodyFromInspect(
-		createInspect(),
+		inspect,
 		'kentcdodds/mediarss:main',
+		createImage({
+			tags: ['kentcdodds/mediarss:main'],
+		}),
 	)
 	expect(body.Image).toBe('kentcdodds/mediarss:main')
 	expect(body.HostConfig?.['NetworkMode']).toBe('host')
-	expect(body.HostConfig?.['Binds']).toEqual([
-		'/volume1/media/audio/audiobooks:/media/audiobooks:ro',
+	expect(body.HostConfig?.['Binds']).toBeUndefined()
+	expect(body.HostConfig?.['Mounts']).toEqual([
+		{
+			Type: 'bind',
+			Source: '/volume1/media/audio/audiobooks',
+			Target: '/media/audiobooks',
+			ReadOnly: true,
+			BindOptions: undefined,
+		},
+		{
+			Type: 'volume',
+			Source: 'mediarss-config',
+			Target: '/config',
+			ReadOnly: false,
+		},
 	])
 	expect(body.Env?.[0]).toBe('SECRET_TOKEN=super-secret-value')
+	// Cmd matches old image defaults → omitted so new image defaults apply.
+	expect(body.Cmd).toBeUndefined()
 })
 
 test('dry run makes no mutating docker calls and works while gate is off', async () => {
@@ -430,6 +474,7 @@ test('self-update returns handed_off before recreate and writes status', async (
 		],
 		env: ['HOME_CONNECTOR_SHARED_SECRET=do-not-leak', 'PORT=4040'],
 	})
+	inspect.Config.Image = 'kentcdodds/kody-home-connector:latest'
 	const { docker, calls } = createMockDocker({
 		inspect,
 		image: createImage({

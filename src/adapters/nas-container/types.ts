@@ -70,10 +70,22 @@ export type DockerContainerInspect = {
 		StopTimeout?: number
 	}
 	HostConfig: Record<string, unknown>
+	Mounts?: Array<DockerContainerMount>
 	NetworkSettings?: {
 		Networks?: Record<string, unknown>
 		Ports?: Record<string, unknown>
 	}
+}
+
+export type DockerContainerMount = {
+	Type?: string
+	Name?: string
+	Source?: string
+	Destination?: string
+	Driver?: string
+	Mode?: string
+	RW?: boolean
+	Propagation?: string
 }
 
 export type DockerImageInspect = {
@@ -84,6 +96,8 @@ export type DockerImageInspect = {
 	Config?: {
 		Labels?: Record<string, string> | null
 		Env?: Array<string> | null
+		Cmd?: Array<string> | null
+		Entrypoint?: Array<string> | string | null
 	}
 	RootFS?: {
 		Layers?: Array<string>
@@ -177,9 +191,18 @@ export type NasContainerPreservedConfigPlan = {
 	labels: Record<string, string>
 	/** Env *keys* only — values are never returned. */
 	envKeys: Array<string>
-	cmd: Array<string> | null
-	entrypoint: Array<string> | string | null
+	/** Whether Cmd was present; values are never returned (may contain secrets). */
+	cmdPresent: boolean
+	/** Whether Entrypoint was present; values are never returned. */
+	entrypointPresent: boolean
 	workingDir: string | null
+	mounts: Array<{
+		type: string | null
+		target: string | null
+		readOnly: boolean
+		/** Volume name or bind source path (not secret). */
+		source: string | null
+	}>
 }
 
 export type NasContainerUpdatePlan = {

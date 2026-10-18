@@ -1,4 +1,6 @@
 import { loadHomeConnectorConfig } from '../../config.ts'
+import { createRuntimeConfigService } from '../../runtime-config/index.ts'
+import { createHomeConnectorStorage } from '../../storage/index.ts'
 import { createNasContainerAdapter } from './index.ts'
 import {
 	readNasContainerOperation,
@@ -20,6 +22,9 @@ export async function runNasContainerUpdateHelper(): Promise<number> {
 	}
 
 	const config = loadHomeConnectorConfig()
+	const storage = await createHomeConnectorStorage(config)
+	const runtimeConfig = createRuntimeConfigService({ config, storage })
+	await runtimeConfig.applyStoredOverrides()
 	const adapter = createNasContainerAdapter({ config })
 	try {
 		const result = await adapter.runHelperOperation(operationId)
@@ -52,11 +57,15 @@ export async function runNasContainerUpdateHelper(): Promise<number> {
 			operationId,
 		)
 		if (existing) {
-			await writeNasContainerOperation(config.dataPath, {
-				...existing,
-				status: 'failed',
-				error: message,
-			})
+			await writeNasContainerOperation(
+				config.dataPath,
+				{
+					...existing,
+					status: 'failed',
+					error: message,
+				},
+				{ overwriteTerminal: true },
+			)
 		}
 		console.error(
 			JSON.stringify({
