@@ -408,11 +408,12 @@ export function createAraknisSwitchAdapter(input: {
 
 			// Reuse an existing OpEN session when present (keepalive). Only force
 			// a fresh login via araknis_authenticate. Do not treat a missing
-			// individual OpEN resource as a total outage.
+			// individual OpEN resource as a total outage. Do not record auth
+			// success until a real authenticated GET succeeds (ensureSession
+			// alone may only reuse a cached cookie).
 			try {
 				await client.ensureSession()
 				loginOk = true
-				await recordAuthSuccess()
 			} catch (error) {
 				if (error instanceof AraknisSwitchAuthError) {
 					await recordAuthFailure(error)
@@ -446,6 +447,7 @@ export function createAraknisSwitchAdapter(input: {
 			} catch (error) {
 				if (error instanceof AraknisSwitchAuthError) {
 					await recordAuthFailure(error)
+					loginOk = false
 				}
 				errors.push(errorMessage(error, 'Failed to read system info.'))
 			}

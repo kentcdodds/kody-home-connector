@@ -218,14 +218,13 @@ export function createAraknisSwitchOpenClient(input: {
 			jsonParseFailed: boolean
 		},
 	): never {
-		const looksLikeLogin =
-			/login|sign\s*in|unauthorized|session/i.test(result.text) ||
-			result.response.status === 401 ||
-			result.response.status === 403
-		if (looksLikeLogin) {
+		// Only treat explicit unauthorized statuses as auth failures. A 200 HTML
+		// error page that happens to contain "login"/"session" must not wipe a
+		// valid OpEN cookie during PoE/LLDP probing.
+		if (result.response.status === 401 || result.response.status === 403) {
 			session.sidCookie = null
 			throw new AraknisSwitchAuthError(
-				`Araknis switch GET ${path} returned a non-JSON body that looks like an expired session (HTTP ${String(result.response.status)}).`,
+				`Araknis switch GET ${path} returned a non-JSON unauthorized body (HTTP ${String(result.response.status)}).`,
 				{ path },
 			)
 		}
