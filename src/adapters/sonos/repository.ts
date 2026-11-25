@@ -1,6 +1,6 @@
 import { and, notInList, type TableRow } from 'remix/data-table'
 import { type HomeConnectorStorage } from '../../storage/index.ts'
-import { sonosPlayers } from '../../storage/schema.ts'
+import { sonosPlayers, sonosSpotifyServiceCache } from '../../storage/schema.ts'
 import { compareNoCase, compareText } from '../../storage/sort.ts'
 import { type SonosPersistedPlayer, type SonosPlayerRecord } from './types.ts'
 
@@ -146,4 +146,40 @@ export async function adoptSonosPlayer(
 		{ where: { connector_id: connectorId, player_id: playerId } },
 	)
 	return getSonosPlayer(storage, connectorId, playerId)
+}
+
+export async function getSonosSpotifyServiceCache(
+	storage: HomeConnectorStorage,
+	connectorId: string,
+) {
+	const row = await storage.db.find(sonosSpotifyServiceCache, {
+		connector_id: connectorId,
+	})
+	return row
+		? {
+				sid: row.sid,
+				sn: row.sn,
+				descToken: row.desc_token,
+				source: row.source,
+			}
+		: null
+}
+
+export async function saveSonosSpotifyServiceCache(
+	storage: HomeConnectorStorage,
+	connectorId: string,
+	info: { sid: string; sn: string; descToken: string; source: string },
+) {
+	const key = { connector_id: connectorId }
+	const values = {
+		sid: info.sid,
+		sn: info.sn,
+		desc_token: info.descToken,
+		source: info.source,
+	}
+	if (await storage.db.find(sonosSpotifyServiceCache, key)) {
+		await storage.db.update(sonosSpotifyServiceCache, key, values)
+	} else {
+		await storage.db.create(sonosSpotifyServiceCache, { ...key, ...values })
+	}
 }

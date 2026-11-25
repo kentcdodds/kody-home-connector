@@ -2,6 +2,7 @@ import { afterEach, expect, test, vi } from 'vitest'
 import {
 	addSonosUriToQueueLive,
 	createSonosFavoriteLive,
+	listSonosMusicServiceAccountsLive,
 	playSonosLive,
 	removeSonosQueueTrackRangeLive,
 	seekSonosQueueTrackLive,
@@ -290,4 +291,33 @@ test('sonos soap timeouts retry once and annotate dedupe metadata', async () => 
 			},
 		},
 	})
+})
+
+test('listSonosMusicServiceAccountsLive parses account types and serial numbers only', async () => {
+	const urls: Array<string> = []
+	vi.stubGlobal('fetch', async (url: string) => {
+		urls.push(url)
+		return new Response(
+			'<?xml version="1.0"?><ZPSupportInfo><Accounts LastUpdateDevice="RINCON_1" Version="1" NextSerialNum="9"><Account Type="3079" SerialNum="6" Deleted="0"><UN>user</UN><MD>1</MD><NN>Kody</NN><OADevID></OADevID><Key>secret-key</Key></Account><Account Type="2311" SerialNum="2" Deleted="1"><UN></UN></Account><Account Type="519" SerialNum="3"><UN></UN></Account></Accounts></ZPSupportInfo>',
+		)
+	})
+
+	const accounts = await listSonosMusicServiceAccountsLive('192.168.1.20')
+
+	expect(urls).toEqual(['http://192.168.1.20:1400/status/accounts'])
+	expect(accounts).toEqual([
+		{ type: '3079', serialNum: '6' },
+		{ type: '519', serialNum: '3' },
+	])
+})
+
+test('listSonosMusicServiceAccountsLive does not echo the response body on failure', async () => {
+	vi.stubGlobal(
+		'fetch',
+		async () => new Response('<Key>secret-key</Key>', { status: 403 }),
+	)
+
+	await expect(
+		listSonosMusicServiceAccountsLive('192.168.1.20'),
+	).rejects.toThrowError('Sonos music-service account listing failed (403).')
 })

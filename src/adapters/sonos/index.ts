@@ -47,8 +47,10 @@ import {
 } from './mock-driver.ts'
 import {
 	adoptSonosPlayer,
+	getSonosSpotifyServiceCache,
 	listSonosPlayers,
 	requireSonosPlayer,
+	saveSonosSpotifyServiceCache,
 	upsertDiscoveredSonosPlayers,
 } from './repository.ts'
 import {
@@ -64,6 +66,7 @@ import {
 	getSonosLoudnessLive,
 	getSonosMediaInfoLive,
 	getSonosMuteLive,
+	getSonosPlaybackMetadataLive,
 	getSonosPositionInfoLive,
 	getSonosTransportInfoLive,
 	getSonosTrebleLive,
@@ -71,6 +74,7 @@ import {
 	groupSonosPlayerLive,
 	listSonosFavoritesLive,
 	listSonosLibraryEntriesLive,
+	listSonosMusicServiceAccountsLive,
 	listSonosQueueLive,
 	listSonosSavedQueuesLive,
 	nextSonosTrackLive,
@@ -100,7 +104,16 @@ import {
 	ungroupSonosPlayerLive,
 } from './soap-client.ts'
 import { scanSonosPlayers } from './discovery.ts'
-import { buildSonosSpotifyUri } from './spotify.ts'
+import {
+	assertPlayableSpotifyContent,
+	buildSonosSpotifyUri,
+	createSpotifyMetadataUnavailableError,
+	createSpotifyServiceCandidateResolver,
+	isSpotifyContentUri,
+	parseSpotifyUri,
+	type SpotifyMetadataEntry,
+	type SpotifyServiceCandidate,
+} from './spotify.ts'
 import {
 	type SonosCreatedFavorite,
 	type SonosDidlEntry,
@@ -135,6 +148,21 @@ function createSonosCallerError(
 		},
 	}
 	return error
+}
+
+function canTryNextSpotifyCandidate(
+	candidate: SpotifyServiceCandidate,
+	error: unknown,
+) {
+	if (candidate.source !== 'cache' && candidate.source !== 'fallback') {
+		return false
+	}
+	const captureContext = (
+		error as {
+			homeConnectorCaptureContext?: HomeConnectorErrorCaptureContext
+		} | null
+	)?.homeConnectorCaptureContext
+	return captureContext?.tags?.sonos_failure_cause_class === 'http_error'
 }
 
 function normalizeQuery(value: string) {
@@ -547,35 +575,119 @@ export function createSonosAdapter(input: {
 		return await resolvePlayer(group.coordinatorPlayerId)
 	}
 
-	async function buildQueueUri(inputArgs: {
-		playerId?: string
-		uri: string
-		metadata?: string | null
-	}) {
-		if (
-			!inputArgs.uri
-				.trim()
-				.match(/^spotify:(playlist|album|track):[A-Za-z0-9]+$/)
-		) {
-			return {
+	async function* listSpotifyPlayerMetadataEntries(
+		player: SonosPersistedPlayer,
+	): AsyncGenerator<SpotifyMetadataEntry> {
+		if (input.config.mocksEnabled && isMockSonosHost(player.host)) {
+			const status = getMockSonosPlayerStatus(player.playerId)
+			yield { uri: status.trackUri, metadata: null }
+			yield { uri: status.currentUri, metadata: null }
+			for (const entry of listMockSonosQueue(player.playerId)) {
+				yield { uri: entry.uri, metadata: entry.metadata }
+			}
+			return
+		}
+		const otherPlayers = (await getKnownPlayers()).filter(
+			(entry) =>
+				entry.playerId !== player.playerId &&
+				!(input.config.mocksEnabled && isMockSonosHost(entry.host)),
+		)
+		const sources: Array<() => Promise<Array<SpotifyMetadataEntry>>> = [
+			() => getSonosPlaybackMetadataLive(player.host),
+			() => listSonosQueueLive({ host: player.host, player }),
+			...otherPlayers.map(
+				(entry) => () => getSonosPlaybackMetadataLive(entry.host),
+			),
+		]
+		for (const loadEntries of sources) {
+			let entries: Array<SpotifyMetadataEntry> = []
+			try {
+				entries = await loadEntries()
+			} catch {
+				continue
+			}
+			yield* entries
+		}
+	}
+
+	async function listSpotifyMusicServiceAccounts(player: SonosPersistedPlayer) {
+		if (input.config.mocksEnabled && isMockSonosHost(player.host)) return []
+		return await listSonosMusicServiceAccountsLive(player.host)
+	}
+
+	type PreparedQueueUri = { uri: string; metadata: string | null }
+
+	/**
+	 * Runs `attempt` with the Sonos URI for `inputArgs.uri`. Bare Spotify URIs
+	 * are built from resolved service info; when a cached or generic fallback
+	 * candidate is rejected by Sonos (UPnP fault), the next candidate is tried.
+	 */
+	async function withQueueUri<T>(
+		inputArgs: {
+			playerId: string
+			uri: string
+			metadata?: string | null
+			/** True when `attempt` proves Sonos accepted the URI. */
+			verifiesPlayback: boolean
+		},
+		attempt: (prepared: PreparedQueueUri) => Promise<T>,
+	): Promise<T> {
+		if (!isSpotifyContentUri(inputArgs.uri)) {
+			return await attempt({
 				uri: inputArgs.uri,
 				metadata: inputArgs.metadata ?? null,
-			}
+			})
 		}
-		const spotify = buildSonosSpotifyUri({
-			uri: inputArgs.uri,
-			favorites: await listFavorites(inputArgs.playerId),
-		})
+		const spotify = parseSpotifyUri(inputArgs.uri)
 		if (!spotify) {
 			throw createSonosCallerError(
-				`Unsupported Spotify URI "${inputArgs.uri}".`,
+				`Unsupported Spotify URI "${inputArgs.uri}". Supported kinds: album, playlist, track, artist, show, episode.`,
 				'unsupported_spotify_uri',
 			)
 		}
-		return {
-			uri: spotify.uri,
-			metadata: inputArgs.metadata ?? spotify.metadata,
+		assertPlayableSpotifyContent(spotify)
+		const player = await resolvePlayer(inputArgs.playerId)
+		const favorites = await listFavorites(inputArgs.playerId)
+		const resolver = createSpotifyServiceCandidateResolver({
+			favorites,
+			listPlayerMetadataEntries: () => listSpotifyPlayerMetadataEntries(player),
+			listMusicServiceAccounts: () => listSpotifyMusicServiceAccounts(player),
+			readCachedServiceInfo: () =>
+				getSonosSpotifyServiceCache(
+					input.storage,
+					input.config.homeConnectorId,
+				),
+		})
+		for await (const candidate of resolver.candidates) {
+			const built = buildSonosSpotifyUri({
+				uri: inputArgs.uri,
+				favorites,
+				serviceInfo: candidate,
+			})
+			if (!built) break
+			let result: T
+			try {
+				result = await attempt({
+					uri: built.uri,
+					metadata: inputArgs.metadata ?? built.metadata,
+				})
+			} catch (error) {
+				if (!canTryNextSpotifyCandidate(candidate, error)) throw error
+				resolver.tried.push(
+					`${candidate.source} sid=${candidate.sid} sn=${candidate.sn} (rejected by Sonos)`,
+				)
+				continue
+			}
+			if (inputArgs.verifiesPlayback || candidate.source !== 'fallback') {
+				await saveSonosSpotifyServiceCache(
+					input.storage,
+					input.config.homeConnectorId,
+					candidate,
+				)
+			}
+			return result
 		}
+		throw createSpotifyMetadataUnavailableError(resolver.tried)
 	}
 
 	async function enqueueUri(inputArgs: {
@@ -587,28 +699,41 @@ export function createSonosAdapter(input: {
 		playNow?: boolean
 	}): Promise<SonosQueueEnqueueResult> {
 		const player = await resolvePlayer(inputArgs.playerId)
-		const prepared = await buildQueueUri({
-			playerId: player.playerId,
-			uri: inputArgs.uri,
-			metadata: inputArgs.metadata,
-		})
 		if (input.config.mocksEnabled && isMockSonosHost(player.host)) {
-			return enqueueMockSonosUri({
-				playerId: player.playerId,
-				uri: prepared.uri,
-				metadata: prepared.metadata,
-				enqueueAsNext: inputArgs.enqueueAsNext,
-				clearQueue: inputArgs.clearQueue,
-				playNow: inputArgs.playNow,
-			})
+			return await withQueueUri(
+				{
+					playerId: player.playerId,
+					uri: inputArgs.uri,
+					metadata: inputArgs.metadata,
+					verifiesPlayback: true,
+				},
+				async (prepared) =>
+					enqueueMockSonosUri({
+						playerId: player.playerId,
+						uri: prepared.uri,
+						metadata: prepared.metadata,
+						enqueueAsNext: inputArgs.enqueueAsNext,
+						clearQueue: inputArgs.clearQueue,
+						playNow: inputArgs.playNow,
+					}),
+			)
 		}
 		const queuePlayer = await resolvePlaybackCoordinator(player)
-		const result = await addSonosUriToQueueLive({
-			host: queuePlayer.host,
-			uri: prepared.uri,
-			metadata: prepared.metadata,
-			enqueueAsNext: inputArgs.enqueueAsNext,
-		})
+		const result = await withQueueUri(
+			{
+				playerId: player.playerId,
+				uri: inputArgs.uri,
+				metadata: inputArgs.metadata,
+				verifiesPlayback: true,
+			},
+			(prepared) =>
+				addSonosUriToQueueLive({
+					host: queuePlayer.host,
+					uri: prepared.uri,
+					metadata: prepared.metadata,
+					enqueueAsNext: inputArgs.enqueueAsNext,
+				}),
+		)
 		let queueResult = result
 		if (inputArgs.clearQueue) {
 			if (result.numTracksAdded > 0) {
@@ -662,26 +787,34 @@ export function createSonosAdapter(input: {
 		description?: string | null
 	}): Promise<SonosCreatedFavorite> {
 		const householdPlayer = await resolveHouseholdPlayer(inputArgs.playerId)
-		const prepared = await buildQueueUri({
-			playerId: householdPlayer.playerId,
-			uri: inputArgs.uri,
-			metadata: inputArgs.metadata,
-		})
-		if (input.config.mocksEnabled && isMockSonosHost(householdPlayer.host)) {
-			return createMockSonosFavorite({
-				title: inputArgs.title,
-				uri: prepared.uri,
-				metadata: prepared.metadata,
-				description: inputArgs.description,
-			})
-		}
-		return await createSonosFavoriteLive({
-			host: householdPlayer.host,
-			title: inputArgs.title,
-			uri: prepared.uri,
-			metadata: prepared.metadata,
-			description: inputArgs.description,
-		})
+		return await withQueueUri(
+			{
+				playerId: householdPlayer.playerId,
+				uri: inputArgs.uri,
+				metadata: inputArgs.metadata,
+				verifiesPlayback: false,
+			},
+			async (prepared) => {
+				if (
+					input.config.mocksEnabled &&
+					isMockSonosHost(householdPlayer.host)
+				) {
+					return createMockSonosFavorite({
+						title: inputArgs.title,
+						uri: prepared.uri,
+						metadata: prepared.metadata,
+						description: inputArgs.description,
+					})
+				}
+				return await createSonosFavoriteLive({
+					host: householdPlayer.host,
+					title: inputArgs.title,
+					uri: prepared.uri,
+					metadata: prepared.metadata,
+					description: inputArgs.description,
+				})
+			},
+		)
 	}
 
 	async function deleteFavorite(inputArgs: {
