@@ -4,8 +4,14 @@ import { loadHomeConnectorConfig } from '../../config.ts'
 import { createAppState } from '../../state.ts'
 import { createHomeConnectorStorage } from '../../storage/index.ts'
 import { createSonosAdapter } from './index.ts'
-import { getSonosSpotifyServiceCache } from './repository.ts'
-import { resetMockSonosState } from './mock-driver.ts'
+import {
+	getSonosSpotifyServiceCache,
+	saveSonosSpotifyServiceCache,
+} from './repository.ts'
+import {
+	resetMockSonosState,
+	setMockSonosRejectedSpotifyServices,
+} from './mock-driver.ts'
 
 function createConfig() {
 	process.env.MOCKS = 'true'
@@ -203,17 +209,30 @@ test('sonos Spotify playback works without favorites via fallback, then cache', 
 	try {
 		const players = await sonos.scan()
 		const playerId = players[0]!.playerId
+		const householdId = players[0]!.householdId
 		await sonos.adoptPlayer(playerId)
 		for (const favorite of await sonos.listFavorites(playerId)) {
 			await sonos.deleteFavorite({ playerId, favoriteId: favorite.favoriteId })
 		}
 		await sonos.clearQueue(playerId)
+		await saveSonosSpotifyServiceCache(
+			storage,
+			config.homeConnectorId,
+			'Sonos_OtherHousehold',
+			{
+				sid: '9',
+				sn: '3',
+				descToken: 'SA_RINCON2311_X_#Svc2311-mock',
+				source: 'account',
+			},
+		)
 
 		await sonos.enqueueUri({ playerId, uri: 'spotify:artist:abc' })
 		const queueAfterFallback = await sonos.listQueue(playerId)
 		const cachedAfterFallback = await getSonosSpotifyServiceCache(
 			storage,
 			config.homeConnectorId,
+			householdId,
 		)
 
 		expect(queueAfterFallback[0]?.uri).toContain(
@@ -237,8 +256,98 @@ test('sonos Spotify playback works without favorites via fallback, then cache', 
 			'x-sonos-spotify:spotify%3Aepisode%3Aabc?sid=12&flags=8224&sn=6',
 		)
 		expect(
-			await getSonosSpotifyServiceCache(storage, config.homeConnectorId),
+			await getSonosSpotifyServiceCache(
+				storage,
+				config.homeConnectorId,
+				householdId,
+			),
 		).toMatchObject({ source: 'cache' })
+		expect(
+			await getSonosSpotifyServiceCache(
+				storage,
+				config.homeConnectorId,
+				'Sonos_OtherHousehold',
+			),
+		).toMatchObject({ sid: '9', sn: '3' })
+	} finally {
+		await storage.close()
+	}
+})
+
+test('sonos Spotify playback skips service info that Sonos rejects', async () => {
+	const config = createConfig()
+	const state = createAppState()
+	const storage = await createHomeConnectorStorage(config)
+	const sonos = createSonosAdapter({
+		config,
+		state,
+		storage,
+	})
+
+	try {
+		const players = await sonos.scan()
+		const playerId = players[0]!.playerId
+		await sonos.adoptPlayer(playerId)
+		await sonos.clearQueue(playerId)
+		// The seeded Spotify favorite uses sid=12 sn=6; make that account stale.
+		setMockSonosRejectedSpotifyServices(['12|6'])
+
+		const result = await sonos.enqueueUri({
+			playerId,
+			uri: 'spotify:artist:abc',
+		})
+		const queue = await sonos.listQueue(playerId)
+
+		expect(result.newQueueLength).toBe(queue.length)
+		expect(queue.map((entry) => entry.uri)).toEqual([
+			expect.stringContaining('?sid=12&flags=8300&sn=7'),
+			expect.stringContaining('?sid=12&flags=8300&sn=7'),
+		])
+		expect(
+			await getSonosSpotifyServiceCache(
+				storage,
+				config.homeConnectorId,
+				players[0]!.householdId,
+			),
+		).toMatchObject({ sid: '12', sn: '7', source: 'fallback' })
+	} finally {
+		await storage.close()
+	}
+})
+
+test('sonos Spotify playback rethrows the first rejection when every candidate fails', async () => {
+	const config = createConfig()
+	const state = createAppState()
+	const storage = await createHomeConnectorStorage(config)
+	const sonos = createSonosAdapter({
+		config,
+		state,
+		storage,
+	})
+
+	try {
+		const players = await sonos.scan()
+		const playerId = players[0]!.playerId
+		await sonos.adoptPlayer(playerId)
+		await sonos.clearQueue(playerId)
+		setMockSonosRejectedSpotifyServices(['12|6', '12|7', '9|6', '9|7'])
+
+		await expect(
+			sonos.enqueueUri({ playerId, uri: 'spotify:episode:abc' }),
+		).rejects.toMatchObject({
+			name: 'SonosSoapError',
+			homeConnectorCaptureContext: {
+				tags: { sonos_failure_cause_class: 'http_error' },
+			},
+		})
+		expect(await sonos.listQueue(playerId)).toEqual([])
+		expect(
+			await getSonosSpotifyServiceCache(
+				storage,
+				config.homeConnectorId,
+				players[0]!.householdId,
+			),
+		).toBeNull()
 	} finally {
 		await storage.close()
 	}

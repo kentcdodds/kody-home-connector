@@ -244,6 +244,34 @@ const mockState = {
 	>(),
 }
 
+/** `sid|sn` pairs whose Spotify URIs the mock rejects like a Sonos UPnP fault. */
+const mockRejectedSpotifyServices = new Set<string>()
+
+export function setMockSonosRejectedSpotifyServices(keys: Array<string>) {
+	mockRejectedSpotifyServices.clear()
+	for (const key of keys) mockRejectedSpotifyServices.add(key)
+}
+
+function assertMockSpotifyServiceAccepted(uri: string) {
+	const query = new URLSearchParams(uri.split('?')[1] ?? '')
+	const key = `${query.get('sid')}|${query.get('sn')}`
+	if (!mockRejectedSpotifyServices.has(key)) return
+	const error = new Error(
+		'Sonos AddURIToQueue failed (500) for mock: UPnP error 800',
+	) as Error & { homeConnectorCaptureContext: unknown }
+	error.name = 'SonosSoapError'
+	error.homeConnectorCaptureContext = {
+		tags: {
+			connector_vendor: 'sonos',
+			sonos_soap_action: 'AddURIToQueue',
+			sonos_failure_cause_class: 'http_error',
+			sonos_http_status: '500',
+			sonos_upnp_error: '800',
+		},
+	}
+	throw error
+}
+
 function cloneMockFavoriteSeeds() {
 	return initialMockFavoriteSeeds.map((seed) => ({
 		...seed,
@@ -453,6 +481,7 @@ export function resetMockSonosState() {
 	mockState.players.clear()
 	mockState.groups.clear()
 	mockFavoriteSeeds = cloneMockFavoriteSeeds()
+	mockRejectedSpotifyServices.clear()
 	nextMockFavoriteOrdinal = initialMockFavoriteSeeds.length + 1
 	for (const basePlayer of basePlayers) {
 		mockState.players.set(basePlayer.playerId, {
@@ -683,6 +712,7 @@ export function enqueueMockSonosUri(input: {
 	clearQueue?: boolean
 	playNow?: boolean
 }): SonosQueueEnqueueResult {
+	assertMockSpotifyServiceAccepted(input.uri)
 	const coordinator = getCoordinatorState(input.playerId)
 	const existingQueue = input.clearQueue ? [] : coordinator.queue
 	const effectiveCurrentTrackIndex = input.clearQueue
