@@ -293,23 +293,26 @@ export function createSpotifyServiceCandidateResolver(deps: {
 		)
 		yield* emit(fromFavorites, 'favorite')
 
-		let fromPlayers: SpotifyServiceInfo | null = null
+		// Every distinct hint is offered, so a rejected stale account does not
+		// hide a working one later in the queue.
+		let foundPlayerHint = false
 		try {
 			for await (const entry of deps.listPlayerMetadataEntries()) {
-				fromPlayers = getSpotifyServiceInfoFromEntries([entry], {
+				const fromPlayer = getSpotifyServiceInfoFromEntries([entry], {
 					deriveMissingToken: true,
 				})
-				if (fromPlayers) break
+				if (!fromPlayer) continue
+				foundPlayerHint = true
+				yield* emit(fromPlayer, 'player')
 			}
 			tried.push(
-				fromPlayers
+				foundPlayerHint
 					? 'player now-playing/queue metadata'
 					: 'player now-playing/queue metadata (no Spotify item found)',
 			)
 		} catch {
 			tried.push('player now-playing/queue metadata (unavailable)')
 		}
-		yield* emit(fromPlayers, 'player')
 
 		let fromAccounts: SpotifyServiceInfo | null = null
 		try {

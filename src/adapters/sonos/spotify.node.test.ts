@@ -312,6 +312,37 @@ test('candidate resolver prefers favorites, then players, accounts, cache, fallb
 	expect(resolver.tried.join(' ')).not.toContain('SA_RINCON')
 })
 
+test('candidate resolver offers every distinct player hint', async () => {
+	const candidates = await collect(
+		createSpotifyServiceCandidateResolver({
+			favorites: [],
+			listPlayerMetadataEntries: () =>
+				entries([
+					{
+						uri: 'x-sonos-spotify:spotify%3Atrack%3Aa?sid=12&flags=8224&sn=6',
+						metadata: null,
+					},
+					{
+						uri: 'x-sonos-spotify:spotify%3Atrack%3Ab?sid=12&flags=8224&sn=6',
+						metadata: null,
+					},
+					{
+						uri: 'x-sonos-spotify:spotify%3Atrack%3Ac?sid=12&flags=8224&sn=8',
+						metadata: null,
+					},
+				]),
+			listMusicServiceAccounts: async () => [],
+			readCachedServiceInfo: async () => null,
+		}),
+	)
+
+	expect(
+		candidates
+			.filter((candidate) => candidate.source === 'player')
+			.map((candidate) => candidate.sn),
+	).toEqual(['6', '8'])
+})
+
 test('candidate resolver uses the cache and fallbacks when nothing else matches', async () => {
 	const cached = await collect(
 		createSpotifyServiceCandidateResolver({

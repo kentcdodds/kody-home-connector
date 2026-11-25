@@ -257,7 +257,7 @@ function assertMockSpotifyServiceAccepted(uri: string) {
 	const key = `${query.get('sid')}|${query.get('sn')}`
 	if (!mockRejectedSpotifyServices.has(key)) return
 	const error = new Error(
-		'Sonos AddURIToQueue failed (500) for mock: UPnP error 800',
+		`Sonos AddURIToQueue failed (500) for mock sid=${query.get('sid')} sn=${query.get('sn')}: UPnP error 800`,
 	) as Error & { homeConnectorCaptureContext: unknown }
 	error.name = 'SonosSoapError'
 	error.homeConnectorCaptureContext = {

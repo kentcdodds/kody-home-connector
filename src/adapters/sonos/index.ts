@@ -152,12 +152,15 @@ function createSonosCallerError(
 
 /** Sonos rejected the URI (UPnP fault), e.g. because the account is wrong. */
 function isSonosUriRejection(error: unknown) {
-	const captureContext = (
+	const tags = (
 		error as {
 			homeConnectorCaptureContext?: HomeConnectorErrorCaptureContext
 		} | null
-	)?.homeConnectorCaptureContext
-	return captureContext?.tags?.sonos_failure_cause_class === 'http_error'
+	)?.homeConnectorCaptureContext?.tags
+	return (
+		tags?.sonos_failure_cause_class === 'http_error' &&
+		Boolean(tags.sonos_upnp_error)
+	)
 }
 
 function normalizeQuery(value: string) {
@@ -236,6 +239,13 @@ export function createSonosAdapter(input: {
 			const player = await resolvePlayer(playerId)
 			if (player.adopted) return player
 			const adoptedPlayers = await getAdoptedPlayers()
+			if (player.householdId) {
+				return (
+					adoptedPlayers.find(
+						(entry) => entry.householdId === player.householdId,
+					) ?? player
+				)
+			}
 			return adoptedPlayers[0] ?? player
 		}
 		const adoptedPlayers = await getAdoptedPlayers()

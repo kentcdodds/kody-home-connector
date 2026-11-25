@@ -336,6 +336,7 @@ test('sonos Spotify playback rethrows the first rejection when every candidate f
 			sonos.enqueueUri({ playerId, uri: 'spotify:episode:abc' }),
 		).rejects.toMatchObject({
 			name: 'SonosSoapError',
+			message: expect.stringContaining('sid=12 sn=6:'),
 			homeConnectorCaptureContext: {
 				tags: { sonos_failure_cause_class: 'http_error' },
 			},
