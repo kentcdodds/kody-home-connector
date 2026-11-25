@@ -150,6 +150,7 @@ test('baseline migration adopts a database created by the previous release', asy
 				['roku_devices', 'applied'],
 				['araknis_switch_credentials', 'applied'],
 				['connector_runtime_settings', 'applied'],
+				['sonos_spotify_service_cache', 'applied'],
 			])
 
 			expect(await listVenstarThermostats(storage, 'default')).toEqual([
@@ -190,6 +191,7 @@ test('baseline migration adopts a database created by the previous release', asy
 				{ type: 'table', name: 'data_table_migrations' },
 				{ type: 'table', name: 'pjlink_projectors' },
 				{ type: 'table', name: 'roku_devices' },
+				{ type: 'table', name: 'sonos_spotify_service_cache' },
 				{ type: 'table', name: 'sony_ircc_players' },
 			].sort(
 				(a, b) => a.type.localeCompare(b.type) || a.name.localeCompare(b.name),
@@ -202,6 +204,7 @@ test('baseline migration adopts a database created by the previous release', asy
 				await loadHomeConnectorMigrations(),
 			)
 			expect(status.map((entry) => entry.status)).toEqual([
+				'applied',
 				'applied',
 				'applied',
 				'applied',
@@ -251,6 +254,7 @@ test('an empty database receives the full schema and a journaled baseline', asyn
 					{ type: 'table', name: 'connector_runtime_settings' },
 					{ type: 'table', name: 'pjlink_projectors' },
 					{ type: 'table', name: 'roku_devices' },
+					{ type: 'table', name: 'sonos_spotify_service_cache' },
 					{ type: 'table', name: 'sony_ircc_players' },
 				].sort(
 					(a, b) =>

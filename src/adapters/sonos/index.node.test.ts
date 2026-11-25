@@ -4,6 +4,7 @@ import { loadHomeConnectorConfig } from '../../config.ts'
 import { createAppState } from '../../state.ts'
 import { createHomeConnectorStorage } from '../../storage/index.ts'
 import { createSonosAdapter } from './index.ts'
+import { getSonosSpotifyServiceCache } from './repository.ts'
 import { resetMockSonosState } from './mock-driver.ts'
 
 function createConfig() {
@@ -124,6 +125,120 @@ test('sonos enqueue uri supports bare Spotify playlist containers in mock mode',
 		expect(statusAfterPlay.trackTitle).toBe(
 			'spotify:playlist:37i9dQZF1DXcBWIGoYBM5M Track 1',
 		)
+	} finally {
+		await storage.close()
+	}
+})
+
+test('sonos enqueue uri supports bare Spotify artist, show, and episode URIs in mock mode', async () => {
+	const config = createConfig()
+	const state = createAppState()
+	const storage = await createHomeConnectorStorage(config)
+	const sonos = createSonosAdapter({
+		config,
+		state,
+		storage,
+	})
+
+	try {
+		const players = await sonos.scan()
+		const playerId = players[0]!.playerId
+		await sonos.adoptPlayer(playerId)
+
+		const cases = [
+			{
+				uri: 'spotify:artist:0OdUWJ0sBjDrqHygGUXeCF',
+				expected:
+					'x-rincon-cpcontainer:100e206cspotify%3AartistTopTracks%3A0OdUWJ0sBjDrqHygGUXeCF?sid=12&flags=8300&sn=6',
+				numTracksAdded: 2,
+			},
+			{
+				uri: 'spotify:show:5CfCWKI5pZ28U0uOzXkDHe',
+				expected:
+					'x-rincon-cpcontainer:1006206cspotify%3Ashow%3A5CfCWKI5pZ28U0uOzXkDHe?sid=12&flags=8300&sn=6',
+				numTracksAdded: 2,
+			},
+			{
+				uri: 'spotify:episode:512ojhOuo1ktJprKbVcKyQ',
+				expected:
+					'x-sonos-spotify:spotify%3Aepisode%3A512ojhOuo1ktJprKbVcKyQ?sid=12&flags=8224&sn=6',
+				numTracksAdded: 1,
+			},
+		]
+		for (const entry of cases) {
+			const result = await sonos.enqueueUri({
+				playerId,
+				uri: entry.uri,
+				clearQueue: true,
+			})
+			const queue = await sonos.listQueue(playerId)
+			expect(result.numTracksAdded).toBe(entry.numTracksAdded)
+			expect(queue[0]?.uri).toContain(entry.expected)
+			expect(queue[0]?.metadata).toContain('SA_RINCON3079_X_#Svc3079-mock')
+		}
+		await expect(
+			sonos.enqueueUri({ playerId, uri: 'spotify:concert:abc' }),
+		).rejects.toMatchObject({
+			name: 'SonosCallerError',
+			homeConnectorCaptureContext: {
+				shouldCapture: false,
+				tags: { sonos_caller_error: 'spotify_concert_unplayable' },
+			},
+		})
+	} finally {
+		await storage.close()
+	}
+})
+
+test('sonos Spotify playback works without favorites via fallback, then cache', async () => {
+	const config = createConfig()
+	const state = createAppState()
+	const storage = await createHomeConnectorStorage(config)
+	const sonos = createSonosAdapter({
+		config,
+		state,
+		storage,
+	})
+
+	try {
+		const players = await sonos.scan()
+		const playerId = players[0]!.playerId
+		await sonos.adoptPlayer(playerId)
+		for (const favorite of await sonos.listFavorites(playerId)) {
+			await sonos.deleteFavorite({ playerId, favoriteId: favorite.favoriteId })
+		}
+		await sonos.clearQueue(playerId)
+
+		await sonos.enqueueUri({ playerId, uri: 'spotify:artist:abc' })
+		const queueAfterFallback = await sonos.listQueue(playerId)
+		const cachedAfterFallback = await getSonosSpotifyServiceCache(
+			storage,
+			config.homeConnectorId,
+		)
+
+		expect(queueAfterFallback[0]?.uri).toContain(
+			'x-rincon-cpcontainer:100e206cspotify%3AartistTopTracks%3Aabc?sid=12&flags=8300&sn=6',
+		)
+		expect(queueAfterFallback[0]?.metadata).toContain(
+			'SA_RINCON3079_X_#Svc3079-0-Token',
+		)
+		expect(cachedAfterFallback).toEqual({
+			sid: '12',
+			sn: '6',
+			descToken: 'SA_RINCON3079_X_#Svc3079-0-Token',
+			source: 'fallback',
+		})
+
+		await sonos.clearQueue(playerId)
+		await sonos.enqueueUri({ playerId, uri: 'spotify:episode:abc' })
+		const queueAfterCache = await sonos.listQueue(playerId)
+
+		expect(queueAfterCache[0]?.uri).toBe(
+			'x-sonos-spotify:spotify%3Aepisode%3Aabc?sid=12&flags=8224&sn=6',
+		)
+		expect(
+			await getSonosSpotifyServiceCache(storage, config.homeConnectorId),
+		).toMatchObject({ source: 'cache' })
 	} finally {
 		await storage.close()
 	}

@@ -577,6 +577,61 @@ export async function getSonosPositionInfoLive(host: string) {
 	}
 }
 
+/**
+ * Raw URI + DIDL for what a player is playing (track and transport source),
+ * used to learn music-service sid/sn/desc tokens. Never logged.
+ */
+export async function getSonosPlaybackMetadataLive(host: string) {
+	const [positionXml, mediaXml] = await Promise.all([
+		avTransport(
+			host,
+			'GetPositionInfo',
+			'<u:GetPositionInfo xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"><InstanceID>0</InstanceID></u:GetPositionInfo>',
+		),
+		avTransport(
+			host,
+			'GetMediaInfo',
+			'<u:GetMediaInfo xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"><InstanceID>0</InstanceID></u:GetMediaInfo>',
+		),
+	])
+	return [
+		{
+			uri: extractTag(positionXml, 'TrackURI'),
+			metadata: extractTag(positionXml, 'TrackMetaData'),
+		},
+		{
+			uri: extractTag(mediaXml, 'CurrentURI'),
+			metadata: extractTag(mediaXml, 'CurrentURIMetaData'),
+		},
+	]
+}
+
+/**
+ * Music-service accounts from the player's local `/status/accounts` page
+ * (no credentials needed). Only account type and serial number are parsed;
+ * the response body is never included in errors because it can hold keys.
+ */
+export async function listSonosMusicServiceAccountsLive(host: string) {
+	const response = await fetch(`http://${host}:1400/status/accounts`, {
+		signal: AbortSignal.timeout(sonosSoapTimeoutMs),
+	})
+	if (!response.ok) {
+		throw new Error(
+			`Sonos music-service account listing failed (${response.status}).`,
+		)
+	}
+	const xml = await response.text()
+	const accounts: Array<{ type: string; serialNum: string }> = []
+	for (const match of xml.matchAll(/<Account\b([^>]*)>/g)) {
+		const attrs = match[1] ?? ''
+		const type = attrs.match(/\bType="(\d+)"/)?.[1]
+		const serialNum = attrs.match(/\bSerialNum="(\d+)"/)?.[1]
+		if (/\bDeleted="1"/.test(attrs)) continue
+		if (type && serialNum) accounts.push({ type, serialNum })
+	}
+	return accounts
+}
+
 export async function getSonosVolumeLive(host: string) {
 	const xml = await renderingControl(
 		host,

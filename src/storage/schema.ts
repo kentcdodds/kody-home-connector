@@ -322,6 +322,24 @@ export const sonosPlayers = table({
 	timestamps,
 })
 
+/**
+ * Last Spotify service info (sid/sn/desc token) that worked for Sonos
+ * playback, reused when no Spotify favorite exists. Never logged.
+ */
+export const sonosSpotifyServiceCache = table({
+	name: 'sonos_spotify_service_cache',
+	columns: {
+		connector_id: c.text(),
+		sid: c.text(),
+		sn: c.text(),
+		desc_token: c.text(),
+		source: c.text(),
+		updated_at: c.text(),
+	},
+	primaryKey: ['connector_id'],
+	timestamps,
+})
+
 export const sonyIrccPlayers = table({
 	name: 'sony_ircc_players',
 	columns: {
