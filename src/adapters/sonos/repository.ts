@@ -148,12 +148,15 @@ export async function adoptSonosPlayer(
 	return getSonosPlayer(storage, connectorId, playerId)
 }
 
+/** Cache rows are per Sonos household; `''` is used when it is unknown. */
 export async function getSonosSpotifyServiceCache(
 	storage: HomeConnectorStorage,
 	connectorId: string,
+	householdId: string | null,
 ) {
 	const row = await storage.db.find(sonosSpotifyServiceCache, {
 		connector_id: connectorId,
+		household_id: householdId ?? '',
 	})
 	return row
 		? {
@@ -168,9 +171,10 @@ export async function getSonosSpotifyServiceCache(
 export async function saveSonosSpotifyServiceCache(
 	storage: HomeConnectorStorage,
 	connectorId: string,
+	householdId: string | null,
 	info: { sid: string; sn: string; descToken: string; source: string },
 ) {
-	const key = { connector_id: connectorId }
+	const key = { connector_id: connectorId, household_id: householdId ?? '' }
 	const values = {
 		sid: info.sid,
 		sn: info.sn,

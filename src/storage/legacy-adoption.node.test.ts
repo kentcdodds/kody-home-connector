@@ -151,6 +151,7 @@ test('baseline migration adopts a database created by the previous release', asy
 				['araknis_switch_credentials', 'applied'],
 				['connector_runtime_settings', 'applied'],
 				['sonos_spotify_service_cache', 'applied'],
+				['sonos_spotify_service_cache_household', 'applied'],
 			])
 
 			expect(await listVenstarThermostats(storage, 'default')).toEqual([
@@ -204,6 +205,7 @@ test('baseline migration adopts a database created by the previous release', asy
 				await loadHomeConnectorMigrations(),
 			)
 			expect(status.map((entry) => entry.status)).toEqual([
+				'applied',
 				'applied',
 				'applied',
 				'applied',

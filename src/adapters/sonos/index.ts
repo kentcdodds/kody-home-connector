@@ -150,19 +150,17 @@ function createSonosCallerError(
 	return error
 }
 
-function canTryNextSpotifyCandidate(
-	candidate: SpotifyServiceCandidate,
-	error: unknown,
-) {
-	if (candidate.source !== 'cache' && candidate.source !== 'fallback') {
-		return false
-	}
-	const captureContext = (
+/** Sonos rejected the URI (UPnP fault), e.g. because the account is wrong. */
+function isSonosUriRejection(error: unknown) {
+	const tags = (
 		error as {
 			homeConnectorCaptureContext?: HomeConnectorErrorCaptureContext
 		} | null
-	)?.homeConnectorCaptureContext
-	return captureContext?.tags?.sonos_failure_cause_class === 'http_error'
+	)?.homeConnectorCaptureContext?.tags
+	return (
+		tags?.sonos_failure_cause_class === 'http_error' &&
+		Boolean(tags.sonos_upnp_error)
+	)
 }
 
 function normalizeQuery(value: string) {
@@ -241,6 +239,13 @@ export function createSonosAdapter(input: {
 			const player = await resolvePlayer(playerId)
 			if (player.adopted) return player
 			const adoptedPlayers = await getAdoptedPlayers()
+			if (player.householdId) {
+				return (
+					adoptedPlayers.find(
+						(entry) => entry.householdId === player.householdId,
+					) ?? player
+				)
+			}
 			return adoptedPlayers[0] ?? player
 		}
 		const adoptedPlayers = await getAdoptedPlayers()
@@ -587,11 +592,14 @@ export function createSonosAdapter(input: {
 			}
 			return
 		}
-		const otherPlayers = (await getKnownPlayers()).filter(
-			(entry) =>
-				entry.playerId !== player.playerId &&
-				!(input.config.mocksEnabled && isMockSonosHost(entry.host)),
-		)
+		const otherPlayers = player.householdId
+			? (await getKnownPlayers()).filter(
+					(entry) =>
+						entry.playerId !== player.playerId &&
+						entry.householdId === player.householdId &&
+						!(input.config.mocksEnabled && isMockSonosHost(entry.host)),
+				)
+			: []
 		const sources: Array<() => Promise<Array<SpotifyMetadataEntry>>> = [
 			() => getSonosPlaybackMetadataLive(player.host),
 			() => listSonosQueueLive({ host: player.host, player }),
@@ -619,12 +627,14 @@ export function createSonosAdapter(input: {
 
 	/**
 	 * Runs `attempt` with the Sonos URI for `inputArgs.uri`. Bare Spotify URIs
-	 * are built from resolved service info; when a cached or generic fallback
-	 * candidate is rejected by Sonos (UPnP fault), the next candidate is tried.
+	 * are built from resolved service info; when Sonos rejects a candidate
+	 * (UPnP fault, e.g. a stale or guessed account), the next one is tried. If
+	 * every candidate is rejected, the first rejection is rethrown.
 	 */
 	async function withQueueUri<T>(
 		inputArgs: {
-			playerId: string
+			/** Player whose queue/now-playing/accounts hint the Spotify account. */
+			player: SonosPersistedPlayer
 			uri: string
 			metadata?: string | null
 			/** True when `attempt` proves Sonos accepted the URI. */
@@ -646,8 +656,8 @@ export function createSonosAdapter(input: {
 			)
 		}
 		assertPlayableSpotifyContent(spotify)
-		const player = await resolvePlayer(inputArgs.playerId)
-		const favorites = await listFavorites(inputArgs.playerId)
+		const { player } = inputArgs
+		const favorites = await listFavorites(player.playerId)
 		const resolver = createSpotifyServiceCandidateResolver({
 			favorites,
 			listPlayerMetadataEntries: () => listSpotifyPlayerMetadataEntries(player),
@@ -656,8 +666,10 @@ export function createSonosAdapter(input: {
 				getSonosSpotifyServiceCache(
 					input.storage,
 					input.config.homeConnectorId,
+					player.householdId,
 				),
 		})
+		let firstRejection: { error: unknown } | null = null
 		for await (const candidate of resolver.candidates) {
 			const built = buildSonosSpotifyUri({
 				uri: inputArgs.uri,
@@ -672,22 +684,39 @@ export function createSonosAdapter(input: {
 					metadata: inputArgs.metadata ?? built.metadata,
 				})
 			} catch (error) {
-				if (!canTryNextSpotifyCandidate(candidate, error)) throw error
+				if (!isSonosUriRejection(error)) throw error
+				firstRejection ??= { error }
 				resolver.tried.push(
 					`${candidate.source} sid=${candidate.sid} sn=${candidate.sn} (rejected by Sonos)`,
 				)
 				continue
 			}
 			if (inputArgs.verifiesPlayback || candidate.source !== 'fallback') {
-				await saveSonosSpotifyServiceCache(
-					input.storage,
-					input.config.homeConnectorId,
-					candidate,
-				)
+				await cacheSpotifyServiceInfo(player, candidate)
 			}
 			return result
 		}
+		if (firstRejection) throw firstRejection.error
 		throw createSpotifyMetadataUnavailableError(resolver.tried)
+	}
+
+	/** Best effort: Sonos already accepted the URI, so never fail the command. */
+	async function cacheSpotifyServiceInfo(
+		player: SonosPersistedPlayer,
+		candidate: SpotifyServiceCandidate,
+	) {
+		try {
+			await saveSonosSpotifyServiceCache(
+				input.storage,
+				input.config.homeConnectorId,
+				player.householdId,
+				candidate,
+			)
+		} catch {
+			console.warn(
+				`Failed to cache Sonos Spotify service info (sid=${candidate.sid} sn=${candidate.sn}).`,
+			)
+		}
 	}
 
 	async function enqueueUri(inputArgs: {
@@ -702,7 +731,7 @@ export function createSonosAdapter(input: {
 		if (input.config.mocksEnabled && isMockSonosHost(player.host)) {
 			return await withQueueUri(
 				{
-					playerId: player.playerId,
+					player,
 					uri: inputArgs.uri,
 					metadata: inputArgs.metadata,
 					verifiesPlayback: true,
@@ -721,7 +750,7 @@ export function createSonosAdapter(input: {
 		const queuePlayer = await resolvePlaybackCoordinator(player)
 		const result = await withQueueUri(
 			{
-				playerId: player.playerId,
+				player: queuePlayer,
 				uri: inputArgs.uri,
 				metadata: inputArgs.metadata,
 				verifiesPlayback: true,
@@ -789,7 +818,7 @@ export function createSonosAdapter(input: {
 		const householdPlayer = await resolveHouseholdPlayer(inputArgs.playerId)
 		return await withQueueUri(
 			{
-				playerId: householdPlayer.playerId,
+				player: householdPlayer,
 				uri: inputArgs.uri,
 				metadata: inputArgs.metadata,
 				verifiesPlayback: false,

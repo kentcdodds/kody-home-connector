@@ -330,13 +330,14 @@ export const sonosSpotifyServiceCache = table({
 	name: 'sonos_spotify_service_cache',
 	columns: {
 		connector_id: c.text(),
+		household_id: c.text(),
 		sid: c.text(),
 		sn: c.text(),
 		desc_token: c.text(),
 		source: c.text(),
 		updated_at: c.text(),
 	},
-	primaryKey: ['connector_id'],
+	primaryKey: ['connector_id', 'household_id'],
 	timestamps,
 })
 
