@@ -290,22 +290,46 @@ These tools work for any adopted Roku.
   `roku_list_apps`, `roku_get_active_app`, `roku_get_media_player`,
   `roku_play_youtube`) has a 5s timeout. If the stored address fails at the
   connection level (refused, unreachable, timeout), the connector runs one
-  discovery scan, matches the same device by serial number (falling back to
-  `deviceId`), stores the new address (adoption and `controlEnabled` are kept),
-  and retries once. The result then includes `addressHealed: { from, to }`. HTTP
-  error responses are never retried. If rediscovery does not find the device, or
+  discovery pass, matches the same device by serial number (falling back to the
+  stable discovery id, such as the SSDP USN), confirms the new address with
+  `/query/device-info`, stores the new address, and retries once. The result
+  then includes `addressHealed: { from, to }`. HTTP error responses are never
+  retried. If rediscovery does not find the device, the identity check fails, or
   the retry fails, the error says which address failed and what discovery found.
+- **Healing only moves an adopted device.** It updates the stored address and
+  `lastSeenAt` of that one device (adoption and `controlEnabled` are kept). It
+  never adds, prunes, or re-adopts inventory, so read tools do not drop
+  unadopted Rokus; only an explicit `roku_scan_devices` prunes. If the device is
+  ignored while rediscovery runs, the heal aborts without storing anything or
+  retrying the command.
+- **Identity check before an address change.** The new address must answer
+  `/query/device-info` with the adopted serial number. Devices stored without a
+  serial must report a matching model and name where both are known. On a
+  mismatch the stored address is not changed and the command is not sent there.
+  Roku ECP and SSDP are unauthenticated on the LAN, so a peer that spoofs both
+  SSDP and device-info can still impersonate a Roku. This check is the same
+  trust bar as initial adoption, applied before an automatic address change.
+- **Device ids.** New device ids come from the serial number, then a stable
+  discovery id (never an index placeholder), then the address. Scans reuse the
+  existing id of a known device that matches by serial or discovery id, so an
+  adopted id keeps working after the device moves.
 - **`roku_get_media_player`** returns ECP `/query/media-player` (`state`:
   `play`, `pause`, `buffer`, `open`, `close`, `stop`; `plugin`, `positionMs`,
-  `durationMs`, `isLive`) plus the active app in one call.
+  `durationMs`, `isLive`) plus the active app in one call. Roku does not include
+  a content id for YouTube, so this cannot say which video is playing.
 - **`roku_play_youtube`** takes `{ deviceId, url, mediaType?, verify? }`. It
   parses youtu.be, youtube.com/watch, shorts, live, embed, m.youtube.com, and
   music.youtube.com links (or a bare 11-character id), launches the YouTube Roku
-  app (`837`) with `contentId`, and by default polls for about 10s until YouTube
-  is active with a loaded player state. `verified: false` means playback was not
-  confirmed yet (cold start or an ad), not a failure; check again with
-  `roku_get_media_player`. `mediaType` (for example `live`) is sent only when
-  passed. A warning is returned if `/query/apps` does not list YouTube.
+  app (`837`) with `contentId`, and by default polls for at most about 10s total
+  (each status request gets only the remaining time, and rediscovery is skipped
+  once time runs out) until YouTube is active with a loaded player state.
+  Because Roku exposes no content id, `verified` stays `false`: it would only be
+  `true` if Roku reported the requested video id. `youtubeActive: true` with a
+  `playerState` such as `play` means YouTube has a loaded player, which may
+  still be a previous video; a warning says the specific video could not be
+  confirmed. A launch that returns is not a failure; check the screen or call
+  `roku_get_media_player` again. `mediaType` (for example `live`) is sent only
+  when passed. A warning is returned if `/query/apps` does not list YouTube.
 - **Manual fallback:**
   `roku_launch_app({ deviceId, appId: "837", params: { contentId: "<videoId>" } })`,
   then `roku_get_media_player({ deviceId })`.

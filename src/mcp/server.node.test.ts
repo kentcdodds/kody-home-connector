@@ -837,7 +837,8 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 			launched: true,
 			videoId: '_mAxik0v1A8',
 			appId: '837',
-			verified: true,
+			verified: false,
+			youtubeActive: true,
 			playerState: 'play',
 		})
 		const rokuPlaying = await mcp.callTool('roku_get_media_player', {

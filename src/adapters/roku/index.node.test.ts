@@ -1,11 +1,12 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { http, HttpResponse } from 'msw'
+import { delay, http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, expect, test } from 'vitest'
 import {
 	createRokuEcpHandlers,
 	resetMockRokuState,
+	type MockRokuDeviceInfo,
 } from '../../../mocks/roku.ts'
 import { installHomeConnectorMockServer } from '../../../mocks/test-server.ts'
 import { createAppState } from '../../state.ts'
@@ -25,6 +26,7 @@ import {
 	persistRokuAdoption,
 	upsertDiscoveredRokuDevices,
 } from './devices/repository.ts'
+import { type RokuDeviceRecord } from './types.ts'
 
 function createConfig() {
 	process.env.MOCKS = 'true'
@@ -298,7 +300,11 @@ async function withPersistedStaleRoku(
 		discoveryRequests: { count: number }
 		staleRequests: { count: number }
 	}) => Promise<void>,
-	options: { discoveredDevices?: Array<Record<string, unknown>> } = {},
+	options: {
+		discoveredDevices?: Array<Record<string, unknown>>
+		currentDeviceInfo?: MockRokuDeviceInfo
+		persisted?: Partial<RokuDeviceRecord>
+	} = {},
 ) {
 	const directory = mkdtempSync(path.join(tmpdir(), 'kody-roku-heal-'))
 	const config = createTestHomeConnectorConfig({
@@ -329,7 +335,14 @@ async function withPersistedStaleRoku(
 				],
 			})
 		}),
-		...createRokuEcpHandlers(currentLocation),
+		...createRokuEcpHandlers(
+			currentLocation,
+			options.currentDeviceInfo ?? {
+				name: 'Court Projector',
+				serialNumber: 'X02800VP8AC2',
+				modelName: 'Roku Ultra',
+			},
+		),
 	)
 	const storage = await createHomeConnectorStorage(config)
 	try {
@@ -344,6 +357,7 @@ async function withPersistedStaleRoku(
 			lastSeenAt: '2026-09-13T00:00:00.000Z',
 			controlEnabled: false,
 			adopted: true,
+			...options.persisted,
 		})
 		const roku = createRokuAdapter({
 			state: createAppState(),
@@ -418,7 +432,7 @@ test('Roku heal retry failure is reported without a second retry', async () => {
 	await withPersistedStaleRoku(async ({ roku, discoveryRequests }) => {
 		let retries = 0
 		server.use(
-			http.all(`${currentLocation}*`, () => {
+			http.get(`${currentLocation}query/apps`, () => {
 				retries++
 				return HttpResponse.error()
 			}),
@@ -549,11 +563,16 @@ test('roku playYouTube deep links YouTube and verifies playback', async () => {
 		videoId: '_mAxik0v1A8',
 		appId: '837',
 		mediaType: null,
-		verified: true,
+		verified: false,
+		youtubeActive: true,
 		playerState: 'play',
 		activeApp: { id: '837' },
-		warnings: [],
 	})
+	expect(result.warnings).toEqual([
+		expect.stringMatching(
+			/Roku did not expose a content id, so video _mAxik0v1A8 could not be confirmed/,
+		),
+	])
 	expect(launches).toEqual([
 		`${device.location.replace(/\/$/, '')}/launch/837?contentId=_mAxik0v1A8`,
 	])
@@ -572,11 +591,14 @@ test('roku playYouTube returns verified false with the last state instead of thr
 	const config = createConfig()
 	const state = createAppState()
 	const delays: Array<number> = []
+	let clock = 0
 	const roku = createRokuAdapter({
 		state,
 		config,
+		now: () => clock,
 		delay: async (ms) => {
 			delays.push(ms)
+			clock += ms
 		},
 	})
 	const devices = await roku.scan()
@@ -621,4 +643,310 @@ test('roku playYouTube rejects non-YouTube links before contacting the device', 
 			url: 'https://www.youtube.com/playlist?list=PL1234567890',
 		}),
 	).rejects.toThrow(/playlist link without a video id/)
+})
+
+test('roku playYouTube does not confirm a new video while a previous YouTube video is playing', async () => {
+	const config = createConfig()
+	const state = createAppState()
+	const roku = createRokuAdapter({ state, config })
+	const devices = await roku.scan()
+	const device = devices[0]!
+	await roku.adoptDevice(device.deviceId)
+	await roku.launchApp(device.deviceId, '837', { contentId: 'aaaaaaaaaaa' })
+	server.use(
+		http.post(
+			`${device.location.replace(/\/$/, '')}/launch/:appId`,
+			() => new HttpResponse(null, { status: 200 }),
+		),
+	)
+
+	const result = await roku.playYouTube(device.deviceId, {
+		url: 'https://youtu.be/bbbbbbbbbbb',
+	})
+	expect(result).toMatchObject({
+		videoId: 'bbbbbbbbbbb',
+		verified: false,
+		youtubeActive: true,
+		playerState: 'play',
+		activeApp: { id: '837' },
+	})
+	expect(result.warnings.join('\n')).toMatch(
+		/did not expose a content id, so video bbbbbbbbbbb could not be confirmed \(a previous video may still be playing\)/,
+	)
+})
+
+test('roku playYouTube verification stops at its deadline when status queries are slow', async () => {
+	const config = createConfig()
+	const state = createAppState()
+	const roku = createRokuAdapter({
+		state,
+		config,
+		youTubeVerifyTimeoutMs: 400,
+		youTubeVerifyIntervalMs: 100,
+	})
+	const devices = await roku.scan()
+	const device = devices[0]!
+	await roku.adoptDevice(device.deviceId)
+	const baseUrl = device.location.replace(/\/$/, '')
+	let discoveryRequests = 0
+	server.use(
+		http.get('http://roku.mock.local/discovery', () => {
+			discoveryRequests++
+			return undefined
+		}),
+		http.get(`${baseUrl}/query/media-player`, async () => {
+			await delay(3_000)
+			return HttpResponse.xml('<player error="false" state="play" />')
+		}),
+		http.get(`${baseUrl}/query/active-app`, async () => {
+			await delay(3_000)
+			return HttpResponse.xml('<active-app><app>Roku</app></active-app>')
+		}),
+	)
+
+	const startedAt = Date.now()
+	const result = await roku.playYouTube(device.deviceId, {
+		url: 'dQw4w9WgXcQ',
+	})
+	const elapsed = Date.now() - startedAt
+	expect(elapsed).toBeLessThan(1_500)
+	expect(result).toMatchObject({ launched: true, verified: false })
+	expect(result.warnings.join('\n')).toMatch(
+		/Playback verification query failed: .*time budget ran out/,
+	)
+	expect(result.warnings.join('\n')).toMatch(
+		/Playback was not confirmed within 400ms/,
+	)
+	expect(discoveryRequests).toBe(0)
+})
+
+test('Roku heal does not re-adopt or retry a device ignored during rediscovery', async () => {
+	await withPersistedStaleRoku(
+		async ({ config, storage, roku, discoveryRequests }) => {
+			let releaseDiscovery!: () => void
+			const discoveryHeld = new Promise<void>((resolve) => {
+				releaseDiscovery = resolve
+			})
+			let discoveryStarted!: () => void
+			const discoveryReached = new Promise<void>((resolve) => {
+				discoveryStarted = resolve
+			})
+			let retries = 0
+			server.use(
+				http.get('http://roku.mock.local/discovery', async () => {
+					discoveryRequests.count++
+					discoveryStarted()
+					await discoveryHeld
+					return HttpResponse.json({
+						devices: [
+							{
+								id: 'court',
+								name: 'Court Projector',
+								location: currentLocation,
+								serialNumber: 'X02800VP8AC2',
+								modelName: 'Roku Ultra',
+							},
+						],
+					})
+				}),
+				http.post(`${currentLocation}launch/:appId`, () => {
+					retries++
+					return new HttpResponse(null, { status: 200 })
+				}),
+			)
+			await roku.ensureHydrated()
+			const pending = roku.launchApp('roku-x02800vp8ac2', '837', {
+				contentId: '_mAxik0v1A8',
+			})
+			const settled = pending.catch((error: unknown) => error)
+			await discoveryReached
+			await roku.ignoreDevice('roku-x02800vp8ac2')
+			releaseDiscovery()
+
+			const error = await settled
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).message).toMatch(
+				/no longer adopted .* the stored address was not changed and the command was not retried/,
+			)
+			expect(retries).toBe(0)
+			expect(await listRokuDevices(storage, config.homeConnectorId)).toEqual([])
+			const status = await roku.getStatus()
+			expect(status.adopted).toEqual([])
+		},
+	)
+})
+
+test('serial-less Roku heals by stable discovery id and keeps its deviceId', async () => {
+	const legacyDeviceId = 'roku-http-192-168-1-98-8060-'
+	await withPersistedStaleRoku(
+		async ({ config, storage, roku }) => {
+			const result = await roku.launchApp(legacyDeviceId, '837', {
+				contentId: '_mAxik0v1A8',
+			})
+			expect(result).toMatchObject({
+				ok: true,
+				deviceId: legacyDeviceId,
+				addressHealed: { from: staleLocation, to: currentLocation },
+			})
+			const followUp = await roku.getActiveApp(legacyDeviceId)
+			expect(followUp.app?.id).toBe('837')
+			expect(followUp.addressHealed).toBeUndefined()
+
+			// A later user scan must reuse the adopted row instead of cloning it.
+			await roku.scan()
+			const stored = await listRokuDevices(storage, config.homeConnectorId)
+			expect(stored).toHaveLength(1)
+			expect(stored[0]).toMatchObject({
+				deviceId: legacyDeviceId,
+				location: currentLocation,
+				adopted: true,
+			})
+		},
+		{
+			persisted: {
+				deviceId: legacyDeviceId,
+				id: 'uuid:roku:ecp:court-usn',
+				serialNumber: null,
+			},
+			discoveredDevices: [
+				{
+					id: 'uuid:roku:ecp:court-usn',
+					name: 'Court Projector',
+					location: currentLocation,
+					modelName: 'Roku Ultra',
+				},
+			],
+			currentDeviceInfo: { name: 'Court Projector', modelName: 'Roku Ultra' },
+		},
+	)
+})
+
+test('serial-less Roku scan reconciles a duplicate row into the adopted record', async () => {
+	const legacyDeviceId = 'roku-http-192-168-1-98-8060-'
+	await withPersistedStaleRoku(
+		async ({ config, storage, roku }) => {
+			await persistRokuAdoption(storage, config.homeConnectorId, {
+				deviceId: 'roku-uuid-roku-ecp-court-usn',
+				id: 'uuid:roku:ecp:court-usn',
+				name: 'Court Projector',
+				location: currentLocation,
+				serialNumber: null,
+				modelName: 'Roku Ultra',
+				isAdopted: false,
+				lastSeenAt: '2026-09-13T00:00:00.000Z',
+				controlEnabled: true,
+				adopted: false,
+			})
+			const result = await roku.pressKey(legacyDeviceId, 'Home')
+			expect(result.addressHealed).toEqual({
+				from: staleLocation,
+				to: currentLocation,
+			})
+			const stored = await listRokuDevices(storage, config.homeConnectorId)
+			expect(stored).toHaveLength(1)
+			expect(stored[0]).toMatchObject({
+				deviceId: legacyDeviceId,
+				location: currentLocation,
+				adopted: true,
+			})
+			const status = await roku.getStatus()
+			expect(status.allDevices.map((device) => device.deviceId)).toEqual([
+				legacyDeviceId,
+			])
+		},
+		{
+			persisted: {
+				deviceId: legacyDeviceId,
+				id: 'uuid:roku:ecp:court-usn',
+				serialNumber: null,
+			},
+			discoveredDevices: [
+				{
+					id: 'uuid:roku:ecp:court-usn',
+					name: 'Court Projector',
+					location: currentLocation,
+					modelName: 'Roku Ultra',
+				},
+			],
+			currentDeviceInfo: { name: 'Court Projector', modelName: 'Roku Ultra' },
+		},
+	)
+})
+
+test('Roku read tools heal without pruning unadopted inventory', async () => {
+	await withPersistedStaleRoku(async ({ config, storage, roku }) => {
+		await persistRokuAdoption(storage, config.homeConnectorId, {
+			deviceId: 'roku-bedroom-serial',
+			id: 'bedroom',
+			name: 'Bedroom Roku',
+			location: 'http://192.168.1.46:8060/',
+			serialNumber: 'BEDROOM-SERIAL',
+			modelName: 'Roku Express',
+			isAdopted: false,
+			lastSeenAt: '2026-09-13T00:00:00.000Z',
+			controlEnabled: true,
+			adopted: false,
+		})
+
+		const result = await roku.getMediaPlayer('roku-x02800vp8ac2')
+		expect(result.addressHealed).toEqual({
+			from: staleLocation,
+			to: currentLocation,
+		})
+		await roku.getActiveApp('roku-x02800vp8ac2')
+		await roku.listApps('roku-x02800vp8ac2')
+
+		const stored = await listRokuDevices(storage, config.homeConnectorId)
+		expect(stored.map((device) => device.deviceId).sort()).toEqual([
+			'roku-bedroom-serial',
+			'roku-x02800vp8ac2',
+		])
+		const status = await roku.getStatus()
+		expect(
+			status.discovered.some(
+				(device) => device.deviceId === 'roku-bedroom-serial',
+			),
+		).toBe(true)
+
+		// An explicit user scan still prunes devices it did not see.
+		await roku.scan()
+		expect(
+			(await listRokuDevices(storage, config.homeConnectorId)).map(
+				(device) => device.deviceId,
+			),
+		).toEqual(['roku-x02800vp8ac2'])
+	})
+})
+
+test('Roku heal refuses a rediscovered address whose device-info serial does not match', async () => {
+	await withPersistedStaleRoku(
+		async ({ config, storage, roku }) => {
+			let sent = 0
+			server.use(
+				http.post(`${currentLocation}keypress/:key`, () => {
+					sent++
+					return new HttpResponse(null, { status: 200 })
+				}),
+			)
+			await expect(roku.pressKey('roku-x02800vp8ac2', 'Home')).rejects.toThrow(
+				/\/query\/device-info there reports serial IMPOSTOR, not X02800VP8AC2\. The stored address was not changed and the command was not sent there\./,
+			)
+			expect(sent).toBe(0)
+			const [stored] = await listRokuDevices(storage, config.homeConnectorId)
+			expect(stored).toMatchObject({
+				deviceId: 'roku-x02800vp8ac2',
+				location: staleLocation,
+				adopted: true,
+			})
+			const status = await roku.getStatus()
+			expect(status.adopted[0]?.location).toBe(staleLocation)
+		},
+		{
+			currentDeviceInfo: {
+				name: 'Court Projector',
+				serialNumber: 'IMPOSTOR',
+				modelName: 'Roku Ultra',
+			},
+		},
+	)
 })

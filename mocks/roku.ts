@@ -61,9 +61,35 @@ function renderMockRokuApp(appId: string) {
 		: `<app>Roku</app>`
 }
 
-export function createRokuEcpHandlers(location: string) {
+export type MockRokuDeviceInfo = {
+	name?: string
+	serialNumber?: string
+	modelName?: string
+}
+
+function renderMockRokuDeviceInfo(info: MockRokuDeviceInfo) {
+	const tags = [
+		info.name ? `\t<user-device-name>${info.name}</user-device-name>` : null,
+		info.serialNumber
+			? `\t<serial-number>${info.serialNumber}</serial-number>`
+			: null,
+		info.modelName ? `\t<model-name>${info.modelName}</model-name>` : null,
+	].filter(Boolean)
+	return `<?xml version="1.0" encoding="UTF-8"?>
+<device-info>
+${tags.join('\n')}
+</device-info>`
+}
+
+export function createRokuEcpHandlers(
+	location: string,
+	deviceInfo: MockRokuDeviceInfo = {},
+) {
 	const baseUrl = location.replace(/\/$/, '')
 	return [
+		http.get(`${baseUrl}/query/device-info`, () =>
+			HttpResponse.xml(renderMockRokuDeviceInfo(deviceInfo), { status: 200 }),
+		),
 		http.get(`${baseUrl}/query/apps`, () => {
 			return HttpResponse.xml(
 				`<?xml version="1.0" encoding="UTF-8"?>
@@ -131,5 +157,7 @@ export const rokuHandlers = [
 			devices: rokuDevices,
 		})
 	}),
-	...rokuDevices.flatMap((device) => createRokuEcpHandlers(device.location)),
+	...rokuDevices.flatMap((device) =>
+		createRokuEcpHandlers(device.location, { name: device.name }),
+	),
 ]

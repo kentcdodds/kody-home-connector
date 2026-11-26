@@ -102,6 +102,7 @@ export type RokuPlayYouTubeResult = {
 	appId: string
 	mediaType: string | null
 	verified: boolean
+	youtubeActive: boolean
 	playerState: string | null
 	activeApp: RokuAppInfo | null
 	warnings: Array<string>

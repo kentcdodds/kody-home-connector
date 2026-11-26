@@ -3,15 +3,21 @@ import {
 	deleteRokuDevice,
 	getAdoptedRokuDevices,
 	getDiscoveredRokuDevices,
+	deleteUnadoptedRokuDevices,
 	listRokuDevices,
 	mergePersistedAdoptedRokuDevices,
 	persistRokuAdoption,
 	syncRokuAdoptionFlags,
 	upsertDiscoveredRokuDevices,
 	ignoreRokuDevice,
+	updateAdoptedRokuDeviceLocation,
 	updateDiscoveredRokuDevices,
 } from './devices/repository.ts'
-import { discoverRokuDevicesWithDiagnostics } from './discovery/client.ts'
+import {
+	discoverRokuDevicesWithDiagnostics,
+	isStableRokuDiscoveryId,
+	parseRokuDeviceInfoXml,
+} from './discovery/client.ts'
 import {
 	setRokuDevices,
 	setRokuDiscoveryDiagnostics,
@@ -31,9 +37,48 @@ import {
 } from './types.ts'
 import { parseYouTubeVideoId, ROKU_YOUTUBE_APP_ID } from './youtube.ts'
 
+// Location is only a last resort: a device that moves address must keep its id.
 function createDeviceId(input: RokuDiscoveredDevice) {
-	const base = input.serialNumber || input.location || input.id || input.name
-	return `roku-${base.replaceAll(/[^a-zA-Z0-9]+/g, '-').toLowerCase()}`
+	const base =
+		input.serialNumber ||
+		(isStableRokuDiscoveryId(input.id) ? input.id.trim() : null) ||
+		input.location ||
+		input.name
+	const slug = base.replaceAll(/[^a-zA-Z0-9]+/g, '-').toLowerCase()
+	return slug.startsWith('roku-') ? slug : `roku-${slug}`
+}
+
+function normalizeSerial(value: string | null | undefined) {
+	return value?.trim().toLowerCase() || null
+}
+
+function sameRokuIdentity(a: RokuDiscoveredDevice, b: RokuDiscoveredDevice) {
+	const serialA = normalizeSerial(a.serialNumber)
+	const serialB = normalizeSerial(b.serialNumber)
+	if (serialA && serialB) return serialA === serialB
+	return isStableRokuDiscoveryId(a.id) && a.id.trim() === b.id.trim()
+}
+
+// Keeps existing deviceIds (adopted first) for rediscovered devices so ids
+// derived by older rules, or from a since-changed location, stay valid.
+function reuseKnownDeviceIds(
+	scanned: Array<RokuDeviceRecord>,
+	known: Array<RokuDeviceRecord>,
+) {
+	const candidates = [...known].sort(
+		(a, b) => Number(b.adopted) - Number(a.adopted),
+	)
+	const claimed = new Set<string>()
+	return scanned.map((device) => {
+		const match = candidates.find(
+			(entry) =>
+				!claimed.has(entry.deviceId) &&
+				(sameRokuIdentity(entry, device) || entry.deviceId === device.deviceId),
+		)
+		if (!match) return device
+		claimed.add(match.deviceId)
+		return { ...device, deviceId: match.deviceId }
+	})
 }
 
 export async function scanRokuDevices(
@@ -56,13 +101,18 @@ async function runRokuScan(
 	})
 	const now = new Date().toISOString()
 	// Discovery `isAdopted` / mock `adopted` is NOT connector adoption.
-	const normalized = result.devices.map((device) => ({
-		...device,
-		deviceId: createDeviceId(device),
-		lastSeenAt: now,
-		adopted: false,
-		isAdopted: false,
-	}))
+	const normalized = reuseKnownDeviceIds(
+		result.devices.map((device) => ({
+			...device,
+			deviceId: createDeviceId(device),
+			lastSeenAt: now,
+			adopted: false,
+			isAdopted: false,
+		})),
+		storage
+			? await listRokuDevices(storage, config.homeConnectorId)
+			: state.devices,
+	)
 	setRokuDiscoveryDiagnostics(state, result.diagnostics)
 
 	const discoveredDeviceIds = new Set(
@@ -244,10 +294,6 @@ function describeError(error: unknown) {
 	return causeCode ? `${error.message} (${causeCode})` : error.message
 }
 
-function normalizeSerial(value: string | null | undefined) {
-	return value?.trim().toLowerCase() || null
-}
-
 function findRediscoveredDevice(
 	target: RokuDeviceRecord,
 	devices: Array<RokuDeviceRecord>,
@@ -259,7 +305,41 @@ function findRediscoveredDevice(
 		)
 		if (bySerial) return bySerial
 	}
-	return devices.find((device) => device.deviceId === target.deviceId) ?? null
+	return devices.find((device) => sameRokuIdentity(target, device)) ?? null
+}
+
+function normalizeText(value: string) {
+	return value.trim().toLowerCase()
+}
+
+// Same trust bar as adoption: the address must report the adopted identity.
+function describeIdentityMismatch(
+	target: RokuDeviceRecord,
+	info: ReturnType<typeof parseRokuDeviceInfoXml>,
+) {
+	const serial = normalizeSerial(target.serialNumber)
+	if (serial) {
+		return normalizeSerial(info.serialNumber) === serial
+			? null
+			: `reports serial ${info.serialNumber ?? '(none)'}, not ${target.serialNumber}`
+	}
+	const mismatches: Array<string> = []
+	if (
+		target.modelName &&
+		info.modelName &&
+		normalizeText(target.modelName) !== normalizeText(info.modelName)
+	) {
+		mismatches.push(`model ${info.modelName}, not ${target.modelName}`)
+	}
+	// Serial-less records often fall back to the discovery id as their name.
+	if (
+		target.name !== target.id &&
+		info.name &&
+		normalizeText(target.name) !== normalizeText(info.name)
+	) {
+		mismatches.push(`name ${info.name}, not ${target.name}`)
+	}
+	return mismatches.length > 0 ? `reports ${mismatches.join(' and ')}` : null
 }
 
 function readXmlTagText(xml: string, tagName: string) {
@@ -317,6 +397,7 @@ export function createRokuAdapter(input: {
 	storage?: HomeConnectorStorage
 	ecpTimeoutMs?: number
 	delay?: (ms: number) => Promise<void>
+	now?: () => number
 	youTubeVerifyTimeoutMs?: number
 	youTubeVerifyIntervalMs?: number
 }) {
@@ -325,6 +406,11 @@ export function createRokuAdapter(input: {
 	const delay =
 		input.delay ??
 		((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)))
+	const now = input.now ?? (() => Date.now())
+
+	function remainingMs(deadline: number | undefined) {
+		return deadline == null ? Infinity : deadline - now()
+	}
 
 	async function hydrate() {
 		if (!input.storage) {
@@ -345,60 +431,130 @@ export function createRokuAdapter(input: {
 		await hydratePromise
 	}
 
+	function isAdoptedNow(deviceId: string) {
+		return (
+			input.state.devices.find((device) => device.deviceId === deviceId)
+				?.adopted === true
+		)
+	}
+
+	async function verifyRediscoveredIdentity(
+		target: RokuDeviceRecord,
+		location: string,
+		deadline: number | undefined,
+	) {
+		const prefix = `Rediscovery reported Roku device "${target.name}" (${target.deviceId}) at ${location}`
+		let info: ReturnType<typeof parseRokuDeviceInfoXml>
+		try {
+			const remaining = remainingMs(deadline)
+			if (remaining <= 0) throw new Error('the time budget ran out')
+			const response = await fetchEcp(
+				location,
+				{ method: 'GET', path: '/query/device-info' },
+				Math.min(ecpTimeoutMs, remaining),
+			)
+			if (!response.ok) throw new Error(`status ${response.status}`)
+			info = parseRokuDeviceInfoXml(await response.text())
+		} catch (error) {
+			throw new Error(
+				`${prefix}, but /query/device-info there failed (${describeError(error)}), so its identity could not be confirmed. The stored address was not changed and the command was not sent there.`,
+			)
+		}
+		const mismatch = describeIdentityMismatch(target, info)
+		if (mismatch) {
+			throw new Error(
+				`${prefix}, but /query/device-info there ${mismatch}. The stored address was not changed and the command was not sent there.`,
+			)
+		}
+	}
+
+	// Only moves an already-adopted device; never creates or re-adopts a row.
 	async function storeHealedLocation(
 		target: RokuDeviceRecord,
-		rediscovered: RokuDeviceRecord,
+		location: string,
 	) {
-		const current =
-			input.state.devices.find(
-				(device) => device.deviceId === target.deviceId,
-			) ?? target
-		let updated: RokuDeviceRecord = {
-			...current,
-			adopted: current.adopted || target.adopted,
-			location: rediscovered.location,
-			lastSeenAt: rediscovered.lastSeenAt ?? current.lastSeenAt,
-		}
-		updated = syncRokuAdoptionFlags([updated])[0]!
+		const notAdopted = () =>
+			new Error(
+				`Roku device "${target.name}" (${target.deviceId}) was rediscovered at ${location}, but it is no longer adopted (it was ignored or removed during rediscovery), so the stored address was not changed and the command was not retried.`,
+			)
+		if (!isAdoptedNow(target.deviceId)) throw notAdopted()
+		const lastSeenAt = new Date().toISOString()
 		if (input.storage) {
-			updated =
-				(await persistRokuAdoption(
-					input.storage,
-					input.config.homeConnectorId,
-					updated,
-				)) ?? updated
+			const stored = await updateAdoptedRokuDeviceLocation(
+				input.storage,
+				input.config.homeConnectorId,
+				target.deviceId,
+				{ location, lastSeenAt },
+			)
+			if (!stored || !isAdoptedNow(target.deviceId)) throw notAdopted()
+			const duplicates = (
+				await listRokuDevices(input.storage, input.config.homeConnectorId)
+			).filter(
+				(device) =>
+					device.deviceId !== target.deviceId &&
+					!device.adopted &&
+					sameRokuIdentity(device, target),
+			)
+			await deleteUnadoptedRokuDevices(
+				input.storage,
+				input.config.homeConnectorId,
+				duplicates.map((device) => device.deviceId),
+			)
+			if (!isAdoptedNow(target.deviceId)) throw notAdopted()
 		}
-		const exists = input.state.devices.some(
-			(device) => device.deviceId === target.deviceId,
-		)
+		let healed: RokuDeviceRecord | null = null
 		setRokuDevices(
 			input.state,
 			syncRokuAdoptionFlags(
-				exists
-					? input.state.devices.map((device) =>
-							device.deviceId === target.deviceId ? updated : device,
-						)
-					: [...input.state.devices, updated],
+				input.state.devices
+					.filter(
+						(device) =>
+							device.deviceId === target.deviceId ||
+							device.adopted ||
+							!sameRokuIdentity(device, target),
+					)
+					.map((device) => {
+						if (device.deviceId !== target.deviceId) return device
+						healed = { ...device, location, lastSeenAt }
+						return healed
+					}),
 			),
 		)
-		return updated
+		if (!healed) throw notAdopted()
+		return healed as RokuDeviceRecord
 	}
 
-	async function rediscoverDevice(target: RokuDeviceRecord, failure: unknown) {
+	// Discovery only: unlike runRokuScan this never prunes or adds inventory.
+	async function rediscoverDevice(
+		target: RokuDeviceRecord,
+		failure: unknown,
+		deadline: number | undefined,
+	) {
 		const prefix = `Roku device "${target.name}" (${target.deviceId}) did not respond at its stored address ${target.location} (${describeError(failure)}). Rediscovery was attempted`
-		let scanned: Array<RokuDeviceRecord>
+		let discovered: Array<RokuDeviceRecord>
 		try {
-			const scan = await runRokuScan(input.state, input.config, input.storage)
-			scanned = scan.devices.filter(
-				(device) =>
-					scan.discoveredDeviceIds.has(device.deviceId) && device.location,
-			)
+			const remaining = remainingMs(deadline)
+			const result = await discoverRokuDevicesWithDiagnostics({
+				discoveryUrl: input.config.rokuDiscoveryUrl,
+				signal: Number.isFinite(remaining)
+					? AbortSignal.timeout(Math.max(1, remaining))
+					: undefined,
+			})
+			setRokuDiscoveryDiagnostics(input.state, result.diagnostics)
+			discovered = result.devices
+				.filter((device) => device.location)
+				.map((device) => ({
+					...device,
+					deviceId: createDeviceId(device),
+					adopted: false,
+					isAdopted: false,
+				}))
 		} catch (error) {
 			throw new Error(`${prefix} but the scan failed: ${describeError(error)}`)
 		}
-		const found = findRediscoveredDevice(target, scanned)
+		const found = findRediscoveredDevice(target, discovered)
 		if (!found) {
-			const seen = scanned.map(
+			const seen = discovered.map(
 				(device) => `${device.name} (${device.deviceId}) at ${device.location}`,
 			)
 			throw new Error(
@@ -413,23 +569,50 @@ export function createRokuAdapter(input: {
 		return found
 	}
 
-	async function requestEcp(target: RokuDeviceRecord, request: RokuEcpRequest) {
+	async function requestEcp(
+		target: RokuDeviceRecord,
+		request: RokuEcpRequest,
+		deadline?: number,
+	) {
+		const label = `Roku device "${target.name}" (${target.deviceId})`
+		const budget = remainingMs(deadline)
+		if (budget <= 0) {
+			throw new Error(
+				`${label}: ${request.method} ${request.path} was not sent because the time budget ran out.`,
+			)
+		}
 		try {
-			const response = await fetchEcp(target.location, request, ecpTimeoutMs)
+			const response = await fetchEcp(
+				target.location,
+				request,
+				Math.min(ecpTimeoutMs, budget),
+			)
 			return { response, device: target, addressHealed: null }
 		} catch (failure) {
-			const rediscovered = await rediscoverDevice(target, failure)
-			const healed = await storeHealedLocation(target, rediscovered)
+			if (remainingMs(deadline) <= 0) {
+				throw new Error(
+					`${label} did not answer ${request.method} ${request.path} at ${target.location} before the time budget ran out (${describeError(failure)}). Rediscovery was skipped.`,
+				)
+			}
+			const rediscovered = await rediscoverDevice(target, failure, deadline)
+			await verifyRediscoveredIdentity(target, rediscovered.location, deadline)
+			const healed = await storeHealedLocation(target, rediscovered.location)
 			const addressHealed: RokuAddressHealed = {
 				from: target.location,
 				to: healed.location,
 			}
 			try {
-				const response = await fetchEcp(healed.location, request, ecpTimeoutMs)
+				const retryBudget = remainingMs(deadline)
+				if (retryBudget <= 0) throw new Error('the time budget ran out')
+				const response = await fetchEcp(
+					healed.location,
+					request,
+					Math.min(ecpTimeoutMs, retryBudget),
+				)
 				return { response, device: healed, addressHealed }
 			} catch (retryFailure) {
 				throw new Error(
-					`Roku device "${target.name}" (${target.deviceId}) did not respond at its stored address ${target.location} (${describeError(failure)}). Rediscovery found it at ${healed.location} and the stored address was updated, but the retry also failed: ${describeError(retryFailure)}`,
+					`${label} did not respond at its stored address ${target.location} (${describeError(failure)}). Rediscovery found it at ${healed.location} and the stored address was updated, but the retry also failed: ${describeError(retryFailure)}`,
 				)
 			}
 		}
@@ -507,11 +690,13 @@ export function createRokuAdapter(input: {
 
 	async function fetchActiveApp(
 		device: RokuDeviceRecord,
+		deadline?: number,
 	): Promise<RokuActiveAppResult> {
-		const result = await requestEcp(device, {
-			method: 'GET',
-			path: '/query/active-app',
-		})
+		const result = await requestEcp(
+			device,
+			{ method: 'GET', path: '/query/active-app' },
+			deadline,
+		)
 		if (!result.response.ok) {
 			throw new Error(
 				`Roku active app query failed with status ${result.response.status}.`,
@@ -527,11 +712,15 @@ export function createRokuAdapter(input: {
 		}
 	}
 
-	async function fetchMediaPlayerXml(device: RokuDeviceRecord) {
-		const result = await requestEcp(device, {
-			method: 'GET',
-			path: '/query/media-player',
-		})
+	async function fetchMediaPlayerXml(
+		device: RokuDeviceRecord,
+		deadline?: number,
+	) {
+		const result = await requestEcp(
+			device,
+			{ method: 'GET', path: '/query/media-player' },
+			deadline,
+		)
 		if (!result.response.ok) {
 			throw new Error(
 				`Roku media player query failed with status ${result.response.status}.`,
@@ -545,6 +734,7 @@ export function createRokuAdapter(input: {
 
 	async function getMediaPlayer(
 		deviceId: string,
+		deadline?: number,
 	): Promise<RokuMediaPlayerResult> {
 		const device = getAdoptedDeviceOrThrow(input.state, deviceId)
 		let addressHealed: RokuAddressHealed | null = null
@@ -552,7 +742,7 @@ export function createRokuAdapter(input: {
 			null
 		let mediaPlayerError: string | null = null
 		try {
-			mediaPlayer = await fetchMediaPlayerXml(device)
+			mediaPlayer = await fetchMediaPlayerXml(device, deadline)
 			addressHealed = mediaPlayer.addressHealed
 		} catch (error) {
 			mediaPlayerError = describeError(error)
@@ -562,7 +752,7 @@ export function createRokuAdapter(input: {
 		let activeApp: RokuActiveAppResult | null = null
 		let activeAppError: string | null = null
 		try {
-			activeApp = await fetchActiveApp(current)
+			activeApp = await fetchActiveApp(current, deadline)
 			addressHealed ??= activeApp.addressHealed ?? null
 		} catch (error) {
 			activeAppError = describeError(error)
@@ -623,42 +813,41 @@ export function createRokuAdapter(input: {
 		)
 		addressHealed ??= launch.addressHealed ?? null
 
-		let verified = false
 		let playerState: string | null = null
 		let activeApp: RokuAppInfo | null = null
+		let youtubeActive = false
 		if (options.verify ?? true) {
 			const timeoutMs = input.youTubeVerifyTimeoutMs ?? 10_000
 			const intervalMs = input.youTubeVerifyIntervalMs ?? 1_000
-			const attempts = Math.max(1, Math.ceil(timeoutMs / intervalMs))
-			for (let attempt = 0; attempt < attempts; attempt++) {
-				if (attempt > 0) await delay(intervalMs)
+			const deadline = now() + timeoutMs
+			let playerLoaded = false
+			let lastError: string | null = null
+			for (;;) {
 				try {
-					const status = await getMediaPlayer(deviceId)
+					const status = await getMediaPlayer(deviceId, deadline)
 					addressHealed ??= status.addressHealed ?? null
 					playerState = status.state
 					activeApp = status.activeApp
+					lastError = null
 				} catch (error) {
-					if (attempt === attempts - 1) {
-						warnings.push(
-							`Playback verification query failed: ${describeError(error)}`,
-						)
-					}
-					continue
+					lastError = describeError(error)
 				}
-				if (
-					activeApp?.id === ROKU_YOUTUBE_APP_ID &&
+				youtubeActive = activeApp?.id === ROKU_YOUTUBE_APP_ID
+				playerLoaded =
+					youtubeActive &&
 					playerState != null &&
 					loadedPlayerStates.has(playerState)
-				) {
-					verified = true
-					break
-				}
+				if (playerLoaded || now() + intervalMs >= deadline) break
+				await delay(intervalMs)
 			}
-			if (!verified) {
-				warnings.push(
-					`Playback was not confirmed within ${timeoutMs}ms (last player state: ${playerState ?? 'unknown'}, active app: ${activeApp ? `${activeApp.name} (${activeApp.id})` : 'unknown'}). YouTube may still be starting or showing an ad; check again with roku_get_media_player.`,
-				)
+			if (lastError) {
+				warnings.push(`Playback verification query failed: ${lastError}`)
 			}
+			warnings.push(
+				playerLoaded
+					? `YouTube is active with player state ${playerState}, but Roku did not expose a content id, so video ${videoId} could not be confirmed (a previous video may still be playing). Check the screen to confirm.`
+					: `Playback was not confirmed within ${timeoutMs}ms (last player state: ${playerState ?? 'unknown'}, active app: ${activeApp ? `${activeApp.name} (${activeApp.id})` : 'unknown'}). YouTube may still be starting or showing an ad; check again with roku_get_media_player.`,
+			)
 		}
 
 		return {
@@ -668,7 +857,10 @@ export function createRokuAdapter(input: {
 			videoId,
 			appId: ROKU_YOUTUBE_APP_ID,
 			mediaType,
-			verified,
+			// ECP /query/media-player exposes no content id for YouTube, so a
+			// specific video can never be confirmed from the Roku side.
+			verified: false,
+			youtubeActive,
 			playerState,
 			activeApp,
 			warnings,

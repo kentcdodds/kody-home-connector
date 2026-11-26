@@ -41,6 +41,19 @@ type RokuDeviceInfoXml = {
 	modelName: string | null
 }
 
+const placeholderRokuIdPattern = /^roku-\d+$/
+
+function placeholderRokuId(index: number) {
+	return placeholderRokuId(index)
+}
+
+// Discovery falls back to an index-based id when it has no serial, UDN, or
+// USN. That id depends on response order, so it does not identify a device.
+export function isStableRokuDiscoveryId(id: string | null | undefined) {
+	const trimmed = id?.trim()
+	return Boolean(trimmed) && !placeholderRokuIdPattern.test(trimmed!)
+}
+
 function normalizeBaseUrl(url: string) {
 	return url.endsWith('/') ? url.slice(0, -1) : url
 }
@@ -104,7 +117,7 @@ function readXmlTag(xml: string, tagName: string) {
 	return match?.[1]?.trim() || null
 }
 
-function parseRokuDeviceInfoXml(xml: string): RokuDeviceInfoXml {
+export function parseRokuDeviceInfoXml(xml: string): RokuDeviceInfoXml {
 	return {
 		name:
 			readXmlTag(xml, 'user-device-name') ||
@@ -123,16 +136,16 @@ function parseRokuDeviceInfoXml(xml: string): RokuDeviceInfoXml {
 	}
 }
 
-async function fetchJson<T>(url: string): Promise<T> {
-	const response = await fetch(url)
+async function fetchJson<T>(url: string, signal?: AbortSignal): Promise<T> {
+	const response = await fetch(url, { signal })
 	if (!response.ok) {
 		throw new Error(`Request failed (${response.status}) for ${url}`)
 	}
 	return (await response.json()) as T
 }
 
-async function fetchText(url: string) {
-	const response = await fetch(url)
+async function fetchText(url: string, signal?: AbortSignal) {
+	const response = await fetch(url, { signal })
 	if (!response.ok) {
 		throw new Error(`Request failed (${response.status}) for ${url}`)
 	}
@@ -150,7 +163,7 @@ function normalizeJsonDiscoveryDevice(
 			device.id?.trim() ||
 			device.udn?.trim() ||
 			device.serialNumber?.trim() ||
-			`roku-${index.toString(10)}`,
+			placeholderRokuId(index),
 		name:
 			device.name?.trim() ||
 			device.friendlyName?.trim() ||
@@ -171,10 +184,11 @@ function normalizeJsonDiscoveryDevice(
 async function discoverRokuDevicesFromJson(input: {
 	discoveryUrl: string
 	now: string
+	signal?: AbortSignal
 }): Promise<RokuDiscoveryResult> {
 	const response = await fetchJson<{
 		devices?: Array<RokuDeviceInfoResponse>
-	}>(input.discoveryUrl)
+	}>(input.discoveryUrl, input.signal)
 	return {
 		devices: (response.devices ?? []).map((device, index) =>
 			normalizeJsonDiscoveryDevice(
@@ -198,6 +212,7 @@ async function discoverRokuDevicesFromJson(input: {
 async function discoverSsdpLocations(input: {
 	discoveryUrl: string
 	now: string
+	signal?: AbortSignal
 }): Promise<{
 	locations: Array<RokuSsdpLocation>
 	hits: Array<RokuSsdpHitDiagnostic>
@@ -236,7 +251,22 @@ async function discoverSsdpLocations(input: {
 
 			function cleanup() {
 				socket.off('error', handleError)
+				input.signal?.removeEventListener('abort', handleAbort)
 			}
+
+			function handleAbort() {
+				handleError(
+					input.signal?.reason instanceof Error
+						? input.signal.reason
+						: new Error('Roku SSDP discovery was aborted.'),
+				)
+			}
+
+			if (input.signal?.aborted) {
+				handleAbort()
+				return
+			}
+			input.signal?.addEventListener('abort', handleAbort)
 
 			function handleError(error: Error) {
 				if (settled) return
@@ -276,6 +306,7 @@ async function buildRokuDeviceFromSsdpLocation(input: {
 	location: RokuSsdpLocation
 	index: number
 	now: string
+	signal?: AbortSignal
 }): Promise<{
 	device: RokuDiscoveredDevice
 	diagnostic: RokuDeviceInfoDiagnostic
@@ -284,14 +315,14 @@ async function buildRokuDeviceFromSsdpLocation(input: {
 	const deviceInfoUrl = `${normalizeBaseUrl(location)}/query/device-info`
 
 	try {
-		const xml = await fetchText(deviceInfoUrl)
+		const xml = await fetchText(deviceInfoUrl, input.signal)
 		const deviceInfo = parseRokuDeviceInfoXml(xml)
 		return {
 			device: {
 				id:
 					deviceInfo.serialNumber ||
 					input.location.usn?.trim() ||
-					`roku-${input.index.toString(10)}`,
+					placeholderRokuId(input.index),
 				name:
 					deviceInfo.name ||
 					deviceInfo.serialNumber ||
@@ -326,7 +357,7 @@ async function buildRokuDeviceFromSsdpLocation(input: {
 		})
 		return {
 			device: {
-				id: input.location.usn?.trim() || `roku-${input.index.toString(10)}`,
+				id: input.location.usn?.trim() || placeholderRokuId(input.index),
 				name: input.location.usn?.trim() || 'Unknown Roku device',
 				location,
 				serialNumber: null,
@@ -349,17 +380,21 @@ async function buildRokuDeviceFromSsdpLocation(input: {
 async function discoverRokuDevicesFromSsdp(input: {
 	discoveryUrl: string
 	now: string
+	signal?: AbortSignal
 }): Promise<RokuDiscoveryResult> {
 	const { locations, hits } = await discoverSsdpLocations({
 		discoveryUrl: input.discoveryUrl,
 		now: input.now,
+		signal: input.signal,
 	})
+	input.signal?.throwIfAborted()
 	const devices = await Promise.all(
 		locations.map((location, index) =>
 			buildRokuDeviceFromSsdpLocation({
 				location,
 				index,
 				now: input.now,
+				signal: input.signal,
 			}),
 		),
 	)
@@ -378,6 +413,7 @@ async function discoverRokuDevicesFromSsdp(input: {
 
 export async function discoverRokuDevicesWithDiagnostics(input: {
 	discoveryUrl: string
+	signal?: AbortSignal
 }): Promise<RokuDiscoveryResult> {
 	const protocol = new URL(input.discoveryUrl).protocol
 	const now = new Date().toISOString()
@@ -388,11 +424,13 @@ export async function discoverRokuDevicesWithDiagnostics(input: {
 			return discoverRokuDevicesFromJson({
 				discoveryUrl: input.discoveryUrl,
 				now,
+				signal: input.signal,
 			})
 		case 'ssdp:':
 			return discoverRokuDevicesFromSsdp({
 				discoveryUrl: input.discoveryUrl,
 				now,
+				signal: input.signal,
 			})
 		default:
 			throw new Error(`Unsupported Roku discovery protocol: ${protocol}`)

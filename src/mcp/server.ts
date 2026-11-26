@@ -1799,6 +1799,7 @@ export function createHomeConnectorMcpServer(input: {
 		appId: z.string(),
 		mediaType: z.string().nullable(),
 		verified: z.boolean(),
+		youtubeActive: z.boolean(),
 		playerState: z.string().nullable(),
 		activeApp: rokuAppInfoSchema.nullable(),
 		warnings: z.array(z.string()),
@@ -1810,7 +1811,7 @@ export function createHomeConnectorMcpServer(input: {
 			name: 'roku_play_youtube',
 			title: 'Play YouTube on Roku',
 			description:
-				'Play a YouTube link on an adopted Roku. Accepts youtu.be, youtube.com/watch, shorts, live, embed, m.youtube.com, music.youtube.com links or a bare 11-character video id, then deep links the YouTube Roku app (837) with contentId. Pass mediaType (for example live) only when needed. With verify (default true) it polls roku_get_media_player for about 10s; verified false means playback was not confirmed yet (cold start or ad), not a failure.',
+				'Play a YouTube link on an adopted Roku. Accepts youtu.be, youtube.com/watch, shorts, live, embed, m.youtube.com, music.youtube.com links or a bare 11-character video id, then deep links the YouTube Roku app (837) with contentId. Pass mediaType (for example live) only when needed. With verify (default true) it polls roku_get_media_player for up to about 10s total. Roku does not report which YouTube video is playing, so verified stays false; youtubeActive plus playerState show that YouTube has a loaded player, which may still be a previous video. A false result is not a launch failure.',
 			...buildToolInputSchema({
 				deviceId: z.string().min(1),
 				url: z.string().min(1),
@@ -1834,7 +1835,9 @@ export function createHomeConnectorMcpServer(input: {
 						type: 'text',
 						text: result.verified
 							? `Playing YouTube video ${result.videoId} on ${deviceId}.`
-							: `Launched YouTube video ${result.videoId} on ${deviceId}; playback not confirmed yet (player state ${result.playerState ?? 'unknown'}).`,
+							: result.youtubeActive
+								? `Launched YouTube video ${result.videoId} on ${deviceId}; YouTube is active (player state ${result.playerState ?? 'unknown'}), but Roku does not report which video is playing.`
+								: `Launched YouTube video ${result.videoId} on ${deviceId}; playback not confirmed yet (player state ${result.playerState ?? 'unknown'}).`,
 					},
 				],
 				structuredContent: result,

@@ -26,7 +26,8 @@ those over hosted docs so APIs match the installed version.
 Agent quick references (details in "Roku: play a video link / verify playback"
 in `docs/home-connector.md`):
 
-- `roku_play_youtube`: play a YouTube link on an adopted Roku and verify it.
+- `roku_play_youtube`: play a YouTube link on an adopted Roku and check that
+  YouTube is active (Roku cannot confirm which video is playing).
 - `roku_get_media_player`: active app plus playback state in one call.
-- Roku ECP calls self-heal a stale stored address (one rediscovery and retry);
-  never hardcode Roku IPs.
+- Roku ECP calls self-heal a stale stored address (one rediscovery, identity
+  check, and retry); never hardcode Roku IPs.

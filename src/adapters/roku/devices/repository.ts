@@ -154,6 +154,36 @@ export async function persistRokuAdoption(
 	return getRokuDevice(storage, connectorId, device.deviceId)
 }
 
+// Updates only an adopted row; returns false when the device is no longer
+// adopted (for example ignored mid-rediscovery) so callers never re-adopt it.
+export async function updateAdoptedRokuDeviceLocation(
+	storage: HomeConnectorStorage,
+	connectorId: string,
+	deviceId: string,
+	values: { location: string; lastSeenAt: string | null },
+) {
+	const result = await storage.db.updateMany(
+		rokuDevices,
+		{ location: values.location, last_seen_at: values.lastSeenAt },
+		{
+			where: { connector_id: connectorId, device_id: deviceId, adopted: 1 },
+		},
+	)
+	return result.affectedRows > 0
+}
+
+export async function deleteUnadoptedRokuDevices(
+	storage: HomeConnectorStorage,
+	connectorId: string,
+	deviceIds: Array<string>,
+) {
+	for (const deviceId of deviceIds) {
+		await storage.db.deleteMany(rokuDevices, {
+			where: { connector_id: connectorId, device_id: deviceId, adopted: 0 },
+		})
+	}
+}
+
 export async function deleteRokuDevice(
 	storage: HomeConnectorStorage,
 	connectorId: string,
