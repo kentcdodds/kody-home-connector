@@ -82,13 +82,17 @@ export async function upsertDiscoveredRokuDevices(
 	const knownById = new Map(known.map((device) => [device.deviceId, device]))
 	for (const device of devices) {
 		const existing = knownById.get(device.deviceId)
+		// Adopted devices keep their stored controlEnabled (matches the in-memory path).
+		const controlEnabled = existing?.adopted
+			? existing.controlEnabled
+			: device.controlEnabled
 		const values = {
 			roku_id: device.id,
 			name: device.name,
 			location: device.location,
 			serial_number: device.serialNumber,
 			model_name: device.modelName,
-			control_enabled: device.controlEnabled ? 1 : 0,
+			control_enabled: controlEnabled ? 1 : 0,
 			last_seen_at: device.lastSeenAt,
 		}
 		const key = { connector_id: connectorId, device_id: device.deviceId }

@@ -1612,7 +1612,7 @@ export function createHomeConnectorMcpServer(input: {
 			name: 'roku_launch_app',
 			title: 'Launch Roku App',
 			description:
-				'Launch a Roku app on an adopted device, optionally with deep-link parameters.',
+				'Launch a Roku app on an adopted device, optionally with deep-link parameters. For YouTube links, prefer roku_play_youtube (it parses the URL, deep links app 837, and verifies playback). If a stored Roku address is stale, ECP calls rediscover the device and retry once; results then include addressHealed.',
 			...buildToolInputSchema({
 				deviceId: z.string().min(1),
 				appId: z.string().min(1),
@@ -1644,6 +1644,17 @@ export function createHomeConnectorMcpServer(input: {
 		},
 	)
 
+	const rokuAddressHealedSchema = z.object({
+		from: z.string(),
+		to: z.string(),
+	})
+	const rokuAppInfoSchema = z.object({
+		id: z.string(),
+		name: z.string(),
+		type: z.string(),
+		version: z.string(),
+	})
+
 	const rokuListAppsOutputSchema = buildToolInputSchema({
 		deviceId: z.string(),
 		deviceName: z.string(),
@@ -1656,6 +1667,7 @@ export function createHomeConnectorMcpServer(input: {
 			}),
 		),
 		responseText: z.string(),
+		addressHealed: rokuAddressHealedSchema.optional(),
 	})
 
 	registerTool(
@@ -1692,15 +1704,9 @@ export function createHomeConnectorMcpServer(input: {
 	const rokuActiveAppOutputSchema = buildToolInputSchema({
 		deviceId: z.string(),
 		deviceName: z.string(),
-		app: z
-			.object({
-				id: z.string(),
-				name: z.string(),
-				type: z.string(),
-				version: z.string(),
-			})
-			.nullable(),
+		app: rokuAppInfoSchema.nullable(),
 		responseText: z.string(),
+		addressHealed: rokuAddressHealedSchema.optional(),
 	})
 
 	registerTool(
@@ -1728,6 +1734,107 @@ export function createHomeConnectorMcpServer(input: {
 						text: result.app
 							? `Active app on ${deviceId} is ${result.app.name}.`
 							: `No active Roku app reported for ${deviceId}.`,
+					},
+				],
+				structuredContent: result,
+			}
+		},
+	)
+
+	const rokuMediaPlayerOutputSchema = buildToolInputSchema({
+		deviceId: z.string(),
+		deviceName: z.string(),
+		state: z.string().nullable(),
+		error: z.boolean().nullable(),
+		plugin: z.object({ id: z.string(), name: z.string() }).nullable(),
+		positionMs: z.number().nullable(),
+		durationMs: z.number().nullable(),
+		isLive: z.boolean().nullable(),
+		responseText: z.string(),
+		mediaPlayerError: z.string().nullable(),
+		activeApp: rokuAppInfoSchema.nullable(),
+		activeAppError: z.string().nullable(),
+		addressHealed: rokuAddressHealedSchema.optional(),
+	})
+
+	registerTool(
+		{
+			name: 'roku_get_media_player',
+			title: 'Get Roku Media Player',
+			description:
+				'Get Roku playback status on an adopted device (ECP /query/media-player: state play|pause|buffer|open|close|stop, plugin, position, duration, live) plus the active app, so one call answers what app is up and whether it is playing. Either query may fail individually; its error is reported in mediaPlayerError or activeAppError.',
+			...buildToolInputSchema({
+				deviceId: z.string().min(1),
+			}),
+			outputSchema: rokuMediaPlayerOutputSchema.inputSchema,
+			sdkOutputSchema: rokuMediaPlayerOutputSchema.sdkInputSchema,
+			annotations: {
+				readOnlyHint: true,
+				idempotentHint: true,
+			},
+		},
+		async (args) => {
+			const deviceId = String(args['deviceId'] ?? '')
+			const result = await roku.getMediaPlayer(deviceId)
+			const appText = result.activeApp
+				? `${result.activeApp.name} (${result.activeApp.id})`
+				: 'unknown app'
+			return {
+				content: [
+					{
+						type: 'text',
+						text: `${deviceId}: ${appText}, player state ${result.state ?? 'unknown'}.`,
+					},
+				],
+				structuredContent: result,
+			}
+		},
+	)
+
+	const rokuPlayYouTubeOutputSchema = buildToolInputSchema({
+		launched: z.literal(true),
+		deviceId: z.string(),
+		deviceName: z.string(),
+		videoId: z.string(),
+		appId: z.string(),
+		mediaType: z.string().nullable(),
+		verified: z.boolean(),
+		playerState: z.string().nullable(),
+		activeApp: rokuAppInfoSchema.nullable(),
+		warnings: z.array(z.string()),
+		addressHealed: rokuAddressHealedSchema.optional(),
+	})
+
+	registerTool(
+		{
+			name: 'roku_play_youtube',
+			title: 'Play YouTube on Roku',
+			description:
+				'Play a YouTube link on an adopted Roku. Accepts youtu.be, youtube.com/watch, shorts, live, embed, m.youtube.com, music.youtube.com links or a bare 11-character video id, then deep links the YouTube Roku app (837) with contentId. Pass mediaType (for example live) only when needed. With verify (default true) it polls roku_get_media_player for about 10s; verified false means playback was not confirmed yet (cold start or ad), not a failure.',
+			...buildToolInputSchema({
+				deviceId: z.string().min(1),
+				url: z.string().min(1),
+				mediaType: z.string().min(1).optional(),
+				verify: z.boolean().optional(),
+			}),
+			outputSchema: rokuPlayYouTubeOutputSchema.inputSchema,
+			sdkOutputSchema: rokuPlayYouTubeOutputSchema.sdkInputSchema,
+		},
+		async (args) => {
+			const deviceId = String(args['deviceId'] ?? '')
+			const result = await roku.playYouTube(deviceId, {
+				url: String(args['url'] ?? ''),
+				mediaType:
+					args['mediaType'] == null ? undefined : String(args['mediaType']),
+				verify: args['verify'] == null ? undefined : Boolean(args['verify']),
+			})
+			return {
+				content: [
+					{
+						type: 'text',
+						text: result.verified
+							? `Playing YouTube video ${result.videoId} on ${deviceId}.`
+							: `Launched YouTube video ${result.videoId} on ${deviceId}; playback not confirmed yet (player state ${result.playerState ?? 'unknown'}).`,
 					},
 				],
 				structuredContent: result,
