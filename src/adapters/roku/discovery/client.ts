@@ -44,7 +44,7 @@ type RokuDeviceInfoXml = {
 const placeholderRokuIdPattern = /^roku-\d+$/
 
 function placeholderRokuId(index: number) {
-	return placeholderRokuId(index)
+	return `roku-${index.toString(10)}`
 }
 
 // Discovery falls back to an index-based id when it has no serial, UDN, or

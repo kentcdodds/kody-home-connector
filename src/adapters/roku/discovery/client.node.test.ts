@@ -115,3 +115,27 @@ test('roku SSDP discovery captures raw diagnostics', async () => {
 		'<serial-number>YH00AA123456</serial-number>',
 	)
 })
+
+test('roku JSON discovery gives unidentified devices a placeholder id', async () => {
+	const httpServer = createServer((_request, response) => {
+		response.writeHead(200, { 'Content-Type': 'application/json' })
+		response.end(
+			JSON.stringify({
+				devices: [{ location: 'http://127.0.0.1:1/' }, { name: 'Den Roku' }],
+			}),
+		)
+	})
+	await new Promise<void>((resolve) => {
+		httpServer.listen(0, '127.0.0.1', () => resolve())
+	})
+	try {
+		const { port } = httpServer.address() as AddressInfo
+		const devices = await discoverRokuDevices({
+			discoveryUrl: `http://127.0.0.1:${port}/discovery`,
+		})
+
+		expect(devices.map((device) => device.id)).toEqual(['roku-0', 'roku-1'])
+	} finally {
+		await new Promise<void>((resolve) => httpServer.close(() => resolve()))
+	}
+})

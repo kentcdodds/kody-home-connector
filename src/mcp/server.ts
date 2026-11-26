@@ -1612,7 +1612,7 @@ export function createHomeConnectorMcpServer(input: {
 			name: 'roku_launch_app',
 			title: 'Launch Roku App',
 			description:
-				'Launch a Roku app on an adopted device, optionally with deep-link parameters. For YouTube links, prefer roku_play_youtube (it parses the URL, deep links app 837, and verifies playback). If a stored Roku address is stale, ECP calls rediscover the device and retry once; results then include addressHealed.',
+				'Launch a Roku app on an adopted device, optionally with deep-link parameters. For YouTube links, prefer roku_play_youtube (it parses the URL, deep links app 837, and reports whether YouTube is active). If a stored Roku address is stale, ECP calls rediscover the device and retry once; results then include addressHealed.',
 			...buildToolInputSchema({
 				deviceId: z.string().min(1),
 				appId: z.string().min(1),

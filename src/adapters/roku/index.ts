@@ -822,18 +822,22 @@ export function createRokuAdapter(input: {
 			const deadline = now() + timeoutMs
 			let playerLoaded = false
 			let lastError: string | null = null
+			let pollComplete = false
 			for (;;) {
 				try {
 					const status = await getMediaPlayer(deviceId, deadline)
 					addressHealed ??= status.addressHealed ?? null
-					playerState = status.state
-					activeApp = status.activeApp
+					if (!status.mediaPlayerError) playerState = status.state
+					if (!status.activeAppError) activeApp = status.activeApp
+					pollComplete = !status.mediaPlayerError && !status.activeAppError
 					lastError = null
 				} catch (error) {
+					pollComplete = false
 					lastError = describeError(error)
 				}
 				youtubeActive = activeApp?.id === ROKU_YOUTUBE_APP_ID
 				playerLoaded =
+					pollComplete &&
 					youtubeActive &&
 					playerState != null &&
 					loadedPlayerStates.has(playerState)
