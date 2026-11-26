@@ -221,7 +221,8 @@ The sport-court cage stack is driven from this connector, not from Elan:
 - IR1 stick-on emitter → MROCIOA HDMI switch
 - IR2 stick-on emitter → Optoma projector (fallback when PJLink is unreachable)
 - IR3 hanging blaster → Chauvet Rotosphere (must be `IR_BLASTER`)
-- Court Roku Ultra ECP at `192.168.1.98` + Sport Court Sonos HDMI/TV input
+- Court Roku Ultra (ECP on port 8060; address comes from discovery and
+  self-heals, so do not hardcode it) + Sport Court Sonos HDMI/TV input
 - Court Sony UHD Blu-ray over LAN IRCC (host often unset — player is frequently
   unplugged / network standby off)
 
@@ -280,6 +281,34 @@ package, not this repo. It should keep calling `court_start_roku` /
 `court_shutdown` / `court_projector_*`; Patch can rewire the package after this
 connector ships. No package change is required for the PJLink preference because
 those court tools now own the transport choice.
+
+### Roku: play a video link / verify playback
+
+These tools work for any adopted Roku.
+
+- **Self-healing address.** Every ECP call (`roku_press_key`, `roku_launch_app`,
+  `roku_list_apps`, `roku_get_active_app`, `roku_get_media_player`,
+  `roku_play_youtube`) has a 5s timeout. If the stored address fails at the
+  connection level (refused, unreachable, timeout), the connector runs one
+  discovery scan, matches the same device by serial number (falling back to
+  `deviceId`), stores the new address (adoption and `controlEnabled` are kept),
+  and retries once. The result then includes `addressHealed: { from, to }`. HTTP
+  error responses are never retried. If rediscovery does not find the device, or
+  the retry fails, the error says which address failed and what discovery found.
+- **`roku_get_media_player`** returns ECP `/query/media-player` (`state`:
+  `play`, `pause`, `buffer`, `open`, `close`, `stop`; `plugin`, `positionMs`,
+  `durationMs`, `isLive`) plus the active app in one call.
+- **`roku_play_youtube`** takes `{ deviceId, url, mediaType?, verify? }`. It
+  parses youtu.be, youtube.com/watch, shorts, live, embed, m.youtube.com, and
+  music.youtube.com links (or a bare 11-character id), launches the YouTube Roku
+  app (`837`) with `contentId`, and by default polls for about 10s until YouTube
+  is active with a loaded player state. `verified: false` means playback was not
+  confirmed yet (cold start or an ad), not a failure; check again with
+  `roku_get_media_player`. `mediaType` (for example `live`) is sent only when
+  passed. A warning is returned if `/query/apps` does not list YouTube.
+- **Manual fallback:**
+  `roku_launch_app({ deviceId, appId: "837", params: { contentId: "<videoId>" } })`,
+  then `roku_get_media_player({ deviceId })`.
 
 ### Court Sony UHD Blu-ray (LAN IRCC)
 

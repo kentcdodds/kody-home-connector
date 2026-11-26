@@ -62,6 +62,7 @@ export type RokuAppListResult = {
 	deviceName: string
 	apps: Array<RokuAppInfo>
 	responseText: string
+	addressHealed?: RokuAddressHealed
 }
 
 export type RokuActiveAppResult = {
@@ -69,4 +70,40 @@ export type RokuActiveAppResult = {
 	deviceName: string
 	app: RokuAppInfo | null
 	responseText: string
+	addressHealed?: RokuAddressHealed
+}
+
+export type RokuAddressHealed = {
+	from: string
+	to: string
+}
+
+export type RokuMediaPlayerResult = {
+	deviceId: string
+	deviceName: string
+	state: string | null
+	error: boolean | null
+	plugin: { id: string; name: string } | null
+	positionMs: number | null
+	durationMs: number | null
+	isLive: boolean | null
+	responseText: string
+	mediaPlayerError: string | null
+	activeApp: RokuAppInfo | null
+	activeAppError: string | null
+	addressHealed?: RokuAddressHealed
+}
+
+export type RokuPlayYouTubeResult = {
+	launched: true
+	deviceId: string
+	deviceName: string
+	videoId: string
+	appId: string
+	mediaType: string | null
+	verified: boolean
+	playerState: string | null
+	activeApp: RokuAppInfo | null
+	warnings: Array<string>
+	addressHealed?: RokuAddressHealed
 }

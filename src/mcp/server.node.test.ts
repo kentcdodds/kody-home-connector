@@ -46,6 +46,7 @@ function createConfig() {
 		'http://samsung-tv.mock.local/discovery'
 	process.env.BOND_DISCOVERY_URL = 'http://bond.mock.local/discovery'
 	process.env.JELLYFISH_DISCOVERY_URL = 'http://jellyfish.mock.local/discovery'
+	process.env.ROKU_DISCOVERY_URL = 'http://roku.mock.local/discovery'
 	process.env.VENSTAR_SCAN_CIDRS = '192.168.10.40/32,192.168.10.41/32'
 	process.env.HOME_CONNECTOR_DB_PATH = ':memory:'
 	process.env.ISLAND_ROUTER_HOST = 'router.local'
@@ -809,6 +810,44 @@ test('mcp server exposes Samsung tools and executes samsung_list_devices', async
 		})
 		expect(sonosAfterLineIn.structuredContent).toMatchObject({
 			currentUri: expect.stringContaining('x-rincon-stream:'),
+		})
+		const rokuScan = await mcp.callTool('roku_scan_devices')
+		const rokuDeviceId = (
+			rokuScan.structuredContent as {
+				devices: Array<{ deviceId: string; name: string }>
+			}
+		).devices.find((device) => device.name === 'Living Room Roku')?.deviceId
+		expect(rokuDeviceId).toBeTruthy()
+		await mcp.callTool('roku_adopt_device', { deviceId: rokuDeviceId })
+		const rokuIdle = await mcp.callTool('roku_get_media_player', {
+			deviceId: rokuDeviceId,
+		})
+		expect(rokuIdle.isError).toBeFalsy()
+		expect(rokuIdle.structuredContent).toMatchObject({
+			deviceId: rokuDeviceId,
+			state: 'close',
+			activeApp: { id: '13842' },
+		})
+		const rokuYouTube = await mcp.callTool('roku_play_youtube', {
+			deviceId: rokuDeviceId,
+			url: 'https://youtu.be/_mAxik0v1A8?is=hhvkIitGxavHyTRe',
+		})
+		expect(rokuYouTube.isError).toBeFalsy()
+		expect(rokuYouTube.structuredContent).toMatchObject({
+			launched: true,
+			videoId: '_mAxik0v1A8',
+			appId: '837',
+			verified: true,
+			playerState: 'play',
+		})
+		const rokuPlaying = await mcp.callTool('roku_get_media_player', {
+			deviceId: rokuDeviceId,
+		})
+		expect(rokuPlaying.structuredContent).toMatchObject({
+			state: 'play',
+			plugin: { id: '837', name: 'YouTube' },
+			positionMs: 12345,
+			activeApp: { id: '837', name: 'YouTube' },
 		})
 		const sonosTv = await mcp.callTool('sonos_select_tv_input', {
 			playerId: sonosPlayerId,
