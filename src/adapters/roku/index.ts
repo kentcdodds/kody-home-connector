@@ -826,8 +826,8 @@ export function createRokuAdapter(input: {
 				try {
 					const status = await getMediaPlayer(deviceId, deadline)
 					addressHealed ??= status.addressHealed ?? null
-					playerState = status.state
-					activeApp = status.activeApp
+					playerState = status.state ?? playerState
+					activeApp = status.activeApp ?? activeApp
 					lastError = null
 				} catch (error) {
 					lastError = describeError(error)
